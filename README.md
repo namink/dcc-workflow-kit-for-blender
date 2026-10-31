@@ -1,4 +1,4 @@
-# DCC Workflow Kit · 整合预览版 0.1.1
+# DCC Workflow Kit · 整合预览版 0.1.2
 
 一个 Blender 扩展，按用户习惯选择 **3ds Max + Blender** 或 **Maya + Blender**，通过顶栏在所选工作流与 Blender 之间切换。
 
@@ -8,10 +8,10 @@
 
 ## 安装与使用
 
-当前开发和验证环境为 Windows、Blender 5.1.0 / 5.2.2。扩展清单限定 Blender 5.1–5.2；其他系统尚未验证。
+扩展清单支持 Blender 4.5–5.2（>=4.5.0、<5.3.0）。Windows Blender 4.5.10 已通过 45 项源码后台和 GUI 检查；5.1.0 / 5.2.2 沿用 0.1.1 的验证记录，5.0 尚未实测。其他系统尚未验证。
 
 1. 先停用单独安装的 Blender Max、Maya Workflow Kit（包括中文版本）；它们与本扩展沿用同一批内部操作符 ID，不能同时启用。
-2. 在 Blender 的“编辑 → 偏好设置 → 获取扩展”右上角菜单选择“从磁盘安装”，从 [Releases](https://github.com/namink/dcc-workflow-kit-for-blender/releases) 下载并安装 `dcc-workflow-kit-0.1.1.zip`，不要选择 GitHub 自动生成的源码 ZIP。
+2. 在 Blender 的“编辑 → 偏好设置 → 获取扩展”右上角菜单选择“从磁盘安装”，从 [Releases](https://github.com/namink/dcc-workflow-kit-for-blender/releases) 下载并安装 `dcc-workflow-kit-0.1.2.zip`，不要选择 GitHub 自动生成的源码 ZIP。
 3. 在本扩展的设置中选择“工作流组合”：`3ds Max + Blender` 或 `Maya + Blender`。
 4. 通过顶栏右侧的 `Blender / 3ds Max` 或 `Blender / Maya` 切换。快捷键为 `Ctrl+Alt+Shift+M`。
 5. 如需启动时进入所选工作流，将“启动界面”设为“所选工作流”；默认启动为 Blender。

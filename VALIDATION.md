@@ -1,3 +1,9 @@
+# 0.1.2 Blender 4.5 兼容验证
+
+Windows Blender 4.5.10 LTS：源码后台 30 项、GUI 15 项、安装后身份/工具架导入/设置路径/清理 4 项通过。安装 ZIP 通过扩展清单校验。5.0 尚未实测；5.1/5.2 本轮未重测。安装验证重新使用 BLENDER_USER_CONFIG 和 BLENDER_USER_EXTENSIONS 隔离。
+
+---
+
 # 0.1.1 汉化补全验证
 
 日期：2026-10-31。当前安装包为 `dist/dcc-workflow-kit-0.1.1.zip`。本轮汉化范围详见 [LOCALIZATION_REPORT.md](LOCALIZATION_REPORT.md)。

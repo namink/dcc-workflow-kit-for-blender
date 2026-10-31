@@ -1,3 +1,13 @@
+# DCC Workflow Kit 0.1.2 · Blender 4.5 兼容预览版
+
+- 扩展最低版本由 5.1.0 调整为 4.5.0，上限保持 <5.3.0，源码 bl_info 同步更新。
+- Windows Blender 4.5.10：45 项源码检查通过，覆盖生命周期、跨模式数据、RP IK、故障恢复、保存重开、中文、GUI 和多窗口切换。
+- 未修改运行时逻辑。5.1.0 / 5.2.2 沿用 0.1.1 验证，5.0 尚未实测；全部命令和生产场景尚未全量验收。
+
+下载 dcc-workflow-kit-0.1.2.zip，通过“从磁盘安装”安装。先停用独立的 Blender Max / Maya Workflow Kit。请勿将 source.zip 作为扩展安装包。
+
+---
+
 # DCC Workflow Kit 0.1.1 · 整合汉化预览版
 
 一个 Blender 扩展，可在偏好设置中选择 **3ds Max + Blender** 或 **Maya + Blender**，并通过顶栏或 `Ctrl+Alt+Shift+M` 切换。

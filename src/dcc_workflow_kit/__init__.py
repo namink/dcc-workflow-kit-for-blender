@@ -6,7 +6,7 @@ from . import lifecycle, localization, preferences, ui, core, migration
 from .providers import max as max_provider, maya
 
 bl_info = {'name': 'DCC Workflow Kit', 'author': 'DCC Workflow Kit contributors; original authors credited in THIRD_PARTY.md',
-           'version': (0, 1, 1), 'blender': (5, 1, 0), 'category': 'Interface',
+           'version': (0, 1, 2), 'blender': (4, 5, 0), 'category': 'Interface',
            'description': 'Choose 3ds Max + Blender or Maya + Blender workflows'}
 
 
