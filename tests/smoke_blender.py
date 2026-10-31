@@ -81,6 +81,26 @@ if report['checks'][-1]['ok']:
         assert not lifecycle.owners(), lifecycle.owners()
         assert maya.operators.ik_rp._on_update not in bpy.app.handlers.frame_change_post
         return 'all recorded registrations removed'
+    def shortcut_registration():
+        from dcc_workflow_kit import ui
+        assert {km.name for km, item in ui._keymaps} == {'Screen', '3D View'}
+        for km, item in ui._keymaps:
+            assert item.active and item.type == 'M' and item.ctrl and item.alt and item.shift
+            assert item.properties.mode == 'TOGGLE'
+        for profile in ('MAX', 'MAYA'):
+            preferences.get().profile = profile
+            core._pending = None
+            core.set_mode('BLENDER', layout=False)
+            assert bpy.ops.dcc_workflow.switch('INVOKE_DEFAULT') == {'FINISHED'}
+            assert core._pending[0] == profile
+            core._pending = None
+            core.set_mode(profile, layout=False)
+            assert bpy.ops.dcc_workflow.switch('INVOKE_DEFAULT') == {'FINISHED'}
+            assert core._pending[0] == 'BLENDER'
+            core._pending = None
+            core.set_mode('BLENDER', layout=False)
+        return 'Global/viewport bindings and both profiles toggle in both directions'
+    check('shortcut_registration_and_toggle', shortcut_registration)
     def legacy_menu_guard():
         assert maya.switch.draw_edit_menu not in bpy.types.TOPBAR_MT_edit.draw._draw_funcs
         prefs = preferences.get()

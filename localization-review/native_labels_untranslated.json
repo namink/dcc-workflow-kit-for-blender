@@ -1,4 +1,9 @@
 {
-  "maya": [],
+  "maya": [
+    {
+      "english": "3D Viewport",
+      "context": "MWK:operators/menu_extras.py:135"
+    }
+  ],
   "max": []
 }

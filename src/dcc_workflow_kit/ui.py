@@ -77,12 +77,16 @@ def register():
     bpy.types.TOPBAR_MT_edit.append(draw_edit)
     kc = bpy.context.window_manager.keyconfigs.addon
     if kc is not None:
-        existing = kc.keymaps.find('Window', space_type='EMPTY', region_type='WINDOW')
-        km = kc.keymaps.new(name='Window', space_type='EMPTY')
-        if existing is None:
-            _owned_maps.append((kc, km))
-        kmi = km.keymap_items.new(DCC_OT_switch.bl_idname, 'M', 'PRESS', ctrl=True, alt=True, shift=True)
-        _keymaps.append((km, kmi))
+        # Keep a global binding and a viewport binding ahead of editor handlers.
+        for name, space in (('Screen', 'EMPTY'), ('3D View', 'VIEW_3D')):
+            existing = kc.keymaps.find(name, space_type=space, region_type='WINDOW')
+            km = kc.keymaps.new(name=name, space_type=space, region_type='WINDOW')
+            if existing is None:
+                _owned_maps.append((kc, km))
+            kmi = km.keymap_items.new(DCC_OT_switch.bl_idname, 'M', 'PRESS',
+                                     ctrl=True, alt=True, shift=True, head=True)
+            kmi.properties.mode = 'TOGGLE'
+            _keymaps.append((km, kmi))
 
 
 def unregister():

@@ -21,7 +21,7 @@ from bpy.props import EnumProperty, StringProperty
 from mathutils import Vector
 from .. import results
 from .. import live_refs
-EDITOR_TYPES = (('OUTLINER', _dcc_source('Outliner'), ''), ('FCURVES', _dcc_source('Graph Editor'), ''), ('DOPESHEET', _dcc_source('Dope Sheet'), ''), ('NLA_EDITOR', _dcc_source('Nonlinear Animation'), ''), ('DRIVERS', _dcc_source('Drivers'), ''), ('SEQUENCE_EDITOR', _dcc_source('Video Sequencer'), ''), ('ShaderNodeTree', _dcc_source('Shader Editor'), ''), ('UV', _dcc_source('UV Editor'), ''), ('SPREADSHEET', _dcc_source('Spreadsheet'), ''), ('TEXT_EDITOR', _dcc_source('Text Editor'), ''), ('PROPERTIES', _dcc_source('Properties'), ''), ('CONSOLE', _dcc_source('Python Console'), ''), ('ASSETS', _dcc_source('Asset Browser'), ''), ('IMAGE_EDITOR', _dcc_source('Image Editor'), ''), ('GeometryNodeTree', _dcc_source('Geometry Node Editor'), ''))
+EDITOR_TYPES = (('VIEW_3D', _dcc_source('3D Viewport'), ''), ('OUTLINER', _dcc_source('Outliner'), ''), ('FCURVES', _dcc_source('Graph Editor'), ''), ('DOPESHEET', _dcc_source('Dope Sheet'), ''), ('NLA_EDITOR', _dcc_source('Nonlinear Animation'), ''), ('DRIVERS', _dcc_source('Drivers'), ''), ('SEQUENCE_EDITOR', _dcc_source('Video Sequencer'), ''), ('ShaderNodeTree', _dcc_source('Shader Editor'), ''), ('UV', _dcc_source('UV Editor'), ''), ('SPREADSHEET', _dcc_source('Spreadsheet'), ''), ('TEXT_EDITOR', _dcc_source('Text Editor'), ''), ('PROPERTIES', _dcc_source('Properties'), ''), ('CONSOLE', _dcc_source('Python Console'), ''), ('ASSETS', _dcc_source('Asset Browser'), ''), ('IMAGE_EDITOR', _dcc_source('Image Editor'), ''), ('GeometryNodeTree', _dcc_source('Geometry Node Editor'), ''))
 
 def _maya_outliner(space):
     from ..ui import maya_outliner
@@ -117,7 +117,11 @@ class ALLSET_OT_open_editor(bpy.types.Operator):
             uv_tools.prepare(context)
             if uv_tools.find_uv_editor(context)[1] is not None:
                 return {'FINISHED'}
-        area = max(window.screen.areas, key=lambda a: a.width * a.height, default=None)
+        # Tear off the invoking viewport, preserving its camera and shading.
+        area = context.area if self.ui_type == 'VIEW_3D' else None
+        if area is None or (self.ui_type == 'VIEW_3D' and area.type != 'VIEW_3D'):
+            candidates = [a for a in window.screen.areas if self.ui_type != 'VIEW_3D' or a.type == 'VIEW_3D']
+            area = max(candidates, key=lambda a: a.width * a.height, default=None)
         if area is None:
             return {'CANCELLED'}
         new = open_window(context, area)

@@ -344,7 +344,7 @@ class ALLSET_OT_panel_run(bpy.types.Operator):
         try:
             with context.temp_override(window=context.window, area=area, region=main_region(area)):
                 getattr(getattr(bpy.ops, mod), name)('INVOKE_DEFAULT', **json.loads(self.props))
-        except RuntimeError as ex:
+        except (RuntimeError, TypeError, ValueError) as ex:
             self.report({'WARNING'}, _zh(str(ex).strip(), 'MWK:ui/panel_menus.py:437'))
             return {'CANCELLED'}
         return {'FINISHED'}
