@@ -81,6 +81,17 @@ if report['checks'][-1]['ok']:
         assert not lifecycle.owners(), lifecycle.owners()
         assert maya.operators.ik_rp._on_update not in bpy.app.handlers.frame_change_post
         return 'all recorded registrations removed'
+    def legacy_menu_guard():
+        assert maya.switch.draw_edit_menu not in bpy.types.TOPBAR_MT_edit.draw._draw_funcs
+        prefs = preferences.get()
+        prefs.profile = 'MAX'
+        core._pending = None
+        core.set_mode('BLENDER', layout=False)
+        result = bpy.ops.allset.switch_mode(mode='MAYA')
+        assert result == {'CANCELLED'}, result
+        assert core.current() == 'BLENDER'
+        return 'No Maya-only menu; legacy call cancels safely under Max profile'
+    check('legacy_maya_menu_and_operator_guard', legacy_menu_guard)
     check('disable_cleanup', disable)
     check('enable_again', enable)
     check('disable_again', disable)
@@ -90,3 +101,4 @@ out.parent.mkdir(parents=True, exist_ok=True)
 out.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
 if any(not item['ok'] for item in report['checks']):
     raise SystemExit(1)
+

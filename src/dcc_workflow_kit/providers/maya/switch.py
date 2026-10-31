@@ -416,7 +416,11 @@ class ALLSET_OT_switch_mode(bpy.types.Operator):
 
     def execute(self, context):
         on = not is_on() if self.mode == 'TOGGLE' else self.mode == 'MAYA'
-        request(on)
+        try:
+            request(on)
+        except (RuntimeError, ValueError) as error:
+            self.report({'WARNING'}, str(error))
+            return {'CANCELLED'}
         results.result(self, _zh('Maya mode' if on else 'Blender mode', 'MWK:switch.py:494'))
         return {'FINISHED'}
 
@@ -458,7 +462,7 @@ def _add_shortcut():
 def register():
     for cls in classes:
         bpy.utils.register_class(cls)
-    bpy.types.TOPBAR_MT_edit.append(draw_edit_menu)
+    # The unified UI owns the Edit-menu switch for the selected profile.
 
 def unregister():
     for (km, kmi) in _keymaps:
@@ -467,7 +471,7 @@ def unregister():
         except (ReferenceError, RuntimeError):
             pass
     _keymaps.clear()
-    bpy.types.TOPBAR_MT_edit.remove(draw_edit_menu)
+    # No legacy Maya-only Edit-menu entry is registered.
     for fn in (_apply_pending, *_timers):
         if bpy.app.timers.is_registered(fn):
             bpy.app.timers.unregister(fn)
