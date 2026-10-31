@@ -20,4 +20,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           version=$(python -c 'import tomllib; print(tomllib.load(open("src/dcc_workflow_kit/blender_manifest.toml", "rb"))["version"])')
+          if release_draft=$(gh release view "v${version}" --json isDraft --jq '.isDraft' 2>/dev/null); then
+            if [ "$release_draft" = "true" ]; then
+              echo "Release v${version} is still a draft; complete it before retrying." >&2
+              exit 1
+            fi
+            echo "Release v${version} is already published; preserving its verified assets."
+            exit 0
+          fi
           gh release create "v${version}" dist/*.zip dist/*.sha256 --prerelease --title "DCC Workflow Kit ${version} 整合汉化预览版" --notes-file RELEASE_NOTES.md
