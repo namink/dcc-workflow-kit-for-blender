@@ -1,0 +1,206 @@
+[
+  {
+    "domain": "max",
+    "english": "Delete Schematic View...",
+    "before": "删除原理图视图……",
+    "after": "删除示意视图……"
+  },
+  {
+    "domain": "max",
+    "english": "Extrude on Spline",
+    "before": "挤压花键",
+    "after": "挤压样条线"
+  },
+  {
+    "domain": "max",
+    "english": "New Schematic View...",
+    "before": "新增原理图视图……",
+    "after": "新增示意视图……"
+  },
+  {
+    "domain": "max",
+    "english": "Saved Schematic View 1",
+    "before": "已保存原理图视图",
+    "after": "已保存示意视图"
+  },
+  {
+    "domain": "max",
+    "english": "Saved Schematic View 10",
+    "before": "已保存原理图视图",
+    "after": "已保存示意视图"
+  },
+  {
+    "domain": "max",
+    "english": "Saved Schematic View 11",
+    "before": "保存原理图视图",
+    "after": "保存示意视图"
+  },
+  {
+    "domain": "max",
+    "english": "Saved Schematic View 12",
+    "before": "已保存原理图视图",
+    "after": "已保存示意视图"
+  },
+  {
+    "domain": "max",
+    "english": "Saved Schematic View 13",
+    "before": "已保存原理图视图",
+    "after": "已保存示意视图"
+  },
+  {
+    "domain": "max",
+    "english": "Saved Schematic View 2",
+    "before": "已保存原理图视图",
+    "after": "已保存示意视图"
+  },
+  {
+    "domain": "max",
+    "english": "Saved Schematic View 3",
+    "before": "已保存原理图视图",
+    "after": "已保存示意视图"
+  },
+  {
+    "domain": "max",
+    "english": "Saved Schematic View 4",
+    "before": "已保存原理图视图",
+    "after": "已保存示意视图"
+  },
+  {
+    "domain": "max",
+    "english": "Saved Schematic View 5",
+    "before": "已保存原理图视图",
+    "after": "已保存示意视图"
+  },
+  {
+    "domain": "max",
+    "english": "Saved Schematic View 7",
+    "before": "已保存原理图视图",
+    "after": "已保存示意视图"
+  },
+  {
+    "domain": "max",
+    "english": "Saved Schematic View 8",
+    "before": "已保存原理图视图",
+    "after": "已保存示意视图"
+  },
+  {
+    "domain": "max",
+    "english": "Saved Schematic View 9",
+    "before": "已保存原理图视图",
+    "after": "已保存示意视图"
+  },
+  {
+    "domain": "max",
+    "english": "Saved Schematic Views",
+    "before": "保存原理图视图",
+    "after": "保存示意视图"
+  },
+  {
+    "domain": "max",
+    "english": "Schematic View Save 1",
+    "before": "原理图视图保存1",
+    "after": "示意视图保存1"
+  },
+  {
+    "domain": "max",
+    "english": "Schematic View Save 2",
+    "before": "原理图视图保存2",
+    "after": "示意视图保存2"
+  },
+  {
+    "domain": "max",
+    "english": "Schematic View Save 3",
+    "before": "原理图视图保存",
+    "after": "示意视图保存"
+  },
+  {
+    "domain": "max",
+    "english": "Schematic View Save 5",
+    "before": "原理图视图保存5",
+    "after": "示意视图保存5"
+  },
+  {
+    "domain": "max",
+    "english": "Spline Mirror",
+    "before": "花键镜",
+    "after": "样条线镜"
+  },
+  {
+    "domain": "maya",
+    "english": "Animation Channels",
+    "before": "动画频道",
+    "after": "动画通道"
+  },
+  {
+    "domain": "maya",
+    "english": "Auto Mix tangents",
+    "before": "自动混音切线",
+    "after": "自动混合切线"
+  },
+  {
+    "domain": "maya",
+    "english": "Channels: From Channel Box",
+    "before": "频道：来自通道盒",
+    "after": "通道：来自通道盒"
+  },
+  {
+    "domain": "maya",
+    "english": "Generic Gizmo",
+    "before": "通用小玩意儿",
+    "after": "通用Gizmo"
+  },
+  {
+    "domain": "maya",
+    "english": "Generic Gizmo Click Drag",
+    "before": "通用小玩意儿点击拖动",
+    "after": "通用Gizmo点击拖动"
+  },
+  {
+    "domain": "maya",
+    "english": "Generic Gizmo Drag",
+    "before": "通用小玩意儿拖",
+    "after": "通用Gizmo拖"
+  },
+  {
+    "domain": "maya",
+    "english": "Generic Gizmo Maybe Drag",
+    "before": "通用的小玩意儿也许拖",
+    "after": "通用的Gizmo也许拖"
+  },
+  {
+    "domain": "maya",
+    "english": "Generic Gizmo Select",
+    "before": "通用小玩意儿选择",
+    "after": "通用Gizmo选择"
+  },
+  {
+    "domain": "maya",
+    "english": "Generic Gizmo Tweak Modal Map",
+    "before": "通用小玩意儿调整模态地图",
+    "after": "通用Gizmo调整模态映射"
+  },
+  {
+    "domain": "maya",
+    "english": "Map borders",
+    "before": "地图边界",
+    "after": "映射边界"
+  },
+  {
+    "domain": "maya",
+    "english": "Mixer:",
+    "before": "搅拌机：",
+    "after": "Blender："
+  },
+  {
+    "domain": "maya",
+    "english": "Rigid Skins",
+    "before": "刚性皮肤",
+    "after": "刚性蒙皮"
+  },
+  {
+    "domain": "maya",
+    "english": "Smooth Skins",
+    "before": "光滑的皮肤",
+    "after": "光滑的蒙皮"
+  }
+]

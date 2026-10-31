@@ -1,0 +1,1054 @@
+[
+  {
+    "domain": "max",
+    "english": "2.5D"
+  },
+  {
+    "domain": "max",
+    "english": "2D"
+  },
+  {
+    "domain": "max",
+    "english": "3D"
+  },
+  {
+    "domain": "max",
+    "english": "Blender's protection against Python scripts embedded in scene files (Preferences > Save & Load)"
+  },
+  {
+    "domain": "max",
+    "english": "Fence"
+  },
+  {
+    "domain": "max",
+    "english": "Rect"
+  },
+  {
+    "domain": "max",
+    "english": "Sets Blender's interpolation and handle type for new keys (Preferences > Animation)"
+  },
+  {
+    "domain": "max",
+    "english": "Xref"
+  },
+  {
+    "domain": "max",
+    "english": "xView"
+  },
+  {
+    "domain": "maya",
+    "english": "(keep)"
+  },
+  {
+    "domain": "maya",
+    "english": "12 projection planes"
+  },
+  {
+    "domain": "maya",
+    "english": "3 projection planes"
+  },
+  {
+    "domain": "maya",
+    "english": "3k Square"
+  },
+  {
+    "domain": "maya",
+    "english": "4 projection planes"
+  },
+  {
+    "domain": "maya",
+    "english": "5 projection planes"
+  },
+  {
+    "domain": "maya",
+    "english": "6 projection planes"
+  },
+  {
+    "domain": "maya",
+    "english": "8 projection planes"
+  },
+  {
+    "domain": "maya",
+    "english": "AdvPolygons"
+  },
+  {
+    "domain": "maya",
+    "english": "Alpha at 0"
+  },
+  {
+    "domain": "maya",
+    "english": "Alpha at 1"
+  },
+  {
+    "domain": "maya",
+    "english": "Alpha value"
+  },
+  {
+    "domain": "maya",
+    "english": "Alternate Output File Location"
+  },
+  {
+    "domain": "maya",
+    "english": "Axis definition"
+  },
+  {
+    "domain": "maya",
+    "english": "Axis divisions"
+  },
+  {
+    "domain": "maya",
+    "english": "Bend amount"
+  },
+  {
+    "domain": "maya",
+    "english": "Blender has no project system: Maya Workflow Kit keeps this folder as your project. File dialogs open in its scenes folder, renders go to its images folder and paths are saved relative (//)."
+  },
+  {
+    "domain": "maya",
+    "english": "Blue at 0"
+  },
+  {
+    "domain": "maya",
+    "english": "Blue at 1"
+  },
+  {
+    "domain": "maya",
+    "english": "Butterworth"
+  },
+  {
+    "domain": "maya",
+    "english": "Camera_Lock"
+  },
+  {
+    "domain": "maya",
+    "english": "Cap divisions"
+  },
+  {
+    "domain": "maya",
+    "english": "Cm_Enable"
+  },
+  {
+    "domain": "maya",
+    "english": "Coil divisions"
+  },
+  {
+    "domain": "maya",
+    "english": "Constraint axes"
+  },
+  {
+    "domain": "maya",
+    "english": "Constraint type"
+  },
+  {
+    "domain": "maya",
+    "english": "Copies"
+  },
+  {
+    "domain": "maya",
+    "english": "Curl amount"
+  },
+  {
+    "domain": "maya",
+    "english": "Curl frequency"
+  },
+  {
+    "domain": "maya",
+    "english": "Deformations"
+  },
+  {
+    "domain": "maya",
+    "english": "Delta Mush"
+  },
+  {
+    "domain": "maya",
+    "english": "Depth divisions"
+  },
+  {
+    "domain": "maya",
+    "english": "Direction vector"
+  },
+  {
+    "domain": "maya",
+    "english": "Driven channels"
+  },
+  {
+    "domain": "maya",
+    "english": "Falloff iterations"
+  },
+  {
+    "domain": "maya",
+    "english": "Fit projection to"
+  },
+  {
+    "domain": "maya",
+    "english": "Full 1280/Screen"
+  },
+  {
+    "domain": "maya",
+    "english": "Green at 0"
+  },
+  {
+    "domain": "maya",
+    "english": "Green at 1"
+  },
+  {
+    "domain": "maya",
+    "english": "Grid lines & numbers"
+  },
+  {
+    "domain": "maya",
+    "english": "Grid lines every"
+  },
+  {
+    "domain": "maya",
+    "english": "Group pivot"
+  },
+  {
+    "domain": "maya",
+    "english": "H Exponent"
+  },
+  {
+    "domain": "maya",
+    "english": "H Exponent 1"
+  },
+  {
+    "domain": "maya",
+    "english": "H Exponent 2"
+  },
+  {
+    "domain": "maya",
+    "english": "H Multiplier 1"
+  },
+  {
+    "domain": "maya",
+    "english": "H Multiplier 2"
+  },
+  {
+    "domain": "maya",
+    "english": "Horizontal Exponent 1"
+  },
+  {
+    "domain": "maya",
+    "english": "Horizontal Exponent 2"
+  },
+  {
+    "domain": "maya",
+    "english": "Horizontal Exponent 3"
+  },
+  {
+    "domain": "maya",
+    "english": "Horizontal Exponent 4"
+  },
+  {
+    "domain": "maya",
+    "english": "Horizontal Exponent 5"
+  },
+  {
+    "domain": "maya",
+    "english": "Horizontal Mixer"
+  },
+  {
+    "domain": "maya",
+    "english": "Horizontal Multiplier 1"
+  },
+  {
+    "domain": "maya",
+    "english": "Horizontal Multiplier 2"
+  },
+  {
+    "domain": "maya",
+    "english": "Hw_Texture"
+  },
+  {
+    "domain": "maya",
+    "english": "Insert location"
+  },
+  {
+    "domain": "maya",
+    "english": "Intensity at 0"
+  },
+  {
+    "domain": "maya",
+    "english": "Intensity at 1"
+  },
+  {
+    "domain": "maya",
+    "english": "Layout_Four"
+  },
+  {
+    "domain": "maya",
+    "english": "Layout_Single"
+  },
+  {
+    "domain": "maya",
+    "english": "Length and width"
+  },
+  {
+    "domain": "maya",
+    "english": "Length of Side 1"
+  },
+  {
+    "domain": "maya",
+    "english": "Length of Side 2"
+  },
+  {
+    "domain": "maya",
+    "english": "Light_All"
+  },
+  {
+    "domain": "maya",
+    "english": "Light_Default"
+  },
+  {
+    "domain": "maya",
+    "english": "Light_Flat"
+  },
+  {
+    "domain": "maya",
+    "english": "Live"
+  },
+  {
+    "domain": "maya",
+    "english": "Max displacement"
+  },
+  {
+    "domain": "maya",
+    "english": "Maya C: snap to curves/edges while held"
+  },
+  {
+    "domain": "maya",
+    "english": "Maya Checker texture = Blender Checker Texture"
+  },
+  {
+    "domain": "maya",
+    "english": "Maya Create > 2D Textures"
+  },
+  {
+    "domain": "maya",
+    "english": "Maya Create > 3D Textures"
+  },
+  {
+    "domain": "maya",
+    "english": "Maya Create > Displacement"
+  },
+  {
+    "domain": "maya",
+    "english": "Maya Create > Env Textures"
+  },
+  {
+    "domain": "maya",
+    "english": "Maya Create > Favorites"
+  },
+  {
+    "domain": "maya",
+    "english": "Maya Create > Glow"
+  },
+  {
+    "domain": "maya",
+    "english": "Maya Create > Image Planes"
+  },
+  {
+    "domain": "maya",
+    "english": "Maya Create > Lights"
+  },
+  {
+    "domain": "maya",
+    "english": "Maya Create > Maya"
+  },
+  {
+    "domain": "maya",
+    "english": "Maya Create > Other Textures"
+  },
+  {
+    "domain": "maya",
+    "english": "Maya Create > Rendering"
+  },
+  {
+    "domain": "maya",
+    "english": "Maya Create > Surface"
+  },
+  {
+    "domain": "maya",
+    "english": "Maya Create > Utilities"
+  },
+  {
+    "domain": "maya",
+    "english": "Maya Create > Volumetric"
+  },
+  {
+    "domain": "maya",
+    "english": "Maya Ctrl+F10"
+  },
+  {
+    "domain": "maya",
+    "english": "Maya Ctrl+F11"
+  },
+  {
+    "domain": "maya",
+    "english": "Maya Ctrl+F9"
+  },
+  {
+    "domain": "maya",
+    "english": "Maya File texture = Blender Image Texture"
+  },
+  {
+    "domain": "maya",
+    "english": "Maya Modeling Toolkit (ui/modeling_toolkit.py, step 63)"
+  },
+  {
+    "domain": "maya",
+    "english": "Maya Noise texture = Blender Noise Texture"
+  },
+  {
+    "domain": "maya",
+    "english": "Maya P"
+  },
+  {
+    "domain": "maya",
+    "english": "Maya Ramp texture = Blender Color Ramp"
+  },
+  {
+    "domain": "maya",
+    "english": "Maya V"
+  },
+  {
+    "domain": "maya",
+    "english": "Maya X = Blender X"
+  },
+  {
+    "domain": "maya",
+    "english": "Maya Z = Blender -Y"
+  },
+  {
+    "domain": "maya",
+    "english": "Maya aiStandardSurface (Principled BSDF)"
+  },
+  {
+    "domain": "maya",
+    "english": "Maya anisotropic (Principled BSDF)"
+  },
+  {
+    "domain": "maya",
+    "english": "Maya avi / qt"
+  },
+  {
+    "domain": "maya",
+    "english": "Maya blinn (Principled BSDF)"
+  },
+  {
+    "domain": "maya",
+    "english": "Maya lambert (Principled BSDF)"
+  },
+  {
+    "domain": "maya",
+    "english": "Maya layeredShader (Principled BSDF)"
+  },
+  {
+    "domain": "maya",
+    "english": "Maya phong (Principled BSDF)"
+  },
+  {
+    "domain": "maya",
+    "english": "Maya phongE (Principled BSDF)"
+  },
+  {
+    "domain": "maya",
+    "english": "Maya rampShader (Principled BSDF)"
+  },
+  {
+    "domain": "maya",
+    "english": "Maya rotate order xyz"
+  },
+  {
+    "domain": "maya",
+    "english": "Maya rotate order xzy"
+  },
+  {
+    "domain": "maya",
+    "english": "Maya rotate order yxz"
+  },
+  {
+    "domain": "maya",
+    "english": "Maya rotate order yzx"
+  },
+  {
+    "domain": "maya",
+    "english": "Maya rotate order zxy"
+  },
+  {
+    "domain": "maya",
+    "english": "Maya rotate order zyx"
+  },
+  {
+    "domain": "maya",
+    "english": "Maya standardSurface (Principled BSDF)"
+  },
+  {
+    "domain": "maya",
+    "english": "Maya surfaceShader (Principled BSDF)"
+  },
+  {
+    "domain": "maya",
+    "english": "Maya useBackground (Principled BSDF)"
+  },
+  {
+    "domain": "maya",
+    "english": "Minor sweep angle"
+  },
+  {
+    "domain": "maya",
+    "english": "Multiplicity"
+  },
+  {
+    "domain": "maya",
+    "english": "Multiplicity / # isoparms to insert"
+  },
+  {
+    "domain": "maya",
+    "english": "New end time"
+  },
+  {
+    "domain": "maya",
+    "english": "New start time"
+  },
+  {
+    "domain": "maya",
+    "english": "Normal definition"
+  },
+  {
+    "domain": "maya",
+    "english": "Number of processors to use"
+  },
+  {
+    "domain": "maya",
+    "english": "Number of sections"
+  },
+  {
+    "domain": "maya",
+    "english": "Number of sides in base"
+  },
+  {
+    "domain": "maya",
+    "english": "Offset type"
+  },
+  {
+    "domain": "maya",
+    "english": "PAL 768"
+  },
+  {
+    "domain": "maya",
+    "english": "PAL 780"
+  },
+  {
+    "domain": "maya",
+    "english": "Parameterization"
+  },
+  {
+    "domain": "maya",
+    "english": "Parent Base"
+  },
+  {
+    "domain": "maya",
+    "english": "Past/Future"
+  },
+  {
+    "domain": "maya",
+    "english": "Persp"
+  },
+  {
+    "domain": "maya",
+    "english": "Pivot Position"
+  },
+  {
+    "domain": "maya",
+    "english": "Point Space"
+  },
+  {
+    "domain": "maya",
+    "english": "Post Frames (Custom)"
+  },
+  {
+    "domain": "maya",
+    "english": "Pre Frames (Custom)"
+  },
+  {
+    "domain": "maya",
+    "english": "Project from"
+  },
+  {
+    "domain": "maya",
+    "english": "Re-weighting distance tolerance"
+  },
+  {
+    "domain": "maya",
+    "english": "Red at 0"
+  },
+  {
+    "domain": "maya",
+    "english": "Red at 1"
+  },
+  {
+    "domain": "maya",
+    "english": "Render_Vp2"
+  },
+  {
+    "domain": "maya",
+    "english": "Replace region"
+  },
+  {
+    "domain": "maya",
+    "english": "Represent hierarchy as"
+  },
+  {
+    "domain": "maya",
+    "english": "Selection_Hilite"
+  },
+  {
+    "domain": "maya",
+    "english": "Shade_Wire"
+  },
+  {
+    "domain": "maya",
+    "english": "Show_Ik_Handles"
+  },
+  {
+    "domain": "maya",
+    "english": "Show_Nurbs_Curves"
+  },
+  {
+    "domain": "maya",
+    "english": "Shrink Wrap"
+  },
+  {
+    "domain": "maya",
+    "english": "Snap Ori"
+  },
+  {
+    "domain": "maya",
+    "english": "Snap Pos"
+  },
+  {
+    "domain": "maya",
+    "english": "Snap times to multiple of"
+  },
+  {
+    "domain": "maya",
+    "english": "Snap values to multiple of"
+  },
+  {
+    "domain": "maya",
+    "english": "Specify node"
+  },
+  {
+    "domain": "maya",
+    "english": "Step (Custom)"
+  },
+  {
+    "domain": "maya",
+    "english": "Subcharacter set attributes"
+  },
+  {
+    "domain": "maya",
+    "english": "Symmetry on/off"
+  },
+  {
+    "domain": "maya",
+    "english": "Time pivot"
+  },
+  {
+    "domain": "maya",
+    "english": "Toolbox"
+  },
+  {
+    "domain": "maya",
+    "english": "Transform control"
+  },
+  {
+    "domain": "maya",
+    "english": "Tumble_Coi"
+  },
+  {
+    "domain": "maya",
+    "english": "Tumble_Selection"
+  },
+  {
+    "domain": "maya",
+    "english": "U patches"
+  },
+  {
+    "domain": "maya",
+    "english": "User colour 1"
+  },
+  {
+    "domain": "maya",
+    "english": "User colour 2"
+  },
+  {
+    "domain": "maya",
+    "english": "User colour 3"
+  },
+  {
+    "domain": "maya",
+    "english": "User colour 4"
+  },
+  {
+    "domain": "maya",
+    "english": "User colour 5"
+  },
+  {
+    "domain": "maya",
+    "english": "User colour 6"
+  },
+  {
+    "domain": "maya",
+    "english": "User colour 7"
+  },
+  {
+    "domain": "maya",
+    "english": "User colour 8"
+  },
+  {
+    "domain": "maya",
+    "english": "Uv"
+  },
+  {
+    "domain": "maya",
+    "english": "V Exponent"
+  },
+  {
+    "domain": "maya",
+    "english": "V Exponent 1"
+  },
+  {
+    "domain": "maya",
+    "english": "V Exponent 2"
+  },
+  {
+    "domain": "maya",
+    "english": "V Multiplier 1"
+  },
+  {
+    "domain": "maya",
+    "english": "V Multiplier 2"
+  },
+  {
+    "domain": "maya",
+    "english": "V patches"
+  },
+  {
+    "domain": "maya",
+    "english": "Value pivot"
+  },
+  {
+    "domain": "maya",
+    "english": "Value scale"
+  },
+  {
+    "domain": "maya",
+    "english": "Vector Space"
+  },
+  {
+    "domain": "maya",
+    "english": "Vertical Exponent 1"
+  },
+  {
+    "domain": "maya",
+    "english": "Vertical Exponent 2"
+  },
+  {
+    "domain": "maya",
+    "english": "Vertical Exponent 3"
+  },
+  {
+    "domain": "maya",
+    "english": "Vertical Exponent 4"
+  },
+  {
+    "domain": "maya",
+    "english": "Vertical Exponent 5"
+  },
+  {
+    "domain": "maya",
+    "english": "Vertical Mixer"
+  },
+  {
+    "domain": "maya",
+    "english": "Vertical Multiplier 1"
+  },
+  {
+    "domain": "maya",
+    "english": "Vertical Multiplier 2"
+  },
+  {
+    "domain": "maya",
+    "english": "Weight locking"
+  },
+  {
+    "domain": "maya",
+    "english": "Width divisions"
+  },
+  {
+    "domain": "maya",
+    "english": "World up vector"
+  },
+  {
+    "domain": "maya",
+    "english": "X+"
+  },
+  {
+    "domain": "maya",
+    "english": "X-"
+  },
+  {
+    "domain": "maya",
+    "english": "Y+"
+  },
+  {
+    "domain": "maya",
+    "english": "Y-"
+  },
+  {
+    "domain": "maya",
+    "english": "Z+"
+  },
+  {
+    "domain": "maya",
+    "english": "Z-"
+  },
+  {
+    "domain": "maya",
+    "english": "aiStandardSurface"
+  },
+  {
+    "domain": "maya",
+    "english": "axisX"
+  },
+  {
+    "domain": "maya",
+    "english": "axisY"
+  },
+  {
+    "domain": "maya",
+    "english": "axisZ"
+  },
+  {
+    "domain": "maya",
+    "english": "centerX"
+  },
+  {
+    "domain": "maya",
+    "english": "centerY"
+  },
+  {
+    "domain": "maya",
+    "english": "centerZ"
+  },
+  {
+    "domain": "maya",
+    "english": "ellipseMirror"
+  },
+  {
+    "domain": "maya",
+    "english": "endSweep"
+  },
+  {
+    "domain": "maya",
+    "english": "from -> to"
+  },
+  {
+    "domain": "maya",
+    "english": "gearMiddle"
+  },
+  {
+    "domain": "maya",
+    "english": "gearOffset"
+  },
+  {
+    "domain": "maya",
+    "english": "gearSpacing"
+  },
+  {
+    "domain": "maya",
+    "english": "gearTip"
+  },
+  {
+    "domain": "maya",
+    "english": "glTF 2.0 (.glb .gltf)"
+  },
+  {
+    "domain": "maya",
+    "english": "heightDivisions"
+  },
+  {
+    "domain": "maya",
+    "english": "heightRatio"
+  },
+  {
+    "domain": "maya",
+    "english": "horizontalDivisions"
+  },
+  {
+    "domain": "maya",
+    "english": "horizontalRevolutions"
+  },
+  {
+    "domain": "maya",
+    "english": "internalRadius"
+  },
+  {
+    "domain": "maya",
+    "english": "lengthRatio"
+  },
+  {
+    "domain": "maya",
+    "english": "mergeVertices"
+  },
+  {
+    "domain": "maya",
+    "english": "minorSweep"
+  },
+  {
+    "domain": "maya",
+    "english": "nObject"
+  },
+  {
+    "domain": "maya",
+    "english": "name#.ext"
+  },
+  {
+    "domain": "maya",
+    "english": "name.#.ext"
+  },
+  {
+    "domain": "maya",
+    "english": "name.ext (Single Frame)"
+  },
+  {
+    "domain": "maya",
+    "english": "name_#.ext"
+  },
+  {
+    "domain": "maya",
+    "english": "normalX"
+  },
+  {
+    "domain": "maya",
+    "english": "normalY"
+  },
+  {
+    "domain": "maya",
+    "english": "normalZ"
+  },
+  {
+    "domain": "maya",
+    "english": "numberOfSides"
+  },
+  {
+    "domain": "maya",
+    "english": "patchesU"
+  },
+  {
+    "domain": "maya",
+    "english": "patchesV"
+  },
+  {
+    "domain": "maya",
+    "english": "pivotX"
+  },
+  {
+    "domain": "maya",
+    "english": "pivotY"
+  },
+  {
+    "domain": "maya",
+    "english": "pivotZ"
+  },
+  {
+    "domain": "maya",
+    "english": "roundCap"
+  },
+  {
+    "domain": "maya",
+    "english": "sectionRadius"
+  },
+  {
+    "domain": "maya",
+    "english": "sideLength"
+  },
+  {
+    "domain": "maya",
+    "english": "sideLength1"
+  },
+  {
+    "domain": "maya",
+    "english": "sideLength2"
+  },
+  {
+    "domain": "maya",
+    "english": "spansPerSide"
+  },
+  {
+    "domain": "maya",
+    "english": "sphericalInflation"
+  },
+  {
+    "domain": "maya",
+    "english": "startSweep"
+  },
+  {
+    "domain": "maya",
+    "english": "subdivisionMode"
+  },
+  {
+    "domain": "maya",
+    "english": "subdivisionsAxis"
+  },
+  {
+    "domain": "maya",
+    "english": "subdivisionsCap"
+  },
+  {
+    "domain": "maya",
+    "english": "subdivisionsCaps"
+  },
+  {
+    "domain": "maya",
+    "english": "subdivisionsCoil"
+  },
+  {
+    "domain": "maya",
+    "english": "subdivisionsDepth"
+  },
+  {
+    "domain": "maya",
+    "english": "subdivisionsHeight"
+  },
+  {
+    "domain": "maya",
+    "english": "subdivisionsWidth"
+  },
+  {
+    "domain": "maya",
+    "english": "ultraMirror"
+  },
+  {
+    "domain": "maya",
+    "english": "verticalDivisions"
+  },
+  {
+    "domain": "maya",
+    "english": "verticalOffset"
+  },
+  {
+    "domain": "maya",
+    "english": "verticalRevolutions"
+  },
+  {
+    "domain": "maya",
+    "english": "xOffset"
+  },
+  {
+    "domain": "maya",
+    "english": "zOffset"
+  }
+]

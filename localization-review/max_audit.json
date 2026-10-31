@@ -1,0 +1,1070 @@
+{
+  "catalog_entries": 2652,
+  "observed_messages": 2773,
+  "missing": [],
+  "kept": [
+    {
+      "english": "3 x 2",
+      "reason": "reviewed_identifier_or_data"
+    },
+    {
+      "english": "5 x 3",
+      "reason": "reviewed_identifier_or_data"
+    },
+    {
+      "english": "6 x 4",
+      "reason": "reviewed_identifier_or_data"
+    },
+    {
+      "english": "647394-EPoly_FExtrude`Editable Polygon Object",
+      "reason": "max_action_id"
+    },
+    {
+      "english": "647394-EPoly_Select_Loop`Editable Polygon Object",
+      "reason": "max_action_id"
+    },
+    {
+      "english": "647394-EPoly_Select_Ring`Editable Polygon Object",
+      "reason": "max_action_id"
+    },
+    {
+      "english": "647394-PhysicalCamera_CreateFromView`Lights and Cameras",
+      "reason": "max_action_id"
+    },
+    {
+      "english": "647394-Show_End_Result_Toggle`Modifier Stack",
+      "reason": "max_action_id"
+    },
+    {
+      "english": "647394-StandardCamera_CreateFromView`Lights and Cameras",
+      "reason": "max_action_id"
+    },
+    {
+      "english": "647394-SubObject_1`Modifier Stack",
+      "reason": "max_action_id"
+    },
+    {
+      "english": "647394-SubObject_2`Modifier Stack",
+      "reason": "max_action_id"
+    },
+    {
+      "english": "647394-SubObject_3`Modifier Stack",
+      "reason": "max_action_id"
+    },
+    {
+      "english": "647394-SubObject_4`Modifier Stack",
+      "reason": "max_action_id"
+    },
+    {
+      "english": "647394-SubObject_5`Modifier Stack",
+      "reason": "max_action_id"
+    },
+    {
+      "english": "ActiveShade",
+      "reason": "product_or_technical_name"
+    },
+    {
+      "english": "Alt+1",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Alt+5",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Alt+A",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Alt+B",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Alt+C",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Alt+F",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Alt+F3",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Alt+H",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Alt+Home",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Alt+I",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Alt+J",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Alt+L",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Alt+M",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Alt+N",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Alt+P",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Alt+Q",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Alt+R",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Alt+Shift+5",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Alt+Shift+C",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Alt+Shift+C, Ctrl+C",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Alt+Shift+E",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Alt+Shift+S",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Alt+Shift+W",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Alt+Shift+X",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Alt+U",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Alt+W",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Alt+Z",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Alt+`",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Arnold",
+      "reason": "product_or_technical_name"
+    },
+    {
+      "english": "BSM_Editor",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_Layout",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_align_flyout",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_default_tangents",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_display",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_edit",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_enum_choice",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_explorer_context",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_explorer_mode",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_extents_all_flyout",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_extents_flyout",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_fov_flyout",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_key_filters",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_key_interpolation",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_key_sets",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_material_actions",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_material_edit",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_material_enum",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_material_flyout",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_material_id",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_material_modes",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_material_node_add",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_material_scene",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_material_select",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_material_view",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_max_",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_modifier_list",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_modifier_sets",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_more_utilities",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_orbit_flyout",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_pan_flyout",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_pivot_center",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_ref_coord",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_region_flyout",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_render_area",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_render_flyout",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_render_target",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_ribbon_",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_ribbon_options",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_scale_flyout",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_selection",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_selection_filter",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_selection_sets",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_slate_tools",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_stack_context",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_subcategories",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_time_tags",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_trackbar",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_trackbar_configure",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_trackbar_filter",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_utility_camera",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_utility_engine",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_utility_format",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_utility_size",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_uv_",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_view_cameras",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_MT_view_lights",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "BSM_UL_scene_items",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "Biped",
+      "reason": "product_or_technical_name"
+    },
+    {
+      "english": "Blender",
+      "reason": "data_only_template"
+    },
+    {
+      "english": "Blender Max",
+      "reason": "product_or_technical_name"
+    },
+    {
+      "english": "Blender Studio Max",
+      "reason": "product_or_technical_name"
+    },
+    {
+      "english": "Bone001",
+      "reason": "reviewed_identifier_or_data"
+    },
+    {
+      "english": "C:/Windows",
+      "reason": "reviewed_identifier_or_data"
+    },
+    {
+      "english": "Ctrl+A",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Ctrl+Alt+C",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Ctrl+Alt+D",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Ctrl+Alt+F",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Ctrl+Alt+H",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Ctrl+Alt+Q",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Ctrl+Alt+S",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Ctrl+Alt+Shift+C",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Ctrl+Alt+Shift+X",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Ctrl+Alt+Shift+Z",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Ctrl+Alt+V",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Ctrl+Alt+X",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Ctrl+Alt+Z",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Ctrl+B",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Ctrl+C",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Ctrl+D",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Ctrl+Down",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Ctrl+F",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Ctrl+H",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Ctrl+I",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Ctrl+L",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Ctrl+Left",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Ctrl+M",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Ctrl+O",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Ctrl+P",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Ctrl+Page Down",
+      "reason": "reviewed_identifier_or_data"
+    },
+    {
+      "english": "Ctrl+Page Up",
+      "reason": "reviewed_identifier_or_data"
+    },
+    {
+      "english": "Ctrl+Q",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Ctrl+R",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Ctrl+Right",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Ctrl+S",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Ctrl+Shift+A",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Ctrl+Shift+B",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Ctrl+Shift+C",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Ctrl+Shift+D",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Ctrl+Shift+E",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Ctrl+Shift+J",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Ctrl+Shift+N",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Ctrl+Shift+Q",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Ctrl+Shift+S",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Ctrl+Shift+W",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Ctrl+Shift+Z",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Ctrl+Shift+`",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Ctrl+Space",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Ctrl+T",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Ctrl+U",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Ctrl+Up",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Ctrl+V",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Ctrl+W",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Ctrl+Y",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Ctrl+Z",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Cycles",
+      "reason": "reviewed_identifier_or_data"
+    },
+    {
+      "english": "DCCWorkflowKit.Max",
+      "reason": "code_or_url"
+    },
+    {
+      "english": "GHOST_WindowClass",
+      "reason": "reviewed_identifier_or_data"
+    },
+    {
+      "english": "Group001",
+      "reason": "reviewed_identifier_or_data"
+    },
+    {
+      "english": "MATERIAL_UL_matslots",
+      "reason": "reviewed_identifier_or_data"
+    },
+    {
+      "english": "MAXScript",
+      "reason": "product_or_technical_name"
+    },
+    {
+      "english": "MassFX",
+      "reason": "product_or_technical_name"
+    },
+    {
+      "english": "OpenSubdiv",
+      "reason": "product_or_technical_name"
+    },
+    {
+      "english": "PROPERTIES_PT_navigation_bar",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "Page Up",
+      "reason": "reviewed_identifier_or_data"
+    },
+    {
+      "english": "RENDER_MT_format_presets",
+      "reason": "reviewed_identifier_or_data"
+    },
+    {
+      "english": "ShaderNodeBsdfDiffuse",
+      "reason": "code_or_url"
+    },
+    {
+      "english": "ShaderNodeBsdfGlass",
+      "reason": "code_or_url"
+    },
+    {
+      "english": "ShaderNodeBsdfPrincipled",
+      "reason": "code_or_url"
+    },
+    {
+      "english": "ShaderNodeBump",
+      "reason": "code_or_url"
+    },
+    {
+      "english": "ShaderNodeEmission",
+      "reason": "code_or_url"
+    },
+    {
+      "english": "ShaderNodeHueSaturation",
+      "reason": "code_or_url"
+    },
+    {
+      "english": "ShaderNodeMapping",
+      "reason": "code_or_url"
+    },
+    {
+      "english": "ShaderNodeMath",
+      "reason": "code_or_url"
+    },
+    {
+      "english": "ShaderNodeMixShader",
+      "reason": "code_or_url"
+    },
+    {
+      "english": "ShaderNodeNormalMap",
+      "reason": "code_or_url"
+    },
+    {
+      "english": "ShaderNodeOutputMaterial",
+      "reason": "code_or_url"
+    },
+    {
+      "english": "ShaderNodeRGB",
+      "reason": "code_or_url"
+    },
+    {
+      "english": "ShaderNodeTex",
+      "reason": "code_or_url"
+    },
+    {
+      "english": "ShaderNodeTexChecker",
+      "reason": "code_or_url"
+    },
+    {
+      "english": "ShaderNodeTexCoord",
+      "reason": "code_or_url"
+    },
+    {
+      "english": "ShaderNodeTexGradient",
+      "reason": "code_or_url"
+    },
+    {
+      "english": "ShaderNodeTexImage",
+      "reason": "code_or_url"
+    },
+    {
+      "english": "ShaderNodeTexNoise",
+      "reason": "code_or_url"
+    },
+    {
+      "english": "ShaderNodeTexVoronoi",
+      "reason": "code_or_url"
+    },
+    {
+      "english": "ShaderNodeValToRGB",
+      "reason": "code_or_url"
+    },
+    {
+      "english": "ShaderNodeValue",
+      "reason": "code_or_url"
+    },
+    {
+      "english": "Shift+4",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Shift+A",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Shift+B",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Shift+C",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Shift+E",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Shift+F",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Shift+F3",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Shift+F9",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Shift+G",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Shift+H",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Shift+I",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Shift+L",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Shift+N",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Shift+O",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Shift+Page Down",
+      "reason": "reviewed_identifier_or_data"
+    },
+    {
+      "english": "Shift+Q",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Shift+Q, Shift+F9",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Shift+R",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Shift+S",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Shift+T",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Shift+V",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Shift+W",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Shift+Y",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Shift+Z",
+      "reason": "shortcut"
+    },
+    {
+      "english": "Slate",
+      "reason": "product_or_technical_name"
+    },
+    {
+      "english": "TOPBAR_MT_file_export",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "TOPBAR_MT_file_external_data",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "TOPBAR_MT_file_import",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "TOPBAR_MT_file_new",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "TOPBAR_MT_file_open_recent",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "TOPBAR_MT_file_recover",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "TOPBAR_MT_undo_history",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "TRANSFORM_OT_edge_slide",
+      "reason": "reviewed_identifier_or_data"
+    },
+    {
+      "english": "TRANSFORM_OT_translate",
+      "reason": "reviewed_identifier_or_data"
+    },
+    {
+      "english": "TextPlus",
+      "reason": "product_or_technical_name"
+    },
+    {
+      "english": "VIEW3D_PT_tools_active",
+      "reason": "code_identifier"
+    },
+    {
+      "english": "ViewCube",
+      "reason": "product_or_technical_name"
+    },
+    {
+      "english": "WORKSPACE_PT_addons",
+      "reason": "reviewed_identifier_or_data"
+    },
+    {
+      "english": "WORKSPACE_PT_main",
+      "reason": "reviewed_identifier_or_data"
+    },
+    {
+      "english": "pose.bones[\"{0}\"].",
+      "reason": "reviewed_identifier_or_data"
+    },
+    {
+      "english": "user_interface.wcol_{0}",
+      "reason": "reviewed_identifier_or_data"
+    },
+    {
+      "english": "{0}.inner",
+      "reason": "reviewed_identifier_or_data"
+    },
+    {
+      "english": "{0}.inner_sel",
+      "reason": "reviewed_identifier_or_data"
+    },
+    {
+      "english": "{0}.outline",
+      "reason": "reviewed_identifier_or_data"
+    },
+    {
+      "english": "{0}.text",
+      "reason": "reviewed_identifier_or_data"
+    },
+    {
+      "english": "{0}.text_sel",
+      "reason": "reviewed_identifier_or_data"
+    },
+    {
+      "english": "{0}x{1}",
+      "reason": "reviewed_identifier_or_data"
+    }
+  ],
+  "unwrapped_display_sites": [],
+  "additional_candidates": [
+    {
+      "english": "Blender Max: original, reversible studio workflow extension.",
+      "occurrences": [
+        {
+          "file": "providers/max/__init__.py",
+          "line": 4
+        }
+      ]
+    },
+    {
+      "english": "Creation gestures, region selection and property popups on actual Blender data.",
+      "occurrences": [
+        {
+          "file": "providers/max/interactions.py",
+          "line": 4
+        }
+      ]
+    },
+    {
+      "english": "Custom studio editor workspaces; all scene data stays in the current file.",
+      "occurrences": [
+        {
+          "file": "providers/max/editor_host.py",
+          "line": 4
+        }
+      ]
+    },
+    {
+      "english": "Environment lifecycle. No third-party add-ons are inspected or modified.",
+      "occurrences": [
+        {
+          "file": "providers/max/runtime.py",
+          "line": 4
+        }
+      ]
+    },
+    {
+      "english": "Functional toolbar actions, using Blender data and viewport operators.",
+      "occurrences": [
+        {
+          "file": "providers/max/toolbar.py",
+          "line": 4
+        }
+      ]
+    },
+    {
+      "english": "Material and animation workflows implemented with Blender's native data.\n\nThese controls edit Blender shaders and action slots. They do not emulate or\nimport proprietary material types, animation controllers, or renderer plugins.\n",
+      "occurrences": [
+        {
+          "file": "providers/max/editors.py",
+          "line": 4
+        }
+      ]
+    },
+    {
+      "english": "Parametric 3ds Max-style primitives: unscaled objects whose parameters rebuild their own mesh.",
+      "occurrences": [
+        {
+          "file": "providers/max/params.py",
+          "line": 4
+        }
+      ]
+    },
+    {
+      "english": "Removed",
+      "occurrences": [
+        {
+          "file": "providers/max/editors.py",
+          "line": 162
+        }
+      ]
+    },
+    {
+      "english": "Scene Explorer table, backed by real objects, parents and collections.",
+      "occurrences": [
+        {
+          "file": "providers/max/scene_ui.py",
+          "line": 4
+        }
+      ]
+    },
+    {
+      "english": "Scene Root",
+      "occurrences": [
+        {
+          "file": "providers/max/commands.py",
+          "line": 1375
+        }
+      ]
+    },
+    {
+      "english": "Session state, the 3ds Max menu bar and the Scene Explorer menus.",
+      "occurrences": [
+        {
+          "file": "providers/max/ui.py",
+          "line": 4
+        }
+      ]
+    },
+    {
+      "english": "Toolbar flyouts, stack/explorer context menus, ribbon panels and small dialogs.",
+      "occurrences": [
+        {
+          "file": "providers/max/flyouts.py",
+          "line": 4
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+name: Check source and package
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Validate Python and JSON syntax
+        run: |
+          python - <<'PY'
+          import ast, json
+          from pathlib import Path
+          root = Path('src/dcc_workflow_kit')
+          for path in root.rglob('*.py'):
+              ast.parse(path.read_bytes(), filename=str(path))
+          for path in root.rglob('*.json'):
+              json.loads(path.read_text(encoding='utf-8'))
+          print('Python and JSON syntax passed')
+          PY
+      - name: Build installable extension
+        run: python tools/build.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dcc-workflow-kit-extension
+          path: |
+            dist/*.zip
+            dist/*.sha256

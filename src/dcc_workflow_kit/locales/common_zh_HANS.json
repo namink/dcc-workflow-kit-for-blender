@@ -1,0 +1,21 @@
+{
+  "Workflow Pair": "工作流组合",
+  "Startup Interface": "启动界面",
+  "Selected Workflow": "所选工作流",
+  "Switch Workflow": "切换工作流",
+  "Switch between Blender and the workflow selected in Preferences": "在 Blender 与偏好设置中所选的工作流之间切换",
+  "Changing the workflow pair returns to Blender. Both sets of settings are retained.": "更换工作流组合后返回 Blender，保留双方的设置。",
+  "Interface language follows Blender. Scene data is preserved when switching.": "界面语言跟随 Blender；切换时保留场景数据。",
+  "Switch failed. Return to Blender and retry.": "切换失败，请返回 Blender 后重试。",
+  "Switching…": "正在切换…",
+  "Switch failed": "切换失败",
+  "3ds Max Settings": "3ds Max 设置",
+  "Maya Settings": "Maya 设置",
+  "Max gray colors": "Max 灰色主题",
+  "Material Editor": "材质编辑器",
+  "Custom Splash Image": "自定义启动图像",
+  "Color changes apply the next time Max mode starts.": "主题设置在下次进入 Max 模式时生效。",
+  "Import Maya Shelves": "导入 Maya 工具架",
+  "Copy custom shelves from the original Maya Workflow Kit; keep existing shelves and source file": "复制原版 Maya Workflow Kit 的自定义工具架，保留当前工具架和原文件",
+  "Imported shelves: ": "已导入工具架数量："
+}

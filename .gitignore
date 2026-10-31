@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+*.blend1
+.ruff_cache/
+.pytest_cache/
+test-results/
+dist/
+user_data/
+.env
+.env.*
+*.log
+publication-upload/

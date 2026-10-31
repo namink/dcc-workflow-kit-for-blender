@@ -1,0 +1,2834 @@
+[
+  {
+    "id": 7,
+    "domain": "max",
+    "english": "3 x 2",
+    "error": "No Chinese translation returned",
+    "draft": "3 × 2"
+  },
+  {
+    "id": 20,
+    "domain": "max",
+    "english": "5 x 3",
+    "error": "No Chinese translation returned",
+    "draft": "5 × 3"
+  },
+  {
+    "id": 22,
+    "domain": "max",
+    "english": "6 x 4",
+    "error": "No Chinese translation returned",
+    "draft": "6 × 4"
+  },
+  {
+    "id": 43,
+    "domain": "max",
+    "english": "Align Orientation (Local):",
+    "error": "No Chinese translation returned",
+    "draft": "Align Orientation (Local)："
+  },
+  {
+    "id": 30,
+    "domain": "max",
+    "english": "ActiveShade:",
+    "error": "No Chinese translation returned",
+    "draft": "zxqph000qxz："
+  },
+  {
+    "id": 48,
+    "domain": "max",
+    "english": "Alpha",
+    "error": "No Chinese translation returned",
+    "draft": "Alpha"
+  },
+  {
+    "id": 79,
+    "domain": "max",
+    "english": "Awning Window",
+    "error": "Unresolved translation placeholder",
+    "draft": "遮阳篷窗\n000080 b|烘焙选定的几何图形→快照ZXQPH000QXZ"
+  },
+  {
+    "id": 80,
+    "domain": "max",
+    "english": "Bake Selected Geometries → Snapshot mesh",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 100,
+    "domain": "max",
+    "english": "BlobMesh",
+    "error": "No Chinese translation returned",
+    "draft": "BlobMesh"
+  },
+  {
+    "id": 92,
+    "domain": "max",
+    "english": "Blender Max:",
+    "error": "No Chinese translation returned",
+    "draft": "zxqph000qxz："
+  },
+  {
+    "id": 119,
+    "domain": "max",
+    "english": "Camera Map (WSM)",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 123,
+    "domain": "max",
+    "english": "Center Point Cycle",
+    "error": "Unresolved translation placeholder",
+    "draft": "中心点循环\n质量中心：ZXQPH000QXZ， ZXQPH001QXZ, ZXQPH002QXZ"
+  },
+  {
+    "id": 124,
+    "domain": "max",
+    "english": "Center of Mass: {0:.3f}, {1:.3f}, {2:.3f}",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 103,
+    "domain": "max",
+    "english": "Bone001",
+    "error": "No Chinese translation returned",
+    "draft": "Bone001"
+  },
+  {
+    "id": 111,
+    "domain": "max",
+    "english": "C:/Windows",
+    "error": "No Chinese translation returned",
+    "draft": "C:/Windows"
+  },
+  {
+    "id": 127,
+    "domain": "max",
+    "english": "Channel Info...",
+    "error": "Unresolved translation placeholder",
+    "draft": "频道信息…\n在ZXQPH000QXZ中选择的频道"
+  },
+  {
+    "id": 128,
+    "domain": "max",
+    "english": "Channels chosen in Key Filters",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 130,
+    "domain": "max",
+    "english": "CheckerPattern",
+    "error": "No Chinese translation returned",
+    "draft": "CheckerPattern"
+  },
+  {
+    "id": 132,
+    "domain": "max",
+    "english": "Choose the transform and open its Type-In dialog, like the option box in Max",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 142,
+    "domain": "max",
+    "english": "Compare Media in RAM Player...",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 165,
+    "domain": "max",
+    "english": "Create Kinematic Ragdoll",
+    "error": "Unresolved translation placeholder",
+    "draft": "创建动态布娃娃\n创建ZXQPH000QXZ几何体…"
+  },
+  {
+    "id": 166,
+    "domain": "max",
+    "english": "Create MCG Geometry...",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 150,
+    "domain": "max",
+    "english": "Conform Modifier",
+    "error": "Unresolved translation placeholder",
+    "draft": "符合ZXQPH000QXZ\n000151连接ZXQPH000QXZ ZXQPH001QXZ"
+  },
+  {
+    "id": 151,
+    "domain": "max",
+    "english": "Connect Material Map",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 181,
+    "domain": "max",
+    "english": "Ctrl+Page Down",
+    "error": "No Chinese translation returned",
+    "draft": "Ctrl+Page Down"
+  },
+  {
+    "id": 182,
+    "domain": "max",
+    "english": "Ctrl+Page Up",
+    "error": "No Chinese translation returned",
+    "draft": "Ctrl+Page Up"
+  },
+  {
+    "id": 176,
+    "domain": "max",
+    "english": "Create {0}",
+    "error": "Unresolved translation placeholder",
+    "draft": "创建ZXQPH000QXZ\n在帧ZXQPH001QXZ上创建ZXQPH000QXZ ZXQPH002QXZ(s)"
+  },
+  {
+    "id": 177,
+    "domain": "max",
+    "english": "Created {0} key(s) at frame {1}",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 193,
+    "domain": "max",
+    "english": "Cycles",
+    "error": "No Chinese translation returned",
+    "draft": "zxqph000qxz"
+  },
+  {
+    "id": 213,
+    "domain": "max",
+    "english": "Denoising is a Cycles render setting",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 215,
+    "domain": "max",
+    "english": "Diagnose Video Hardware",
+    "error": "Unresolved translation placeholder",
+    "draft": "诊断视频硬件\n尺寸：ZXQPH000QXZ x ZXQPH001QXZ x ZXQPH002QXZ"
+  },
+  {
+    "id": 216,
+    "domain": "max",
+    "english": "Dimensions: {0:.3f} x {1:.3f} x {2:.3f}",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 218,
+    "domain": "max",
+    "english": "Disp Approx",
+    "error": "Unresolved translation placeholder",
+    "draft": "dip约\n排水量ZXQPH000QXZ （WSM）"
+  },
+  {
+    "id": 219,
+    "domain": "max",
+    "english": "Displace Mesh (WSM)",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 245,
+    "domain": "max",
+    "english": "Distance: {0}  Delta X: {1}  Y: {2}  Z: {3}",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 246,
+    "domain": "max",
+    "english": "Don't Affect Children",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 249,
+    "domain": "max",
+    "english": "Double-click a material in the browser to create it.",
+    "error": "Unresolved translation placeholder",
+    "draft": "在浏览器中双击ZXQPH000QXZ创建它。\n从子节点拖动到父节点ZXQPH000QXZ\n从ZXQPH000QXZ拖动到ZXQPH001QXZ"
+  },
+  {
+    "id": 250,
+    "domain": "max",
+    "english": "Drag from a child to its parent object",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 251,
+    "domain": "max",
+    "english": "Drag from an object to a space warp",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 279,
+    "domain": "max",
+    "english": "Euler XYZ",
+    "error": "No Chinese translation returned",
+    "draft": "zxqph000qxz xyz"
+  },
+  {
+    "id": 280,
+    "domain": "max",
+    "english": "Euler XZY",
+    "error": "No Chinese translation returned",
+    "draft": "zxqph000qxz xzy"
+  },
+  {
+    "id": 281,
+    "domain": "max",
+    "english": "Euler YXZ",
+    "error": "No Chinese translation returned",
+    "draft": "zxqph000qxz yxz"
+  },
+  {
+    "id": 282,
+    "domain": "max",
+    "english": "Euler YZX",
+    "error": "No Chinese translation returned",
+    "draft": "zxqph000qxz yzx"
+  },
+  {
+    "id": 283,
+    "domain": "max",
+    "english": "Euler ZXY",
+    "error": "No Chinese translation returned",
+    "draft": "zxqph000qxz zxy"
+  },
+  {
+    "id": 284,
+    "domain": "max",
+    "english": "Euler ZYX",
+    "error": "No Chinese translation returned",
+    "draft": "zxqph000qxz zyx"
+  },
+  {
+    "id": 296,
+    "domain": "max",
+    "english": "ExposeTm",
+    "error": "No Chinese translation returned",
+    "draft": "ExposeTm"
+  },
+  {
+    "id": 316,
+    "domain": "max",
+    "english": "FFD 2x2x2",
+    "error": "No Chinese translation returned",
+    "draft": "FFD 2x2x2"
+  },
+  {
+    "id": 317,
+    "domain": "max",
+    "english": "FFD 3x3x3",
+    "error": "No Chinese translation returned",
+    "draft": "FFD 3x3x3"
+  },
+  {
+    "id": 318,
+    "domain": "max",
+    "english": "FFD 4x4x4",
+    "error": "No Chinese translation returned",
+    "draft": "FFD 4x4x4"
+  },
+  {
+    "id": 323,
+    "domain": "max",
+    "english": "FFD {0}x{1}x{2}",
+    "error": "No Chinese translation returned",
+    "draft": "FFD zxqph000qxzzzxqph001qxzzxqph002qxz"
+  },
+  {
+    "id": 325,
+    "domain": "max",
+    "english": "FFD(Cyl)",
+    "error": "No Chinese translation returned",
+    "draft": "FFD（Cyl）"
+  },
+  {
+    "id": 341,
+    "domain": "max",
+    "english": "Flight Studio",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 328,
+    "domain": "max",
+    "english": "Facets",
+    "error": "No Chinese translation returned",
+    "draft": "facet"
+  },
+  {
+    "id": 360,
+    "domain": "max",
+    "english": "Frame the selection in every viewport",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 395,
+    "domain": "max",
+    "english": "Group001",
+    "error": "No Chinese translation returned",
+    "draft": "Group001"
+  },
+  {
+    "id": 376,
+    "domain": "max",
+    "english": "GHOST_WindowClass",
+    "error": "No Chinese translation returned",
+    "draft": "GHOST_WindowClass"
+  },
+  {
+    "id": 423,
+    "domain": "max",
+    "english": "Icosa",
+    "error": "No Chinese translation returned",
+    "draft": "Icosa"
+  },
+  {
+    "id": 424,
+    "domain": "max",
+    "english": "Icosahedron base",
+    "error": "Unresolved translation placeholder",
+    "draft": "二十面体底\nZXQPH000QXZ的想法"
+  },
+  {
+    "id": 425,
+    "domain": "max",
+    "english": "Ideas for 3ds Max",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 404,
+    "domain": "max",
+    "english": "Helper",
+    "error": "No Chinese translation returned",
+    "draft": "Helper"
+  },
+  {
+    "id": 433,
+    "domain": "max",
+    "english": "In/Out: Interpolation...",
+    "error": "No Chinese translation returned",
+    "draft": "In/Out: Interpolation…"
+  },
+  {
+    "id": 457,
+    "domain": "max",
+    "english": "Join Autodesk Feedback Community",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 506,
+    "domain": "max",
+    "english": "MATERIAL_UL_matslots",
+    "error": "No Chinese translation returned",
+    "draft": "MATERIAL_UL_matslots"
+  },
+  {
+    "id": 509,
+    "domain": "max",
+    "english": "MAXScript Mini Listener",
+    "error": "Unresolved translation placeholder",
+    "draft": "ZXQPH000QXZ迷你监听器\n1自由度旋转弹簧ZXQPH001QXZ"
+  },
+  {
+    "id": 510,
+    "domain": "max",
+    "english": "MCG 1 DOF Rotation Spring Controller",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 520,
+    "domain": "max",
+    "english": "MSmooth",
+    "error": "No Chinese translation returned",
+    "draft": "MSmooth"
+  },
+  {
+    "id": 531,
+    "domain": "max",
+    "english": "MapScaler (WSM)",
+    "error": "No Chinese translation returned",
+    "draft": "MapScaler （WSM）"
+  },
+  {
+    "id": 542,
+    "domain": "max",
+    "english": "Material assignment and shader controls",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 565,
+    "domain": "max",
+    "english": "Minimize to Panel Titles",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 552,
+    "domain": "max",
+    "english": "Max Toolbar Action",
+    "error": "Unresolved translation placeholder",
+    "draft": "工具栏最大动作\n最大ZXQPH000QXZ开关（Alt+W）"
+  },
+  {
+    "id": 553,
+    "domain": "max",
+    "english": "Maximize Viewport Toggle (Alt+W)",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 594,
+    "domain": "max",
+    "english": "MultiRes",
+    "error": "No Chinese translation returned",
+    "draft": "MultiRes"
+  },
+  {
+    "id": 597,
+    "domain": "max",
+    "english": "NGon",
+    "error": "No Chinese translation returned",
+    "draft": "NGon"
+  },
+  {
+    "id": 693,
+    "domain": "max",
+    "english": "PCloud",
+    "error": "No Chinese translation returned",
+    "draft": "PCloud"
+  },
+  {
+    "id": 694,
+    "domain": "max",
+    "english": "PDynaFlect",
+    "error": "No Chinese translation returned",
+    "draft": "pdynafect"
+  },
+  {
+    "id": 697,
+    "domain": "max",
+    "english": "POmniFlect",
+    "error": "No Chinese translation returned",
+    "draft": "pomnireflect"
+  },
+  {
+    "id": 700,
+    "domain": "max",
+    "english": "Page Up",
+    "error": "No Chinese translation returned",
+    "draft": "Page Up"
+  },
+  {
+    "id": 717,
+    "domain": "max",
+    "english": "Particles & Dynamics",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 707,
+    "domain": "max",
+    "english": "Panorama Exporter...",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 735,
+    "domain": "max",
+    "english": "Physical Material",
+    "error": "No Chinese translation returned",
+    "draft": "zxqph000qxz"
+  },
+  {
+    "id": 743,
+    "domain": "max",
+    "english": "Pick an object for the reference coordinate system",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 750,
+    "domain": "max",
+    "english": "Pick the second point",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 751,
+    "domain": "max",
+    "english": "Pick: {0}",
+    "error": "No Chinese translation returned",
+    "draft": "Pick: ZXQPH000QXZ"
+  },
+  {
+    "id": 774,
+    "domain": "max",
+    "english": "Poly Select",
+    "error": "No Chinese translation returned",
+    "draft": "Poly Select"
+  },
+  {
+    "id": 775,
+    "domain": "max",
+    "english": "PolyDraw",
+    "error": "No Chinese translation returned",
+    "draft": "PolyDraw"
+  },
+  {
+    "id": 806,
+    "domain": "max",
+    "english": "Quad {0} - {1}",
+    "error": "No Chinese translation returned",
+    "draft": "Quad ZXQPH000QXZ - ZXQPH001QXZ"
+  },
+  {
+    "id": 794,
+    "domain": "max",
+    "english": "ProBoolean",
+    "error": "No Chinese translation returned",
+    "draft": "ProBoolean"
+  },
+  {
+    "id": 813,
+    "domain": "max",
+    "english": "RENDER_MT_format_presets",
+    "error": "No Chinese translation returned",
+    "draft": "RENDER_MT_format_presets"
+  },
+  {
+    "id": 827,
+    "domain": "max",
+    "english": "Real-Time Exporter...",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 867,
+    "domain": "max",
+    "english": "Render in the Cloud",
+    "error": "Unresolved translation placeholder",
+    "draft": "在云中渲染\n渲染大小：ZXQPH000QXZ x ZXQPH001QXZ"
+  },
+  {
+    "id": 868,
+    "domain": "max",
+    "english": "Render size: {0} x {1}",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 871,
+    "domain": "max",
+    "english": "Renderable Spline Modifier",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 887,
+    "domain": "max",
+    "english": "Ripple",
+    "error": "No Chinese translation returned",
+    "draft": "Ripple"
+  },
+  {
+    "id": 892,
+    "domain": "max",
+    "english": "SOmniFlect",
+    "error": "No Chinese translation returned",
+    "draft": "somnireflect"
+  },
+  {
+    "id": 899,
+    "domain": "max",
+    "english": "Save Incremental (+)",
+    "error": "No Chinese translation returned",
+    "draft": "Save Incremental （+）"
+  },
+  {
+    "id": 1003,
+    "domain": "max",
+    "english": "Select one or more animation keys",
+    "error": "Unresolved translation placeholder",
+    "draft": "选择一个或多个动画ZXQPH000QXZ\n选择ZXQPH000QXZ ZXQPH001QXZ进行焊接"
+  },
+  {
+    "id": 1004,
+    "domain": "max",
+    "english": "Select the texture vertices to weld",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1046,
+    "domain": "max",
+    "english": "ShapeBoolean",
+    "error": "No Chinese translation returned",
+    "draft": "ShapeBoolean"
+  },
+  {
+    "id": 1047,
+    "domain": "max",
+    "english": "ShapeMerge",
+    "error": "No Chinese translation returned",
+    "draft": "ShapeMerge"
+  },
+  {
+    "id": 1051,
+    "domain": "max",
+    "english": "Shift+Page Down",
+    "error": "No Chinese translation returned",
+    "draft": "Shift+Page Down"
+  },
+  {
+    "id": 1065,
+    "domain": "max",
+    "english": "Show Material in Viewport",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1058,
+    "domain": "max",
+    "english": "Show For Active View",
+    "error": "No Chinese translation returned",
+    "draft": "Show For Active View"
+  },
+  {
+    "id": 1094,
+    "domain": "max",
+    "english": "Snaps",
+    "error": "No Chinese translation returned",
+    "draft": "Snaps"
+  },
+  {
+    "id": 1099,
+    "domain": "max",
+    "english": "SpaceWarps",
+    "error": "No Chinese translation returned",
+    "draft": "spacewarp"
+  },
+  {
+    "id": 1107,
+    "domain": "max",
+    "english": "Spline Influence",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1165,
+    "domain": "max",
+    "english": "TRANSFORM_OT_edge_slide",
+    "error": "No Chinese translation returned",
+    "draft": "TRANSFORM_OT_edge_slide"
+  },
+  {
+    "id": 1166,
+    "domain": "max",
+    "english": "TRANSFORM_OT_translate",
+    "error": "No Chinese translation returned",
+    "draft": "TRANSFORM_OT_translate"
+  },
+  {
+    "id": 1151,
+    "domain": "max",
+    "english": "Surf Deform (WSM)",
+    "error": "Unresolved translation placeholder",
+    "draft": "Surf Deform （WSM）\n表面积：ZXQPH000QXZ"
+  },
+  {
+    "id": 1152,
+    "domain": "max",
+    "english": "Surface Area: {0}",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1156,
+    "domain": "max",
+    "english": "SwiftLoop",
+    "error": "No Chinese translation returned",
+    "draft": "SwiftLoop"
+  },
+  {
+    "id": 1175,
+    "domain": "max",
+    "english": "Tee",
+    "error": "No Chinese translation returned",
+    "draft": "Tee"
+  },
+  {
+    "id": 1216,
+    "domain": "max",
+    "english": "Track View - Curve Editor...",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1218,
+    "domain": "max",
+    "english": "Track View - Dope Sheet...",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1225,
+    "domain": "max",
+    "english": "Transform Gizmo Size Down",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1230,
+    "domain": "max",
+    "english": "Transform Toolbox...",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1244,
+    "domain": "max",
+    "english": "UOmniFlect",
+    "error": "No Chinese translation returned",
+    "draft": "unomnireflect"
+  },
+  {
+    "id": 1250,
+    "domain": "max",
+    "english": "UVW XForm",
+    "error": "No Chinese translation returned",
+    "draft": "UVW XForm"
+  },
+  {
+    "id": 1284,
+    "domain": "max",
+    "english": "Use XRefed",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1334,
+    "domain": "max",
+    "english": "WORKSPACE_PT_addons",
+    "error": "No Chinese translation returned",
+    "draft": "WORKSPACE_PT_addons"
+  },
+  {
+    "id": 1335,
+    "domain": "max",
+    "english": "WORKSPACE_PT_main",
+    "error": "No Chinese translation returned",
+    "draft": "WORKSPACE_PT_main"
+  },
+  {
+    "id": 1353,
+    "domain": "max",
+    "english": "XForm",
+    "error": "No Chinese translation returned",
+    "draft": "XForm"
+  },
+  {
+    "id": 1368,
+    "domain": "max",
+    "english": "pose.bones[\"{0}\"].",
+    "error": "No Chinese translation returned",
+    "draft": "pose.bones[\"ZXQPH000QXZ\"]。"
+  },
+  {
+    "id": 1375,
+    "domain": "max",
+    "english": "user_interface.wcol_{0}",
+    "error": "No Chinese translation returned",
+    "draft": "user_interface.wcol_ZXQPH000QXZ"
+  },
+  {
+    "id": 1396,
+    "domain": "max",
+    "english": "{0}, frame {1}, Display: {2}, View: {3}, RGBA Color 32 Bits/Channel {4}",
+    "error": "A protected placeholder was lost",
+    "draft": "ZXQPH000QXZ，帧ZXQPH001QXZ，显示：ZXQPH002QXZ，视图：ZXQPH003QXZ，色：ZXQPH004QXZ"
+  },
+  {
+    "id": 1397,
+    "domain": "max",
+    "english": "{0}.inner",
+    "error": "No Chinese translation returned",
+    "draft": "ZXQPH000QXZ.inner"
+  },
+  {
+    "id": 1398,
+    "domain": "max",
+    "english": "{0}.inner_sel",
+    "error": "No Chinese translation returned",
+    "draft": "ZXQPH000QXZ.inner_sel"
+  },
+  {
+    "id": 1399,
+    "domain": "max",
+    "english": "{0}.outline",
+    "error": "No Chinese translation returned",
+    "draft": "ZXQPH000QXZ.outline"
+  },
+  {
+    "id": 1401,
+    "domain": "max",
+    "english": "{0}.text",
+    "error": "No Chinese translation returned",
+    "draft": "ZXQPH000QXZ.text"
+  },
+  {
+    "id": 1402,
+    "domain": "max",
+    "english": "{0}.text_sel",
+    "error": "No Chinese translation returned",
+    "draft": "ZXQPH000QXZ.text_sel"
+  },
+  {
+    "id": 1405,
+    "domain": "max",
+    "english": "{0}x{1}",
+    "error": "No Chinese translation returned",
+    "draft": "ZXQPH000QXZxZXQPH001QXZ"
+  },
+  {
+    "id": 1408,
+    "domain": "maya",
+    "english": "+{len(pts) - MAX_POINTS}",
+    "error": "No Chinese translation returned",
+    "draft": "+ zxqph000qxz"
+  },
+  {
+    "id": 1410,
+    "domain": "maya",
+    "english": "A true sine shape (Blender's Wave modifier ripples)",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1411,
+    "domain": "maya",
+    "english": "A_Color",
+    "error": "No Chinese translation returned",
+    "draft": "A_Color"
+  },
+  {
+    "id": 1413,
+    "domain": "maya",
+    "english": "Absolute Transform",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1434,
+    "domain": "maya",
+    "english": "All Render-Enabled Layers",
+    "error": "Unresolved translation placeholder",
+    "draft": "所有启用渲染的图层\n所有变形ZXQPH000QXZ组"
+  },
+  {
+    "id": 1435,
+    "domain": "maya",
+    "english": "All deforming bone groups",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1430,
+    "domain": "maya",
+    "english": "Alembic (.abc)",
+    "error": "No Chinese translation returned",
+    "draft": "ZXQPH000QXZ （.abc）"
+  },
+  {
+    "id": 1444,
+    "domain": "maya",
+    "english": "Alpha",
+    "error": "Unresolved translation placeholder",
+    "draft": "Alpha\n还显示所列出的ZXQPH001QXZ的子代的ZXQPH000QXZ（试剂盒将它们列为行）"
+  },
+  {
+    "id": 1445,
+    "domain": "maya",
+    "english": "Also show the keys of the listed objects' children (the kit lists them as rows)",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1456,
+    "domain": "maya",
+    "english": "Append to Polygon: click a border edge, then points, Enter to add the face, Backspace: remove the last point",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1473,
+    "domain": "maya",
+    "english": "Auto simplify curve (the kit always fits the curve: on)",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1458,
+    "domain": "maya",
+    "english": "AreaLight",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1459,
+    "domain": "maya",
+    "english": "Art3dPaintTool",
+    "error": "No Chinese translation returned",
+    "draft": "Art3dPaintTool"
+  },
+  {
+    "id": 1460,
+    "domain": "maya",
+    "english": "ArtPaintSkinWeightsTool",
+    "error": "No Chinese translation returned",
+    "draft": "ArtPaintSkinWeightsTool"
+  },
+  {
+    "id": 1484,
+    "domain": "maya",
+    "english": "B_Color",
+    "error": "No Chinese translation returned",
+    "draft": "B_Color"
+  },
+  {
+    "id": 1488,
+    "domain": "maya",
+    "english": "Bake To: New Layer",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1491,
+    "domain": "maya",
+    "english": "Baked",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1497,
+    "domain": "maya",
+    "english": "Bend Strength",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1509,
+    "domain": "maya",
+    "english": "Blender always draws a dot per frame",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1518,
+    "domain": "maya",
+    "english": "Blender deletes only selected keys: Select > Before Current Frame ([), then Delete.",
+    "error": "A protected placeholder was lost",
+    "draft": "ZXQPH000QXZ: Select > Before Current Frame([)，然后Delete。"
+  },
+  {
+    "id": 1514,
+    "domain": "maya",
+    "english": "Blender brush blend Multiply",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1526,
+    "domain": "maya",
+    "english": "Blender has no cubic falloff: distance squared, its power matching Maya at 10 units.",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1528,
+    "domain": "maya",
+    "english": "Blender has no key brushes: its Graph Editor smooths and decimates the selected keys from the Key menu instead.",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1529,
+    "domain": "maya",
+    "english": "Blender has no nucleus node: Maya Workflow Kit writes these values to the scene gravity, the rigid body world and every cloth.",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1533,
+    "domain": "maya",
+    "english": "Blender has no volume light penumbra",
+    "error": "Unresolved translation placeholder",
+    "draft": "ZXQPH000QXZ无体光半影\nZXQPH000QXZ ZXQPH001QXZ将它们的Y轴指向子ZXQPH002QXZ；带有另一个主轴的ZXQPH003QXZ框架与ZXQPH004QXZ保持一致（导出到ZXQPH005QXZ）。"
+  },
+  {
+    "id": 1534,
+    "domain": "maya",
+    "english": "Blender joints point their Y axis at the child joint; a Maya frame with another primary axis is kept with the joint (exported to FBX).",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1530,
+    "domain": "maya",
+    "english": "Blender has no ripple delete for keys: delete them, then move the later keys back with G.",
+    "error": "Unresolved translation placeholder",
+    "draft": "ZXQPH000QXZ对ZXQPH001QXZ没有纹波删除：删除它们，然后用G移动后面的ZXQPH002QXZ。\nZXQPH000QXZ没有这样的ZXQPH001QXZ命令：它的ZXQPH002QXZ工具在ZXQPH003QXZ的ZXQPH004QXZ和通道菜单（平滑，Decimate，清洁，烘烤，ZXQPH005QXZ过滤器）。"
+  },
+  {
+    "id": 1531,
+    "domain": "maya",
+    "english": "Blender has no such curve command: its curve tools are in the Graph Editor's Key and Channel menus (Smooth, Decimate, Clean, Bake, Euler Filter).",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1535,
+    "domain": "maya",
+    "english": "Blender keeps no edit-mode history: only the last operation can be changed here.",
+    "error": "Unresolved translation placeholder",
+    "draft": "ZXQPH000QXZ不保留编辑模式历史记录：这里只能修改最后一次操作。\nZXQPH000QXZ每ZXQPH002QXZ保留一个ZXQPH001QXZ: ZXQPH003QXZ和游戏引擎读取一个。要将ZXQPH004QXZ添加到ZXQPH005QXZ，请使用ZXQPH006QXZ >； Edit ZXQPH007QXZ > add ZXQPH008QXZ；第二个电枢修饰语可以在属性修饰语中手工添加。"
+  },
+  {
+    "id": 1536,
+    "domain": "maya",
+    "english": "Blender keeps one skin per mesh here: FBX and game engines read one. To add joints to this skin use Skin > Edit Influences > Add Influence; a second Armature modifier can be added by hand in Properties > Modifiers.",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1546,
+    "domain": "maya",
+    "english": "Blender's Blur tool",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1548,
+    "domain": "maya",
+    "english": "Blender's Principled BSDF has no thin-walled mode",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1554,
+    "domain": "maya",
+    "english": "Blender's lasso always closes the shape from the last point to the first",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1549,
+    "domain": "maya",
+    "english": "Blender's World light isn't shadowed like Maya's ambient light",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1550,
+    "domain": "maya",
+    "english": "Blender's area light can't fall off faster than distance squared: its power matches Maya at 10 units.",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1563,
+    "domain": "maya",
+    "english": "Blob",
+    "error": "No Chinese translation returned",
+    "draft": "Blob"
+  },
+  {
+    "id": 1567,
+    "domain": "maya",
+    "english": "Border Falloff Blur",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1574,
+    "domain": "maya",
+    "english": "Browse Blender weight-paint brush assets",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1579,
+    "domain": "maya",
+    "english": "C Muscle Shader",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1583,
+    "domain": "maya",
+    "english": "Camera-Based Selection {'off' if prefs.select_through else 'on'}",
+    "error": "A protected placeholder was lost",
+    "draft": "zxqph001qxz基ZXQPH002QXZ"
+  },
+  {
+    "id": 1610,
+    "domain": "maya",
+    "english": "Click the mesh to sample its weight into Value",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1611,
+    "domain": "maya",
+    "english": "Clip Dopesheet Editor",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1651,
+    "domain": "maya",
+    "english": "Create Empty Layer (newLayerEmpty)",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1646,
+    "domain": "maya",
+    "english": "Convert selection (Maya Ctrl+RMB)",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1660,
+    "domain": "maya",
+    "english": "CreatePointLight",
+    "error": "No Chinese translation returned",
+    "draft": "CreatePointLight"
+  },
+  {
+    "id": 1663,
+    "domain": "maya",
+    "english": "Crv",
+    "error": "No Chinese translation returned",
+    "draft": "Crv"
+  },
+  {
+    "id": 1664,
+    "domain": "maya",
+    "english": "Ctrl + LMB",
+    "error": "No Chinese translation returned",
+    "draft": "Ctrl + LMB"
+  },
+  {
+    "id": 1665,
+    "domain": "maya",
+    "english": "Ctrl + MMB",
+    "error": "No Chinese translation returned",
+    "draft": "Ctrl + MMB"
+  },
+  {
+    "id": 1666,
+    "domain": "maya",
+    "english": "Ctrl + Shift + LMB",
+    "error": "No Chinese translation returned",
+    "draft": "Ctrl + Shift + LMB"
+  },
+  {
+    "id": 1667,
+    "domain": "maya",
+    "english": "Ctrl + Shift + MMB",
+    "error": "No Chinese translation returned",
+    "draft": "Ctrl + Shift + MMB"
+  },
+  {
+    "id": 1668,
+    "domain": "maya",
+    "english": "Ctrl+<",
+    "error": "No Chinese translation returned",
+    "draft": "Ctrl+<；"
+  },
+  {
+    "id": 1669,
+    "domain": "maya",
+    "english": "Ctrl+>",
+    "error": "No Chinese translation returned",
+    "draft": "Ctrl+>；"
+  },
+  {
+    "id": 1671,
+    "domain": "maya",
+    "english": "Ctrl+~",
+    "error": "No Chinese translation returned",
+    "draft": "Ctrl+~"
+  },
+  {
+    "id": 1675,
+    "domain": "maya",
+    "english": "Curve degree: 2 / 5 / 7 (1 and 3 only)",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1680,
+    "domain": "maya",
+    "english": "Custom Normals Modal Map",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1681,
+    "domain": "maya",
+    "english": "Cycles",
+    "error": "No Chinese translation returned",
+    "draft": "zxqph000qxz"
+  },
+  {
+    "id": 1684,
+    "domain": "maya",
+    "english": "Decompose near object",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1695,
+    "domain": "maya",
+    "english": "Delta Translate",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1701,
+    "domain": "maya",
+    "english": "DiskLight",
+    "error": "No Chinese translation returned",
+    "draft": "DiskLight"
+  },
+  {
+    "id": 1704,
+    "domain": "maya",
+    "english": "Display Film Gate Mask",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1705,
+    "domain": "maya",
+    "english": "Display Local Axis",
+    "error": "Unresolved translation placeholder",
+    "draft": "显示本地轴\n显示器ZXQPH000QXZ（正面）\n显示ZXQPH000QXZ （ZXQPH001QXZ）\n显示ZXQPH000QXZ失真"
+  },
+  {
+    "id": 1706,
+    "domain": "maya",
+    "english": "Display Normals (Face)",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1707,
+    "domain": "maya",
+    "english": "Display Normals (Vertex)",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1708,
+    "domain": "maya",
+    "english": "Display UV distortion",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1715,
+    "domain": "maya",
+    "english": "Display the grid",
+    "error": "Unresolved translation placeholder",
+    "draft": "显示网格\n距离的平方是ZXQPH000QXZ自己的衰减：ZXQPH001QXZ， ZXQPH002QXZ和视口渲染它。"
+  },
+  {
+    "id": 1716,
+    "domain": "maya",
+    "english": "Distance squared is Blender's own falloff: Cycles, EEVEE and the viewport render it.",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1720,
+    "domain": "maya",
+    "english": "DollyTool",
+    "error": "No Chinese translation returned",
+    "draft": "DollyTool"
+  },
+  {
+    "id": 1721,
+    "domain": "maya",
+    "english": "Dopesheet",
+    "error": "No Chinese translation returned",
+    "draft": "Dopesheet"
+  },
+  {
+    "id": 1722,
+    "domain": "maya",
+    "english": "Dopesheet Generic",
+    "error": "No Chinese translation returned",
+    "draft": "Dopesheet Generic"
+  },
+  {
+    "id": 1730,
+    "domain": "maya",
+    "english": "Drag weights along the direction of your stroke",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1731,
+    "domain": "maya",
+    "english": "Draw Sharp",
+    "error": "No Chinese translation returned",
+    "draft": "Draw Sharp"
+  },
+  {
+    "id": 1725,
+    "domain": "maya",
+    "english": "Drag in the viewport to paint a linear weight gradient",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1726,
+    "domain": "maya",
+    "english": "Drag in the viewport to paint a radial weight gradient",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1741,
+    "domain": "maya",
+    "english": "Dropoff: 4.0 (Maya weighs an unlocked influence by distance; the kit adds it at 0)",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1742,
+    "domain": "maya",
+    "english": "Dual Quaternion",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1744,
+    "domain": "maya",
+    "english": "Duplicate Layer (No Animation)",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1748,
+    "domain": "maya",
+    "english": "EPCurveTool",
+    "error": "No Chinese translation returned",
+    "draft": "EPCurveTool"
+  },
+  {
+    "id": 1750,
+    "domain": "maya",
+    "english": "Each vertex slides the same fraction of its own side edge",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1751,
+    "domain": "maya",
+    "english": "Each vertex takes the weights of the closest point in the file",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1752,
+    "domain": "maya",
+    "english": "Edge ring, then one loop through it",
+    "error": "Unresolved translation placeholder",
+    "draft": "边环，然后一个环通过它\n编辑ZXQPH000QXZ >；连接"
+  },
+  {
+    "id": 1753,
+    "domain": "maya",
+    "english": "Edit Mesh > Connect",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1761,
+    "domain": "maya",
+    "english": "Emit Specular",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1772,
+    "domain": "maya",
+    "english": "Erase Target",
+    "error": "Unresolved translation placeholder",
+    "draft": "擦除目标\n错误：ZXQPH000QXZ："
+  },
+  {
+    "id": 1773,
+    "domain": "maya",
+    "english": "Error: Python: ",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1774,
+    "domain": "maya",
+    "english": "Esc",
+    "error": "Unresolved translation placeholder",
+    "draft": "Esc\n每个ZXQPH000QXZ句柄（后面是空的ZXQPH001QXZ约束）"
+  },
+  {
+    "id": 1775,
+    "domain": "maya",
+    "english": "Every IK handle (the empties IK constraints follow)",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1778,
+    "domain": "maya",
+    "english": "Every curve that drives a wire deformer",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1779,
+    "domain": "maya",
+    "english": "Every mesh with cloth",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1780,
+    "domain": "maya",
+    "english": "Every object with a particle system",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1781,
+    "domain": "maya",
+    "english": "Every object with an nParticle system",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1782,
+    "domain": "maya",
+    "english": "Every passive collider",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1783,
+    "domain": "maya",
+    "english": "Every rigid body",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1784,
+    "domain": "maya",
+    "english": "Every selected component gets the same crease value",
+    "error": "Unresolved translation placeholder",
+    "draft": "每个选定的组件获得相同的折痕值\n每个ZXQPH000QXZ滑动相同的距离"
+  },
+  {
+    "id": 1785,
+    "domain": "maya",
+    "english": "Every vertex slides the same distance",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1801,
+    "domain": "maya",
+    "english": "Extract Non-Layered Animation for Selected Objects",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1819,
+    "domain": "maya",
+    "english": "Fill Tool Modal Map",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1803,
+    "domain": "maya",
+    "english": "Eyedropper Modal Map",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1806,
+    "domain": "maya",
+    "english": "FBX (.fbx)",
+    "error": "No Chinese translation returned",
+    "draft": "ZXQPH000QXZ （.fbx）"
+  },
+  {
+    "id": 1807,
+    "domain": "maya",
+    "english": "FXCaching",
+    "error": "No Chinese translation returned",
+    "draft": "FXCaching"
+  },
+  {
+    "id": 1808,
+    "domain": "maya",
+    "english": "Factor_Float",
+    "error": "No Chinese translation returned",
+    "draft": "Factor_Float"
+  },
+  {
+    "id": 1823,
+    "domain": "maya",
+    "english": "Film gate (Blender: camera sensor frame)",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1839,
+    "domain": "maya",
+    "english": "Four View: top, persp, front and side. ",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1857,
+    "domain": "maya",
+    "english": "Gear Spacing",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1858,
+    "domain": "maya",
+    "english": "Gear Tip",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1853,
+    "domain": "maya",
+    "english": "Gate Mask Opacity",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1883,
+    "domain": "maya",
+    "english": "Gravity and Wind",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1884,
+    "domain": "maya",
+    "english": "Grease Pencil Brush Stroke",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1885,
+    "domain": "maya",
+    "english": "Grease Pencil Fill Tool",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1896,
+    "domain": "maya",
+    "english": "Harmonic mean of the input weights, 0 when any is 0 or less",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1907,
+    "domain": "maya",
+    "english": "Highlight backfaces",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1908,
+    "domain": "maya",
+    "english": "Hip",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1915,
+    "domain": "maya",
+    "english": "IKHandleTool",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1919,
+    "domain": "maya",
+    "english": "Image Editor Tool: Mask, Box",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1920,
+    "domain": "maya",
+    "english": "Image Editor Tool: Mask, Circle",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1921,
+    "domain": "maya",
+    "english": "Image Editor Tool: Mask, Cursor",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1922,
+    "domain": "maya",
+    "english": "Image Editor Tool: Mask, Move",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1930,
+    "domain": "maya",
+    "english": "Image Editor Tool: Mask, Select Lasso (fallback)",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1931,
+    "domain": "maya",
+    "english": "Image Editor Tool: Mask, Transform",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1932,
+    "domain": "maya",
+    "english": "Image Editor Tool: Mask, Tweak",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1933,
+    "domain": "maya",
+    "english": "Image Editor Tool: Mask, Tweak (fallback)",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1935,
+    "domain": "maya",
+    "english": "Image Editor Tool: Uv, Cursor",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1936,
+    "domain": "maya",
+    "english": "Image Editor Tool: Uv, Grab",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1937,
+    "domain": "maya",
+    "english": "Image Editor Tool: Uv, Move",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1923,
+    "domain": "maya",
+    "english": "Image Editor Tool: Mask, Rotate",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1924,
+    "domain": "maya",
+    "english": "Image Editor Tool: Mask, Scale",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1925,
+    "domain": "maya",
+    "english": "Image Editor Tool: Mask, Select Box",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1926,
+    "domain": "maya",
+    "english": "Image Editor Tool: Mask, Select Box (fallback)",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1927,
+    "domain": "maya",
+    "english": "Image Editor Tool: Mask, Select Circle",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1928,
+    "domain": "maya",
+    "english": "Image Editor Tool: Mask, Select Circle (fallback)",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1929,
+    "domain": "maya",
+    "english": "Image Editor Tool: Mask, Select Lasso",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1938,
+    "domain": "maya",
+    "english": "Image Editor Tool: Uv, Pinch",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1939,
+    "domain": "maya",
+    "english": "Image Editor Tool: Uv, Relax",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1940,
+    "domain": "maya",
+    "english": "Image Editor Tool: Uv, Rip Region",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1941,
+    "domain": "maya",
+    "english": "Image Editor Tool: Uv, Rotate",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1942,
+    "domain": "maya",
+    "english": "Image Editor Tool: Uv, Scale",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1943,
+    "domain": "maya",
+    "english": "Image Editor Tool: Uv, Select Box",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1944,
+    "domain": "maya",
+    "english": "Image Editor Tool: Uv, Select Box (fallback)",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1945,
+    "domain": "maya",
+    "english": "Image Editor Tool: Uv, Select Circle",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1946,
+    "domain": "maya",
+    "english": "Image Editor Tool: Uv, Select Circle (fallback)",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1947,
+    "domain": "maya",
+    "english": "Image Editor Tool: Uv, Select Lasso",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1948,
+    "domain": "maya",
+    "english": "Image Editor Tool: Uv, Select Lasso (fallback)",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1949,
+    "domain": "maya",
+    "english": "Image Editor Tool: Uv, Tweak",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1950,
+    "domain": "maya",
+    "english": "Image Editor Tool: Uv, Tweak (fallback)",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1962,
+    "domain": "maya",
+    "english": "Individual channels (Red / Green / Blue / Alpha each on its own)",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1973,
+    "domain": "maya",
+    "english": "Insert a key on the selected curves without changing their shape (Maya Alt+I)",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1974,
+    "domain": "maya",
+    "english": "Insert a key on the translate curves, keeping their shape (Maya Ctrl+Shift+W)",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1970,
+    "domain": "maya",
+    "english": "Insert Edge Loop: drag to slide the loop, release to keep it, Esc / right-click to cancel",
+    "error": "Unresolved translation placeholder",
+    "draft": "插入边缘循环：拖动以滑动循环，松开以保持循环，Esc /右键单击以取消循环\n在旋转的ZXQPH001QXZ上插入一个ZXQPH000QXZ，保持其形状（ZXQPH002QXZ Ctrl+Shift+E）\n在刻度ZXQPH001QXZ上插入一个ZXQPH000QXZ，保持其形状（ZXQPH002QXZ Ctrl+Shift+R）"
+  },
+  {
+    "id": 1971,
+    "domain": "maya",
+    "english": "Insert a key on the rotate curves, keeping their shape (Maya Ctrl+Shift+E)",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1972,
+    "domain": "maya",
+    "english": "Insert a key on the scale curves, keeping their shape (Maya Ctrl+Shift+R)",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1980,
+    "domain": "maya",
+    "english": "Interpolate Tool Modal Map",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1986,
+    "domain": "maya",
+    "english": "Isolate select",
+    "error": "Unresolved translation placeholder",
+    "draft": "隔离选择\n隔离选择集：ZXQPH000QXZ faceZXQPH001QXZZXQPH002QXZ"
+  },
+  {
+    "id": 1987,
+    "domain": "maya",
+    "english": "Isolate select set: %d face%s%s",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1988,
+    "domain": "maya",
+    "english": "It has non-zero rotations.",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1989,
+    "domain": "maya",
+    "english": "Jiggle Weight",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1992,
+    "domain": "maya",
+    "english": "JointTool",
+    "error": "Unresolved translation placeholder",
+    "draft": "JointTool\n|接头，ZXQPH000QXZ和ZXQPH001QXZ\n保持变形ZXQPH000QXZ某区域刚性（ZXQPH001QXZ变形>；凝固）"
+  },
+  {
+    "id": 1993,
+    "domain": "maya",
+    "english": "Joints, Curves and Meshes",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 1994,
+    "domain": "maya",
+    "english": "Keep a region of the deformed mesh rigid (Maya Deform > Solidify)",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2002,
+    "domain": "maya",
+    "english": "Keep the open scene",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2010,
+    "domain": "maya",
+    "english": "Knot spacing: Uniform (Chord length not in the tool)",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2011,
+    "domain": "maya",
+    "english": "Lasso Tool (lassoSelect)",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2030,
+    "domain": "maya",
+    "english": "Linear blend of the joint matrices",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2054,
+    "domain": "maya",
+    "english": "Look along a world axis",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2062,
+    "domain": "maya",
+    "english": "Manip",
+    "error": "No Chinese translation returned",
+    "draft": "Manip"
+  },
+  {
+    "id": 2088,
+    "domain": "maya",
+    "english": "Maya Alt+H",
+    "error": "No Chinese translation returned",
+    "draft": "ZXQPH000QXZ Alt+H"
+  },
+  {
+    "id": 2101,
+    "domain": "maya",
+    "english": "Maya Ctrl+Shift+H",
+    "error": "No Chinese translation returned",
+    "draft": "ZXQPH000QXZ Ctrl+Shift+H"
+  },
+  {
+    "id": 2106,
+    "domain": "maya",
+    "english": "Maya Curves > Scale Curvature (factory 1.1, max curvature 0.8)",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2096,
+    "domain": "maya",
+    "english": "Maya Channel Box and Layer Editor",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2100,
+    "domain": "maya",
+    "english": "Maya Ctrl+H",
+    "error": "No Chinese translation returned",
+    "draft": "ZXQPH000QXZ Ctrl+H"
+  },
+  {
+    "id": 2111,
+    "domain": "maya",
+    "english": "Maya Decay Rate No Decay renders in Cycles; EEVEE and the viewport get darker with the square of the distance (matched to Maya at 10 units).",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2117,
+    "domain": "maya",
+    "english": "Maya F10",
+    "error": "No Chinese translation returned",
+    "draft": "zxqph000qxz f10"
+  },
+  {
+    "id": 2118,
+    "domain": "maya",
+    "english": "Maya F11",
+    "error": "No Chinese translation returned",
+    "draft": "zxqph000qxz f11"
+  },
+  {
+    "id": 2120,
+    "domain": "maya",
+    "english": "Maya F9",
+    "error": "No Chinese translation returned",
+    "draft": "zxqph000qxz f9"
+  },
+  {
+    "id": 2129,
+    "domain": "maya",
+    "english": "Maya Shift+H",
+    "error": "No Chinese translation returned",
+    "draft": "ZXQPH000QXZ Shift+H"
+  },
+  {
+    "id": 2154,
+    "domain": "maya",
+    "english": "Maya bool",
+    "error": "No Chinese translation returned",
+    "draft": "ZXQPH000QXZ bool"
+  },
+  {
+    "id": 2161,
+    "domain": "maya",
+    "english": "Maya ikSCsolver: Blender IK whose chain end follows the handle's rotation",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2169,
+    "domain": "maya",
+    "english": "Maya overrideRGBColors",
+    "error": "No Chinese translation returned",
+    "draft": "ZXQPH000QXZ overrideRGBColors"
+  },
+  {
+    "id": 2182,
+    "domain": "maya",
+    "english": "Maya twist1: Simple Deform Twist",
+    "error": "No Chinese translation returned",
+    "draft": "ZXQPH000QXZ twist1: Simple Deform Twist"
+  },
+  {
+    "id": 2183,
+    "domain": "maya",
+    "english": "Maya {window.title}",
+    "error": "No Chinese translation returned",
+    "draft": "zxqph001qxz zxqph000qxz"
+  },
+  {
+    "id": 2186,
+    "domain": "maya",
+    "english": "Maya's first Label Shoulder item: Shoulder / Elbow / Hand / Finger down the limb",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2187,
+    "domain": "maya",
+    "english": "Maya's settings for this command have no Blender equivalent: it runs with Blender's own.",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2188,
+    "domain": "maya",
+    "english": "Maya-style",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2189,
+    "domain": "maya",
+    "english": "Maya: Ctrl+drag sews",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2190,
+    "domain": "maya",
+    "english": "Maya: brightness / distance",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2191,
+    "domain": "maya",
+    "english": "Maya: brightness / distance cubed",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2195,
+    "domain": "maya",
+    "english": "Maya_Workflow_Kit",
+    "error": "No Chinese translation returned",
+    "draft": "Maya_Workflow_Kit"
+  },
+  {
+    "id": 2210,
+    "domain": "maya",
+    "english": "Method: Range (cutKey has no area option)",
+    "error": "Unresolved translation placeholder",
+    "draft": "方法：Range （cutKey没有区域选项）\n方法：Walk Contours / ZXQPH000QXZ投影（试剂盒遵循四边形网格）"
+  },
+  {
+    "id": 2211,
+    "domain": "maya",
+    "english": "Method: Walk Contours / NURBS Projection (the kit follows the quad grid)",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2239,
+    "domain": "maya",
+    "english": "Move layer down (moveLayerDown)",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2256,
+    "domain": "maya",
+    "english": "NTSC 4d",
+    "error": "No Chinese translation returned",
+    "draft": "NTSC 4d"
+  },
+  {
+    "id": 2301,
+    "domain": "maya",
+    "english": "Normalize isoparms (NURBS)",
+    "error": "No Chinese translation returned",
+    "draft": "Normalize isoparm （ZXQPH000QXZ）"
+  },
+  {
+    "id": 2302,
+    "domain": "maya",
+    "english": "Normalize: Before / After / Not (Before)",
+    "error": "No Chinese translation returned",
+    "draft": "Normalize: Before / After / Not （Before）"
+  },
+  {
+    "id": 2303,
+    "domain": "maya",
+    "english": "Normalized view",
+    "error": "Unresolved translation placeholder",
+    "draft": "规范化视图\n不在这个ZXQPH000QXZ编辑器中。"
+  },
+  {
+    "id": 2304,
+    "domain": "maya",
+    "english": "Not in this Blender editor.",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2309,
+    "domain": "maya",
+    "english": "OBJ (.obj)",
+    "error": "No Chinese translation returned",
+    "draft": "ZXQPH000QXZ （.obj）"
+  },
+  {
+    "id": 2383,
+    "domain": "maya",
+    "english": "Pie",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2386,
+    "domain": "maya",
+    "english": "Pinky Toe",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2397,
+    "domain": "maya",
+    "english": "Pose in the Channel Box, then Key",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2415,
+    "domain": "maya",
+    "english": "Preview Tool: Select Box (fallback)",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2422,
+    "domain": "maya",
+    "english": "Previous Skin Paint Mode",
+    "error": "Unresolved translation placeholder",
+    "draft": "上一个ZXQPH000QXZ油漆模式\n主轴（总是ZXQPH000QXZ的Y = ZXQPH001QXZ X）"
+  },
+  {
+    "id": 2423,
+    "domain": "maya",
+    "english": "Primary Axis (always the bone's Y = Maya X)",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2425,
+    "domain": "maya",
+    "english": "Primitive Tool Modal Map",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2434,
+    "domain": "maya",
+    "english": "QuadDrawTool",
+    "error": "No Chinese translation returned",
+    "draft": "QuadDrawTool"
+  },
+  {
+    "id": 2440,
+    "domain": "maya",
+    "english": "QuickRigEditor",
+    "error": "No Chinese translation returned",
+    "draft": "QuickRigEditor"
+  },
+  {
+    "id": 2446,
+    "domain": "maya",
+    "english": "Raw",
+    "error": "No Chinese translation returned",
+    "draft": "Raw"
+  },
+  {
+    "id": 2468,
+    "domain": "maya",
+    "english": "Remove Simple Deform / Wave / Cast modifiers",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2485,
+    "domain": "maya",
+    "english": "Remove the faces of the selected UVs from the isolate select set",
+    "error": "Unresolved translation placeholder",
+    "draft": "从隔离选择集中删除所选ZXQPH000QXZ的面\n拆下套件线ZXQPH000QXZ及其基线（ZXQPH001QXZ保持）"
+  },
+  {
+    "id": 2486,
+    "domain": "maya",
+    "english": "Remove the kit wire deformers and their base wires (the curves stay)",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2511,
+    "domain": "maya",
+    "english": "Result_Color",
+    "error": "No Chinese translation returned",
+    "draft": "Result_Color"
+  },
+  {
+    "id": 2530,
+    "domain": "maya",
+    "english": "S Divisions",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2551,
+    "domain": "maya",
+    "english": "Select Tool (aselect)",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2562,
+    "domain": "maya",
+    "english": "Select by hierarchy",
+    "error": "Unresolved translation placeholder",
+    "draft": "按层次选择\nZXQPH000QXZ选择ZXQPH001QXZ型（电枢）"
+  },
+  {
+    "id": 2563,
+    "domain": "maya",
+    "english": "Select by joint object type (armatures)",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2570,
+    "domain": "maya",
+    "english": "Select meshes with the same vertex count as {ob.name}",
+    "error": "A protected placeholder was lost",
+    "draft": "选择与ZXQPH000QXZ计数相同的ZXQPH002QXZ"
+  },
+  {
+    "id": 2576,
+    "domain": "maya",
+    "english": "Select the creased edges with Select > Select Similar > Crease first",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2587,
+    "domain": "maya",
+    "english": "SelectEdgeLoop; DeleteEdge",
+    "error": "No Chinese translation returned",
+    "draft": "selectedgelop；DeleteEdge"
+  },
+  {
+    "id": 2588,
+    "domain": "maya",
+    "english": "SelectEdgeLoop; polyDuplicateEdge (Blender: Offset Edge Loop)",
+    "error": "No Chinese translation returned",
+    "draft": "selectedgelloop；polyDuplicateEdge （ZXQPH000QXZ: Offset Edge Loop）"
+  },
+  {
+    "id": 2589,
+    "domain": "maya",
+    "english": "SelectEdgeRing; polyCollapseEdge",
+    "error": "No Chinese translation returned",
+    "draft": "selectedgeering；polyCollapseEdge"
+  },
+  {
+    "id": 2605,
+    "domain": "maya",
+    "english": "Sequencer Tool: Select Lasso (fallback)",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2617,
+    "domain": "maya",
+    "english": "SetCutSewUVTool",
+    "error": "No Chinese translation returned",
+    "draft": "SetCutSewUVTool"
+  },
+  {
+    "id": 2621,
+    "domain": "maya",
+    "english": "Several skin clusters: FBX and game engines keep one skin per mesh.",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2627,
+    "domain": "maya",
+    "english": "Sheen Tint",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2630,
+    "domain": "maya",
+    "english": "Shift + LMB",
+    "error": "No Chinese translation returned",
+    "draft": "Shift + LMB"
+  },
+  {
+    "id": 2631,
+    "domain": "maya",
+    "english": "Shift + MMB",
+    "error": "No Chinese translation returned",
+    "draft": "Shift + MMB"
+  },
+  {
+    "id": 2641,
+    "domain": "maya",
+    "english": "Show or hide the Channel Box / Layer Editor",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2643,
+    "domain": "maya",
+    "english": "Show or hide the Modeling Toolkit",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2646,
+    "domain": "maya",
+    "english": "Show the Compass",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2653,
+    "domain": "maya",
+    "english": "ShowShadingGroupAttributeEditor",
+    "error": "No Chinese translation returned",
+    "draft": "showshadinggrouattributeeditor"
+  },
+  {
+    "id": 2668,
+    "domain": "maya",
+    "english": "Slide Edge: select edges, then middle-drag to slide them",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2680,
+    "domain": "maya",
+    "english": "Smoothness: 10.0 (Maya's smoothCurve; the kit runs Blender's curve Smooth)",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2683,
+    "domain": "maya",
+    "english": "Snap to curves (hold C)",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2694,
+    "domain": "maya",
+    "english": "SpaceClipEditor",
+    "error": "No Chinese translation returned",
+    "draft": "SpaceClipEditor"
+  },
+  {
+    "id": 2695,
+    "domain": "maya",
+    "english": "SpaceDopeSheetEditor",
+    "error": "No Chinese translation returned",
+    "draft": "spacedopesheetitor"
+  },
+  {
+    "id": 2696,
+    "domain": "maya",
+    "english": "SpaceGraphEditor",
+    "error": "No Chinese translation returned",
+    "draft": "spacegrapheitor"
+  },
+  {
+    "id": 2698,
+    "domain": "maya",
+    "english": "SpaceTextEditor",
+    "error": "No Chinese translation returned",
+    "draft": "spacetextteditor"
+  },
+  {
+    "id": 2722,
+    "domain": "maya",
+    "english": "Standard Modal Map",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2741,
+    "domain": "maya",
+    "english": "SunLight",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2752,
+    "domain": "maya",
+    "english": "SyntaxError: ",
+    "error": "No Chinese translation returned",
+    "draft": "SyntaxError："
+  },
+  {
+    "id": 2754,
+    "domain": "maya",
+    "english": "Tab + LMB",
+    "error": "No Chinese translation returned",
+    "draft": "Tab + LMB"
+  },
+  {
+    "id": 2755,
+    "domain": "maya",
+    "english": "Tab + MMB",
+    "error": "No Chinese translation returned",
+    "draft": "Tab + MMB"
+  },
+  {
+    "id": 2758,
+    "domain": "maya",
+    "english": "Targa",
+    "error": "No Chinese translation returned",
+    "draft": "Targa"
+  },
+  {
+    "id": 2759,
+    "domain": "maya",
+    "english": "Targa 486 (tga)",
+    "error": "No Chinese translation returned",
+    "draft": "Targa 486 （tga）"
+  },
+  {
+    "id": 2760,
+    "domain": "maya",
+    "english": "Targa NTSC (tga)",
+    "error": "No Chinese translation returned",
+    "draft": "Targa NTSC （tga）"
+  },
+  {
+    "id": 2762,
+    "domain": "maya",
+    "english": "Target Inflation",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2745,
+    "domain": "maya",
+    "english": "Surface degree: 2 / 5 / 7 (1 Linear and 3 Cubic only)",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2746,
+    "domain": "maya",
+    "english": "SurfaceCurve",
+    "error": "No Chinese translation returned",
+    "draft": "SurfaceCurve"
+  },
+  {
+    "id": 2771,
+    "domain": "maya",
+    "english": "TextCurve",
+    "error": "No Chinese translation returned",
+    "draft": "TextCurve"
+  },
+  {
+    "id": 2773,
+    "domain": "maya",
+    "english": "The Input Line transforms objects, or mesh components in edit mode.",
+    "error": "Unresolved translation placeholder",
+    "draft": "输入线在编辑模式下转换ZXQPH000QXZ或ZXQPH001QXZ组件。\nZXQPH001QXZ的ZXQPH000QXZ （ZXQPH002QXZ编辑器，ZXQPH003QXZ同步ZXQPH004QXZ off）"
+  },
+  {
+    "id": 2774,
+    "domain": "maya",
+    "english": "The UVs of the selection (UV Editor, UV Sync Selection off)",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2776,
+    "domain": "maya",
+    "english": "The bone's X axis",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2777,
+    "domain": "maya",
+    "english": "The bone's Z axis",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2799,
+    "domain": "maya",
+    "english": "The open border edges of the selected shells",
+    "error": "Unresolved translation placeholder",
+    "draft": "所选外壳的开放边界边缘\n渲染器的设置（ZXQPH000QXZ的渲染属性）"
+  },
+  {
+    "id": 2800,
+    "domain": "maya",
+    "english": "The renderer's settings (Blender's Render properties)",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2794,
+    "domain": "maya",
+    "english": "The loop cuts every ring edge at the same fraction",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2804,
+    "domain": "maya",
+    "english": "The targets' placement in the scene counts too",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2807,
+    "domain": "maya",
+    "english": "The view's camera, else the kit persp camera (Maya persp)",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2809,
+    "domain": "maya",
+    "english": "There",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2839,
+    "domain": "maya",
+    "english": "TumbleTool",
+    "error": "No Chinese translation returned",
+    "draft": "TumbleTool"
+  },
+  {
+    "id": 2847,
+    "domain": "maya",
+    "english": "U:  %s V:  %s",
+    "error": "No Chinese translation returned",
+    "draft": "u: zxqph000qxz v: zxqph001qxz"
+  },
+  {
+    "id": 2849,
+    "domain": "maya",
+    "english": "USD (.usd*)",
+    "error": "No Chinese translation returned",
+    "draft": "ZXQPH000QXZ （.usd*）"
+  },
+  {
+    "id": 2860,
+    "domain": "maya",
+    "english": "Unable to find the match weight set name '{}' to given deformer.",
+    "error": "Unresolved translation placeholder",
+    "draft": "无法找到与给定的ZXQPH001QXZ匹配的权重集名称“ZXQPH000QXZ”。\n在驱动的zxqph000qxz通道下还列出其驱动的ZXQPH001QXZ ZXQPH002QXZ和驱动程序自己的ZXQPH003QXZ"
+  },
+  {
+    "id": 2861,
+    "domain": "maya",
+    "english": "Under a driven-key channel also list its driven key curve and the driver's own curve",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2853,
+    "domain": "maya",
+    "english": "UVEditing",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2858,
+    "domain": "maya",
+    "english": "Ultra",
+    "error": "No Chinese translation returned",
+    "draft": "Ultra"
+  },
+  {
+    "id": 2916,
+    "domain": "maya",
+    "english": "View3D Dolly Modal",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2941,
+    "domain": "maya",
+    "english": "Weights blend the joint matrices (Maya factory)",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2944,
+    "domain": "maya",
+    "english": "Width and height of your own",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2951,
+    "domain": "maya",
+    "english": "World up type: Object up / Object rotation up",
+    "error": "Unresolved translation placeholder",
+    "draft": "ZXQPH000QXZ向上类型：ZXQPH001QXZ向上/ ZXQPH002QXZ旋转向上\nZXQPH000QXZ向上矢量(0,1,0)= ZXQPH001QXZ ZXQPH002QXZ Z （ZXQPH003QXZ factory）"
+  },
+  {
+    "id": 2952,
+    "domain": "maya",
+    "english": "World up vector (0, 1, 0) = Blender world Z (Maya factory)",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2963,
+    "domain": "maya",
+    "english": "perspShape",
+    "error": "No Chinese translation returned",
+    "draft": "perspShape"
+  },
+  {
+    "id": 2964,
+    "domain": "maya",
+    "english": "polyAutoProj",
+    "error": "No Chinese translation returned",
+    "draft": "polyautoproject"
+  },
+  {
+    "id": 2965,
+    "domain": "maya",
+    "english": "polyAverageNormal -distance {self.distance:g}",
+    "error": "No Chinese translation returned",
+    "draft": "polyaverage - normal -distance ZXQPH000QXZ"
+  },
+  {
+    "id": 2966,
+    "domain": "maya",
+    "english": "polyBevel",
+    "error": "No Chinese translation returned",
+    "draft": "polyBevel"
+  },
+  {
+    "id": 2967,
+    "domain": "maya",
+    "english": "polyColorMod",
+    "error": "No Chinese translation returned",
+    "draft": "polyColorMod"
+  },
+  {
+    "id": 2968,
+    "domain": "maya",
+    "english": "polyColorPerVertex",
+    "error": "No Chinese translation returned",
+    "draft": "polyColorPerVertex"
+  },
+  {
+    "id": 2969,
+    "domain": "maya",
+    "english": "polyExtrudeEdge",
+    "error": "No Chinese translation returned",
+    "draft": "polyextrtrudeedge"
+  },
+  {
+    "id": 2970,
+    "domain": "maya",
+    "english": "polyExtrudeFace",
+    "error": "No Chinese translation returned",
+    "draft": "polyExtrudeFace"
+  },
+  {
+    "id": 2971,
+    "domain": "maya",
+    "english": "polyExtrudeVertex",
+    "error": "No Chinese translation returned",
+    "draft": "polyExtrudeVertex"
+  },
+  {
+    "id": 2972,
+    "domain": "maya",
+    "english": "polyGeoSampler",
+    "error": "No Chinese translation returned",
+    "draft": "polyGeoSampler"
+  },
+  {
+    "id": 2973,
+    "domain": "maya",
+    "english": "polyNormalPerVertex -xyz {self.x:g} {self.y:g} {self.z:g}",
+    "error": "No Chinese translation returned",
+    "draft": "polyNormalPerVertex -xyz ZXQPH000QXZ ZXQPH001QXZ ZXQPH002QXZ"
+  },
+  {
+    "id": 2957,
+    "domain": "maya",
+    "english": "Xform",
+    "error": "No Chinese translation returned",
+    "draft": "Xform"
+  },
+  {
+    "id": 2958,
+    "domain": "maya",
+    "english": "Xg",
+    "error": "No Chinese translation returned",
+    "draft": "Xg"
+  },
+  {
+    "id": 2981,
+    "domain": "maya",
+    "english": "{ae_layout.light_type(ob.data)}:",
+    "error": "No Chinese translation returned",
+    "draft": "zxqph000qxz；"
+  },
+  {
+    "id": 2985,
+    "domain": "maya",
+    "english": "{entry[2]}:",
+    "error": "No Chinese translation returned",
+    "draft": "zxqph000qxz；"
+  },
+  {
+    "id": 2986,
+    "domain": "maya",
+    "english": "{key}: {what}",
+    "error": "No Chinese translation returned",
+    "draft": "zxqph000qxz: zxqph001qxz"
+  },
+  {
+    "id": 2987,
+    "domain": "maya",
+    "english": "{label}  ({blender})",
+    "error": "No Chinese translation returned",
+    "draft": "zxqph000qxz （zxqph001qxz）"
+  },
+  {
+    "id": 2988,
+    "domain": "maya",
+    "english": "{label} {'on' if getattr(prefs, name) else 'off'}",
+    "error": "No Chinese translation returned",
+    "draft": "zxqph000qxz zxqph001qxz"
+  },
+  {
+    "id": 2989,
+    "domain": "maya",
+    "english": "{name}",
+    "error": "No Chinese translation returned",
+    "draft": "zxqph000qxz"
+  },
+  {
+    "id": 2990,
+    "domain": "maya",
+    "english": "{name} ({ae.nice_type(mtype)})",
+    "error": "No Chinese translation returned",
+    "draft": "zxqph000qxz （zxqph001qxz）"
+  },
+  {
+    "id": 2974,
+    "domain": "maya",
+    "english": "reorderDeformers {self.first} {self.second} {ob.name}",
+    "error": "Translated row index missing"
+  },
+  {
+    "id": 2975,
+    "domain": "maya",
+    "english": "setAttr {', '.join(names)} normalizeWeights {MAYA_VALUE[self.mode]}",
+    "error": "No Chinese translation returned",
+    "draft": "setAttr ZXQPH000QXZ normalizeWeights ZXQPH001QXZ"
+  },
+  {
+    "id": 2977,
+    "domain": "maya",
+    "english": "{'Loaded' if a == 'LOAD' else 'Unloaded'} {rn}",
+    "error": "No Chinese translation returned",
+    "draft": "zxqph000qxz zxqph001qxz"
+  },
+  {
+    "id": 2978,
+    "domain": "maya",
+    "english": "{'Loaded' if self.action == 'LOAD_RELATED' else 'Unloaded'} {', '.join((node_name(r) for r in refs))}",
+    "error": "No Chinese translation returned",
+    "draft": "zxqph000qxz zxqph001qxz"
+  },
+  {
+    "id": 2979,
+    "domain": "maya",
+    "english": "{'Locked' if a == 'LOCK' else 'Unlocked'} {rn}",
+    "error": "No Chinese translation returned",
+    "draft": "zxqph000qxz zxqph001qxz"
+  },
+  {
+    "id": 2980,
+    "domain": "maya",
+    "english": "{HANDLE}  {PANE_LABELS[name]}  {HANDLE}",
+    "error": "No Chinese translation returned",
+    "draft": "zxqph000qxz zxqph001qxz zxqph002qxz"
+  },
+  {
+    "id": 2991,
+    "domain": "maya",
+    "english": "{name}:",
+    "error": "No Chinese translation returned",
+    "draft": "zxqph000qxz；"
+  },
+  {
+    "id": 3001,
+    "domain": "maya",
+    "english": "{rec.name}: {rec.spec.labels[field]}",
+    "error": "No Chinese translation returned",
+    "draft": "zxqph000qxz: zxqph001qxz"
+  },
+  {
+    "id": 3002,
+    "domain": "maya",
+    "english": "{refs.node_name(ref)}  {refs.file_label(ref)}{lock}",
+    "error": "No Chinese translation returned",
+    "draft": "zxqph000qxz zxqph001qxzzxqph002qxz"
+  },
+  {
+    "id": 3003,
+    "domain": "maya",
+    "english": "{rn}: {exc}",
+    "error": "No Chinese translation returned",
+    "draft": "zxqph000qxz: zxqph001qxz"
+  },
+  {
+    "id": 3004,
+    "domain": "maya",
+    "english": "{row['command']}: {row['maya_key']}",
+    "error": "No Chinese translation returned",
+    "draft": "zxqph000qxz: zxqph001qxz"
+  },
+  {
+    "id": 3005,
+    "domain": "maya",
+    "english": "{row['command']}: {text}",
+    "error": "No Chinese translation returned",
+    "draft": "zxqph000qxz: zxqph001qxz"
+  },
+  {
+    "id": 3006,
+    "domain": "maya",
+    "english": "{self.action.title()}d {n} node{'s' if n != 1 else ''}",
+    "error": "No Chinese translation returned",
+    "draft": "ZXQPH000QXZd ZXQPH001QXZ nodeZXQPH002QXZ"
+  },
+  {
+    "id": 3007,
+    "domain": "maya",
+    "english": "{self.type.replace('_', ' ').title()}: {n}",
+    "error": "No Chinese translation returned",
+    "draft": "zxqph000qxz: zxqph001qxz"
+  },
+  {
+    "id": 3009,
+    "domain": "maya",
+    "english": "{tex.name} -> {mat.name}.{_maya_attr(self.socket)}",
+    "error": "No Chinese translation returned",
+    "draft": "ZXQPH000QXZ -> ZXQPH001QXZ。ZXQPH002QXZ"
+  },
+  {
+    "id": 3010,
+    "domain": "maya",
+    "english": "{verb} {os.path.basename(path)}",
+    "error": "No Chinese translation returned",
+    "draft": "zxqph000qxz zxqph001qxz"
+  },
+  {
+    "id": 3011,
+    "domain": "maya",
+    "english": "{w:.3f}",
+    "error": "No Chinese translation returned",
+    "draft": "zxqph000qxz"
+  }
+]

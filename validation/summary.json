@@ -1,0 +1,212 @@
+{
+  "release": "0.1.1",
+  "date": "2026-10-31",
+  "checks": {
+    "smoke-5.1.0.json": [
+      {
+        "name": "enable",
+        "ok": true
+      },
+      {
+        "name": "mode_cycles_preserve_scene",
+        "ok": true
+      },
+      {
+        "name": "services_retained_interaction_removed",
+        "ok": true
+      },
+      {
+        "name": "live_language_switch",
+        "ok": true
+      },
+      {
+        "name": "disable_cleanup",
+        "ok": true
+      },
+      {
+        "name": "enable_again",
+        "ok": true
+      },
+      {
+        "name": "disable_again",
+        "ok": true
+      }
+    ],
+    "smoke-5.2.2-LTS.json": [
+      {
+        "name": "enable",
+        "ok": true
+      },
+      {
+        "name": "mode_cycles_preserve_scene",
+        "ok": true
+      },
+      {
+        "name": "services_retained_interaction_removed",
+        "ok": true
+      },
+      {
+        "name": "live_language_switch",
+        "ok": true
+      },
+      {
+        "name": "disable_cleanup",
+        "ok": true
+      },
+      {
+        "name": "enable_again",
+        "ok": true
+      },
+      {
+        "name": "disable_again",
+        "ok": true
+      }
+    ],
+    "data-5.1.0.json": [
+      {
+        "name": "cross_mode_parametric_geometry_and_material",
+        "ok": true
+      },
+      {
+        "name": "maya_ik_evaluates_in_blender_and_max",
+        "ok": true
+      },
+      {
+        "name": "partial_initialization_rollback",
+        "ok": true
+      },
+      {
+        "name": "translation_context_and_user_data",
+        "ok": true
+      },
+      {
+        "name": "save_reopen_data",
+        "ok": true
+      },
+      {
+        "name": "full_teardown_baseline",
+        "ok": true
+      }
+    ],
+    "data-5.2.2-LTS.json": [
+      {
+        "name": "cross_mode_parametric_geometry_and_material",
+        "ok": true
+      },
+      {
+        "name": "maya_ik_evaluates_in_blender_and_max",
+        "ok": true
+      },
+      {
+        "name": "partial_initialization_rollback",
+        "ok": true
+      },
+      {
+        "name": "translation_context_and_user_data",
+        "ok": true
+      },
+      {
+        "name": "save_reopen_data",
+        "ok": true
+      },
+      {
+        "name": "full_teardown_baseline",
+        "ok": true
+      }
+    ],
+    "localization-5.1.0.json": [
+      {
+        "name": "native_dictionary_built_in_english",
+        "ok": true
+      },
+      {
+        "name": "source_metadata_stays_english",
+        "ok": true
+      },
+      {
+        "name": "additional_chinese_labels_and_safe_names",
+        "ok": true
+      },
+      {
+        "name": "actual_native_translation_registry",
+        "ok": true
+      },
+      {
+        "name": "dynamic_fields_and_language_roundtrip",
+        "ok": true
+      }
+    ],
+    "localization-5.2.2-LTS.json": [
+      {
+        "name": "native_dictionary_built_in_english",
+        "ok": true
+      },
+      {
+        "name": "source_metadata_stays_english",
+        "ok": true
+      },
+      {
+        "name": "additional_chinese_labels_and_safe_names",
+        "ok": true
+      },
+      {
+        "name": "actual_native_translation_registry",
+        "ok": true
+      },
+      {
+        "name": "dynamic_fields_and_language_roundtrip",
+        "ok": true
+      }
+    ],
+    "upstream-5.2.2-LTS.json": [
+      {
+        "name": "test_step129_marking_bounds.py:test_drag_down_the_list_past_a_submenu_row",
+        "ok": true
+      },
+      {
+        "name": "test_step129_marking_bounds.py:test_cascade_keeps_parent_rows_and_its_own_rows",
+        "ok": true
+      },
+      {
+        "name": "test_step129_marking_bounds.py:test_cascade_to_another_cascade_row",
+        "ok": true
+      },
+      {
+        "name": "test_step129_marking_bounds.py:test_radial_hover_while_cascade_open",
+        "ok": true
+      },
+      {
+        "name": "test_step129_marking_bounds.py:test_click_mode_cascade_row_click_keeps_menu",
+        "ok": true
+      },
+      {
+        "name": "test_step129_marking_bounds.py:test_radial_submenu_still_replaces_the_menu",
+        "ok": true
+      },
+      {
+        "name": "test_step166_menu_consistency.py:test_twins_mapped_to_the_same_action",
+        "ok": true
+      },
+      {
+        "name": "test_step166_menu_consistency.py:test_menu_counts",
+        "ok": true
+      },
+      {
+        "name": "test_step166_menu_consistency.py:test_select_all_by_type_ik_handles_and_clusters",
+        "ok": true
+      },
+      {
+        "name": "test_step166_menu_consistency.py:test_delete_all_by_type_ik_handles_and_clusters",
+        "ok": true
+      },
+      {
+        "name": "test_step166_menu_consistency.py:test_select_particles_rigid_bodies",
+        "ok": true
+      },
+      {
+        "name": "test_step166_menu_consistency.py:test_dope_curve_selection_rule",
+        "ok": true
+      }
+    ]
+  }
+}

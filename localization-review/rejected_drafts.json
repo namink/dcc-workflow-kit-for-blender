@@ -1,0 +1,698 @@
+[
+  {
+    "id": 118,
+    "domain": "max",
+    "english": "Camera Map",
+    "chinese": "摄影机 贴图\n摄影机 贴图 （wsm）",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 131,
+    "domain": "max",
+    "english": "Choose",
+    "chinese": "选择\n选择转换并打开它的输入对话框，就像Max中的选项框一样",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 141,
+    "domain": "max",
+    "english": "Combos...",
+    "chinese": "组合…\n比较RAM播放器中的媒体…",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 212,
+    "domain": "max",
+    "english": "Denoiser {0}",
+    "chinese": "降噪器{0}\n去噪是一个{0}渲染设置",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 340,
+    "domain": "max",
+    "english": "Flex",
+    "chinese": "Flex\n000341 b|飞行工作室",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 541,
+    "domain": "max",
+    "english": "Material Option",
+    "chinese": "材质选项\n材质分配和着色器控件",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 564,
+    "domain": "max",
+    "english": "Mini View Object Wheel",
+    "chinese": "迷你视图对象滚轮\n最小化面板标题",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 716,
+    "domain": "max",
+    "english": "Particle View Toggle",
+    "chinese": "粒子视图开关\n粒子与动力学",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 706,
+    "domain": "max",
+    "english": "Pan to Selected",
+    "chinese": "Pan to Selected\n000707 bb0全景出口商…",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 742,
+    "domain": "max",
+    "english": "Pick an object for the modifier",
+    "chinese": "为修改器选择一个对象\n选择一个对象作为参考坐标系",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 749,
+    "domain": "max",
+    "english": "Pick the first point; right-click cancels",
+    "chinese": "选第一点；右键单击取消\n选择第二个点",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 826,
+    "domain": "max",
+    "english": "Real Time",
+    "chinese": "实时\n000827 bb0实时导出…",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 870,
+    "domain": "max",
+    "english": "Render to Texture...",
+    "chinese": "渲染到纹理…\n可渲染样条纹理",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 1106,
+    "domain": "max",
+    "english": "Spline Chamfer",
+    "chinese": "花键倒角\n001107样条影响",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 1215,
+    "domain": "max",
+    "english": "Track View - Curve Editor",
+    "chinese": "轨迹视图 - 曲线编辑器\n轨迹视图 - 曲线编辑器…",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 1217,
+    "domain": "max",
+    "english": "Track View - Dope Sheet",
+    "chinese": "轨迹视图 - 摄影表\n轨迹视图 - 摄影表…",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 1224,
+    "domain": "max",
+    "english": "Transform Gizmo Plane Constraint Cycle",
+    "chinese": "变换Gizmo平面约束循环\n改变Gizmo的大小",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 1229,
+    "domain": "max",
+    "english": "Transform Gizmo Z Constraint",
+    "chinese": "转换Gizmo Z约束\n转换工具箱…",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 1283,
+    "domain": "max",
+    "english": "Use Working Pivot",
+    "chinese": "使用工作轴心\n001284 bbb使用XRefed",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 1409,
+    "domain": "maya",
+    "english": "+{n - 1}",
+    "chinese": "+ {n - 1}\n一个真正的正弦形状（{n - 1}的波浪修正器波纹）",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 1412,
+    "domain": "maya",
+    "english": "Abbreviated property names",
+    "chinese": "缩写属性名\n绝对变换",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 1455,
+    "domain": "maya",
+    "english": "Animation layers",
+    "chinese": "动画层\n附加到多边形：点击边缘，然后点，按回车键添加面，退格键：删除最后一个点",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 1472,
+    "domain": "maya",
+    "english": "Auto load Graph Editor on selection",
+    "chinese": "自动加载曲线图编辑器到选择\n自动简化曲线图编辑器（该套件始终适合选择: on）",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 1490,
+    "domain": "maya",
+    "english": "Bake modifiers and shape keys (Delete History)",
+    "chinese": "烘烤改性剂和形态键（删除历史记录）\n001491 b|烤好了",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 1508,
+    "domain": "maya",
+    "english": "Blender Holdout: the surface shows the background (Cycles: Object > Visibility > Shadow Catcher catches shadows)",
+    "chinese": "Blender Holdout：表面显示背景（Cycles: 对象 > Visibility >； Shadow Catcher捕捉阴影）\nBlender总是每帧画一个点",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 1513,
+    "domain": "maya",
+    "english": "Blender brush blend Mix",
+    "chinese": "Blender刷子混合混合\nBlender画笔混合正片",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 1525,
+    "domain": "maya",
+    "english": "Blender has no command that deletes unsnapped keys: Edit > Select Unsnapped, then Delete.",
+    "chinese": "Blender没有删除unsnaps的命令关键帧: Edit >；选择unsnaps，然后Delete。\nBlender无立方衰减：距离平方，其功率与关键帧匹配10个单位。",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 1545,
+    "domain": "maya",
+    "english": "Blender shows shape key channels or not (header filters > Shape Keys); it has no auto expand depth for them.",
+    "chinese": "Blender显示形态键通道或不（头部过滤器>；形状关键帧）；它没有自动展开深度。\nBlender的模糊工具",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 1547,
+    "domain": "maya",
+    "english": "Blender's IK bends from the rest pose: the preferred angle is stored and restored by Assume Preferred Angle, the solver doesn't read it.",
+    "chinese": "Blender的IK从休息姿势弯曲：首选角度被假定首选角度存储和恢复，求解器不读取。\nBlender的IK没有薄壁模式",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 1553,
+    "domain": "maya",
+    "english": "Blender's brush runs no MEL commands before or after a stroke",
+    "chinese": "Blender的笔刷在笔画前后没有运行MEL命令\nBlender的套索总是从最后一点到第一点闭合形状",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 1566,
+    "domain": "maya",
+    "english": "Bone envelopes",
+    "chinese": "骨骼信封\n边界下降模糊",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 1573,
+    "domain": "maya",
+    "english": "Bridge type: Smooth path / curve",
+    "chinese": "桥架类型：平滑路径/ 曲线\n浏览曲线重刷资源",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 1578,
+    "domain": "maya",
+    "english": "Bump Mapping",
+    "chinese": "凹凸贴图\n肌肉着色器",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 1609,
+    "domain": "maya",
+    "english": "Click the mesh to choose an influence under the cursor",
+    "chinese": "单击网格，选择光标下的影响对象\n单击网格将其权重采样到Value中\n剪辑模板编辑器",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 1650,
+    "domain": "maya",
+    "english": "Crease Tool: select edges or vertices, then middle-drag left to crease less, right for more",
+    "chinese": "折痕工具：选择边缘或顶点，然后向左中间拖动折痕少，向右拖动折痕多\n创建空图层（newLayerEmpty）",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 1645,
+    "domain": "maya",
+    "english": "Control points (Blender animates no vertices: shape keys are the Shapes)",
+    "chinese": "控制点（Blender动画没有顶点: 形态键是形状）\n转换Blender （顶点 Ctrl+RMB）",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 1674,
+    "domain": "maya",
+    "english": "Curve Snap",
+    "chinese": "曲线 Snap\n曲线度：2 / 5 / 7（仅1和3）",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 1679,
+    "domain": "maya",
+    "english": "Curves, keys and tangents can be picked (Maya Select > All)",
+    "chinese": "曲线、关键帧、切线可选（Maya Select > All）\n自定义曲线模态图",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 1694,
+    "domain": "maya",
+    "english": "Delta Rotate",
+    "chinese": "Delta旋转\n00 - 1695 | Delta翻译",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 1743,
+    "domain": "maya",
+    "english": "Duplicate Attribute",
+    "chinese": "重复属性\n复制图层（没有动画）",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 1749,
+    "domain": "maya",
+    "english": "Each rotate channel interpolates on its own (Maya rotationInterpolation none)",
+    "chinese": "每个旋转通道自己插值（Maya rotationInterpolation none）\n每个Maya滑动其自身边沿的相同分数",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 1760,
+    "domain": "maya",
+    "english": "Emit Diffuse",
+    "chinese": "发出漫射\n发出高光",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 1800,
+    "domain": "maya",
+    "english": "Extract Non-Layered Animation for All Objects",
+    "chinese": "提取非分层动画所有对象\n为选定的对象提取非分层动画",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 1818,
+    "domain": "maya",
+    "english": "File: New, Open, Save, Undo, Redo",
+    "chinese": "文件：新建，打开，保存，撤销，重做\n填充工具模态图",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 1802,
+    "domain": "maya",
+    "english": "Eyedropper ColorRamp PointSampling Map",
+    "chinese": "滴管ColorRamp点采样地图\n滴管模态图",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 1838,
+    "domain": "maya",
+    "english": "Four View. ",
+    "chinese": "四视图。\n四视图：顶部，侧面，前部和侧面。",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 1852,
+    "domain": "maya",
+    "english": "Gamma: switch between 1 and the last gamma",
+    "chinese": "伽马值：在1和最后一个伽马值之间切换\n栅极掩码不透明度",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 1882,
+    "domain": "maya",
+    "english": "Gravity Field",
+    "chinese": "重力场\n[00:1883]重力与风\n油脂铅笔笔刷笔触\n油脂铅笔填充工具",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 1895,
+    "domain": "maya",
+    "english": "Grow the selected region along its loops (Maya Select > Grow Along Loop)",
+    "chinese": "沿着其循环生长选定区域（Maya Select > Grow along Loop）\n输入权重的谐波平均值，当任意值小于等于0时为0",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 1906,
+    "domain": "maya",
+    "english": "Highlight affected",
+    "chinese": "高亮受影响\n突出背景\n[00:08 . 00] |臀部",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 1914,
+    "domain": "maya",
+    "english": "IK handles (the empties IK constraints follow: shown or hidden in every view)",
+    "chinese": "IK句柄（空的IK约束如下：在每个视图中显示或隐藏）\n[00:15 . 00] [qh",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 1918,
+    "domain": "maya",
+    "english": "Ignore Transform",
+    "chinese": "忽略变换\n图像编辑工具：蒙版，方框\n图片编辑工具：蒙版，圆圈\n图片编辑工具：蒙版，光标\n图片编辑工具：蒙版，移动",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 1934,
+    "domain": "maya",
+    "english": "Image Editor Tool: Sample",
+    "chinese": "图像编辑工具：样本\n图像编辑工具：Uv，光标\n图片编辑工具：Uv，抓取\n图片编辑工具：Uv，移动",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 1961,
+    "domain": "maya",
+    "english": "Index Toe",
+    "chinese": "索引脚趾\n独立频道（红/绿/蓝/ Alpha）",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 1979,
+    "domain": "maya",
+    "english": "Internal Radius",
+    "chinese": "内部半径\n插值工具模态图",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 2009,
+    "domain": "maya",
+    "english": "Knife Tool Modal Map",
+    "chinese": "刀具模态图\n绳结间距：均匀（弦长不在工具中）",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 2029,
+    "domain": "maya",
+    "english": "Limit influences",
+    "chinese": "限制影响对象\n影响对象矩阵的线性混合",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 2053,
+    "domain": "maya",
+    "english": "Locked influences stay protected.",
+    "chinese": "锁定影响对象处于保护状态。\n沿着影响对象轴看",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 2105,
+    "domain": "maya",
+    "english": "Maya Curves > Curl (factory amount 0.3, frequency 1)",
+    "chinese": "Maya 曲线旋度（出厂量0.3，频率1）\nMaya 曲线 >；刻度曲率（出厂1.1，最大曲率0.8）",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 2095,
+    "domain": "maya",
+    "english": "Maya Catmull-Clark",
+    "chinese": "Maya Catmull-Clark\nMaya Catmull-Clark和图层编辑器",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 2160,
+    "domain": "maya",
+    "english": "Maya ikRPsolver: Blender IK, the pole vector (Constrain > Pole Vector) turns the chain plane",
+    "chinese": "Maya ikRPsolver: Blender IK，极点向量（constraint > 极向量）转动链平面\nBlender IK，其链端跟随手柄旋转",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 2238,
+    "domain": "maya",
+    "english": "Move Tool / Options",
+    "chinese": "移动工具/选项\n向下移动图层（moveLayerDown）",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 2382,
+    "domain": "maya",
+    "english": "Pick the format from the file's extension (Maya Best Guess)",
+    "chinese": "从文件扩展名中选择格式（Maya最佳猜测）\n002383 b|派",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 2385,
+    "domain": "maya",
+    "english": "Pinky Finger",
+    "chinese": "小指\n002386 b|小拇指",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 2414,
+    "domain": "maya",
+    "english": "Preview Tool: Select Box",
+    "chinese": "预览工具：选择框\n预览工具：选择框（回退）",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 2424,
+    "domain": "maya",
+    "english": "Primary Visibility",
+    "chinese": "主能见度\n原始工具模态图",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 2467,
+    "domain": "maya",
+    "english": "Reload the selected reference (edits kept)",
+    "chinese": "重新加载所选引用（保留编辑）\n移除简单的变形/波浪/施法修饰",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 2529,
+    "domain": "maya",
+    "english": "RuntimeError: the script did not run",
+    "chinese": "RuntimeError：脚本未运行\n002530 bbb100 S分区",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 2550,
+    "domain": "maya",
+    "english": "Section Radius",
+    "chinese": "截面半径\n002551选择工具（选择）",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 2575,
+    "domain": "maya",
+    "english": "Select the components of front-facing UV faces (counter-clockwise winding)",
+    "chinese": "选择正面UV面组件（逆时针绕线）\n用选择>；选择相似>；折痕先选择折痕边",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 2604,
+    "domain": "maya",
+    "english": "Sequencer Tool: Select Lasso",
+    "chinese": "Sequencer Tool：选择套索\n音序器工具：选择套索（回退）",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 2626,
+    "domain": "maya",
+    "english": "Shear Strength",
+    "chinese": "剪切强度\n002627 b|光泽色调",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 2640,
+    "domain": "maya",
+    "english": "Show or hide the Attribute Editor",
+    "chinese": "显示或隐藏属性编辑器\n显示或隐藏属性编辑器 /图层编辑器",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 2642,
+    "domain": "maya",
+    "english": "Show or hide the Character Controls",
+    "chinese": "显示或隐藏字符控件\n显示或隐藏建模工具包",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 2667,
+    "domain": "maya",
+    "english": "Slide Edge: drag to slide, release to keep, Esc / right-click to cancel",
+    "chinese": "滑动边缘：拖动滑动，释放保持，Esc /右键单击取消\n滑动边缘：选择边缘，然后中间拖动来滑动它们",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 2682,
+    "domain": "maya",
+    "english": "Snap keys to whole frames",
+    "chinese": "将关键帧捕捉到整个帧\n锁定到关键帧（按住C键）",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 2721,
+    "domain": "maya",
+    "english": "Stamp spacing / depth",
+    "chinese": "邮票间距/深度\n标准模态图",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 2740,
+    "domain": "maya",
+    "english": "Subtract the colour",
+    "chinese": "减去颜色\n002741 b|阳光",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 2761,
+    "domain": "maya",
+    "english": "Targa PAL (tga)",
+    "chinese": "Targa PAL （tga）\n目标通胀",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 2744,
+    "domain": "maya",
+    "english": "Surface degree along the length (Distance: always Linear, as Maya makes it)",
+    "chinese": "沿长度的表面度（距离：始终为线性，如Maya所示）\n表面度：2 / 5 / 7（1线性和3立方）",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 2775,
+    "domain": "maya",
+    "english": "The UVs on the perimeter of the selection (UV Editor)",
+    "chinese": "UV周长上的选择 （UV编辑器）\nUV的X轴\nUV的Z轴",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 2793,
+    "domain": "maya",
+    "english": "The joint with the same type label on the other side (Skeleton > Joint Labelling): Left <-> Right",
+    "chinese": "另一侧带有同类型标签的关节（骨架>； 关节标签）：左<；->；右\n[00:2794][|]环路以相同的分数切割每个环的边缘",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 2803,
+    "domain": "maya",
+    "english": "The smallest input weight",
+    "chinese": "最小输入权重\n目标在场景中的位置也很重要",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 2808,
+    "domain": "maya",
+    "english": "The workspace {LABELS[self.name]} could not be loaded",
+    "chinese": "工作空间{LABELS[self.name]}无法加载\n[00:2809]好了",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 2852,
+    "domain": "maya",
+    "english": "UV snapshot",
+    "chinese": "UV快照\n[00:2853] [au：",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 2915,
+    "domain": "maya",
+    "english": "View2D Buttons List",
+    "chinese": "View2D按钮列表\nView3D多莉模态",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  },
+  {
+    "id": 2943,
+    "domain": "maya",
+    "english": "Whiteness",
+    "chinese": "白度\n002944 b|宽度和高度你自己的",
+    "origin": "Public translation draft with protected terminology; review required",
+    "reason": "Unexpected multiline result"
+  }
+]
