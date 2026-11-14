@@ -24,7 +24,7 @@ import bpy
 from bpy.props import BoolProperty
 
 from ..operators import uv_arrays, uv_shells
-from .. import compat
+from .. import compat, i18n
 
 TEXT_RGB = (0.81, 0.81, 0.81)        # #cfcfcf (HUD text)
 FONT_PX = 10                         # HUD caps ~7 px high
@@ -57,7 +57,7 @@ def position_text(points):
 
 
 def statistics_text(sel_shells, shells, sel_overlap, overlap, sel_reversed, reversed_):
-    return "(%d/%d) UV shells, (%d/%d) overlapping UVs, (%d/%d) reversed UVs" % (
+    return i18n.iface("(%d/%d) UV shells, (%d/%d) overlapping UVs, (%d/%d) reversed UVs") % (
         sel_shells, shells, sel_overlap, overlap, sel_reversed, reversed_)
 
 
@@ -128,7 +128,8 @@ def _edit_meshes(context):
 def collect(context):
     """Statistics over every mesh in edit mode, cached for REFRESH_S (numpy, operators/uv_arrays.py)."""
     synced = context.scene.tool_settings.use_uv_select_sync
-    key = (synced, tuple(o.as_pointer() for o in _edit_meshes(context)))
+    key = (synced, tuple(o.as_pointer() for o in _edit_meshes(context)),
+           i18n.iface(ISOLATE_TEXT))
     now = time.monotonic()
     if _cache["key"] == key:
         if _cache["value"] is not None and now - _cache["at"] < REFRESH_S:
@@ -185,9 +186,10 @@ def _draw():
             blf.position(font, margin, base, 0)
             blf.draw(font, pos)
         if wm.allset_uv_hud_isolate and getattr(wm, "allset_uv_isolate", False):
-            w = blf.dimensions(font, ISOLATE_TEXT)[0]
+            label = i18n.iface(ISOLATE_TEXT)
+            w = blf.dimensions(font, label)[0]
             blf.position(font, (region.width - w) / 2, base + LINE_PX * scale, 0)
-            blf.draw(font, ISOLATE_TEXT)
+            blf.draw(font, label)
     except (ReferenceError, AttributeError, ValueError):
         _cache["value"] = None
 

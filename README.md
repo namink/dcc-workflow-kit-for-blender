@@ -1,9 +1,9 @@
-# DCC Workflow Kit 0.2.0 · 简体中文预览版
+# DCC Workflow Kit 0.2.1 · 简体中文预览版
 
 只需安装一个 ZIP，包含 MaxFlow 0.8.3 和 Maya Workflow Kit 0.16.0。此构建面向 Windows Blender 5.3.0；Blender 4.5 请保留 DCC 0.1.5。
 
 1. 停用独立安装的 Blender Max / MaxFlow 和 Maya Workflow Kit，避免同名操作冲突。已有工具架或快捷键时建议先备份。
-2. 在 Blender 5.3 的「编辑 → 偏好设置 → 扩展」右上角菜单选择「从磁盘安装」，选中 dcc-workflow-kit-0.2.0.zip，无需解压。
+2. 在 Blender 5.3 的「编辑 → 偏好设置 → 扩展」右上角菜单选择「从磁盘安装」，选中 dcc-workflow-kit-0.2.1.zip，无需解压。
 3. 在「插件 → DCC Workflow Kit」中选择「3ds Max + Blender」或「Maya + Blender」。用顶部按钮切换，也可使用 Ctrl+Alt+Shift+M。
 4. 在「偏好设置 → 界面」选择简体中文，开启「翻译界面」；也可开启「翻译工具提示」。
 

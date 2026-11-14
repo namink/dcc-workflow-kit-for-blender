@@ -73,7 +73,7 @@ class DCC_Preferences(bpy.types.AddonPreferences):
             translations.draw(box)
             if core.current() == 'MAYA':
                 box.operator('allset.new_maya_scene', icon='FILE_NEW')
-        layout.label(text='DCC Workflow Kit 0.2.0 · MaxFlow 0.8.3 · Maya Workflow Kit 0.16.0')
+        layout.label(text='DCC Workflow Kit 0.2.1 · MaxFlow 0.8.3 · Maya Workflow Kit 0.16.0')
 
 
 CLASSES = (BSM_Preferences, ALLSET_AddonPreferences, DCC_Preferences)

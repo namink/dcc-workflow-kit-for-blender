@@ -50,7 +50,7 @@ from gpu_extras.batch import batch_for_shader
 from mathutils import Matrix, Vector, geometry
 
 from . import cb_entry, creation_inputs, in_view_settings, manipulator
-from .. import undo_steps
+from .. import i18n, undo_steps
 from ..operators import bevel_maya, extrude, prim_history, prim_shapes, units   # bevel_maya: registers polyBevel
 from ..operators import uv_tools  # noqa: F401  registers the polyAutoProj spec
 from ..operators import move_component  # noqa: F401  registers the polyMoveFace / Edge / Vertex specs
@@ -278,9 +278,9 @@ def cap_frame(ob, rec):
     return mw @ centre, nw / k, k
 
 
-def layout(region, anchor, scale, fields=extrude.FIELDS, gap=GAP):
+def layout(region, anchor, scale, fields=extrude.FIELDS, gap=GAP, *, width=WIDTH):
     """Box geometry in region pixels: {"box", "title", "rows": [(field, x0, y0, x1, y1)]}."""
-    w, h = WIDTH * scale, ROW_H * scale
+    w, h = width * scale, ROW_H * scale
     n = len(fields) + 1
     x0 = anchor[0] + gap[0] * scale
     top = anchor[1] + gap[1] * scale
@@ -345,7 +345,13 @@ def current_layout(context):
         return None, None
     _sync_node(ob, rec)
     dx, dy = in_view_settings.get_offset()
-    return rec, layout(context.region, a, _scale(), rec.spec.view_fields, (gap[0] + dx, gap[1] + dy))
+    scale = _scale()
+    blf.size(0, 11 * scale)
+    label_width = max((blf.dimensions(0, i18n.iface(rec.spec.labels[f]))[0]
+                       for f in rec.spec.view_fields), default=0)
+    width = max(WIDTH, label_width / scale + VALUE_W + 15)
+    return rec, layout(context.region, a, scale, rec.spec.view_fields,
+                       (gap[0] + dx, gap[1] + dy), width=width)
 
 
 def fan_circle(lay, scale):
@@ -493,9 +499,11 @@ def draw_box():
         _draw_fan(*fan_circle(lay, s), in_view_settings.get_sensitivity())
     for i, (field, rx0, ry0, rx1, ry1) in enumerate(lay["rows"]):
         hot = i == _state["hot"]
-        _text(rx0 + pad, ry0 + 4 * s, rec.spec.labels[field], HOT if hot else LIT if i == _state["hover"] else TEXT,
+        _text(rx0 + pad, ry0 + 4 * s, i18n.iface(rec.spec.labels[field]), HOT if hot else LIT if i == _state["hover"] else TEXT,
               size)
         v = value_text(rec, field)
+        if field_kind(rec, field) == "BOOL":
+            v = i18n.iface(v)
         blf.size(0, size)
         vx1 = rx1 - pad
         _rect(vx1 - VALUE_W * s, ry0 + 2 * s, vx1 + 3 * s, ry1 - 1 * s, VALUE_BG)
@@ -1242,7 +1250,7 @@ class ALLSET_OT_inview_type(bpy.types.Operator):
             return {'CANCELLED'}
         prop = self._prop(rec, field)
         setattr(self, prop, (int if prop != "number" else float)(rec.params[field]))
-        return context.window_manager.invoke_props_dialog(self, title=f"{rec.name}: {rec.spec.labels[field]}")
+        return context.window_manager.invoke_props_dialog(self, title=f"{rec.name}: {i18n.iface(rec.spec.labels[field])}")
 
     def draw(self, context):
         rec, field = self._field(context)

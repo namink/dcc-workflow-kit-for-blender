@@ -29,6 +29,7 @@ from bpy.props import BoolProperty, EnumProperty
 
 from . import hypergraph_layout as hl
 from . import marked_window
+from .. import i18n
 
 KIND = "HYPERGRAPH"
 VIEWS = {}            # area pointer -> hypergraph_layout.View
@@ -196,10 +197,11 @@ def strip_buttons(region, scale):
     import blf
     blf.size(0, 11.0 * scale)
     pad = 10 * scale
-    widths = [blf.dimensions(0, label)[0] + 2 * pad for _k, label in hl.TOOLS]
+    tools = [(key, i18n.iface(label)) for key, label in hl.TOOLS]
+    widths = [blf.dimensions(0, label)[0] + 2 * pad for _k, label in tools]
     sh = strip_height(scale)
     rects = hl.strip_rects(widths, region.height - 3 * scale, sh - 6 * scale, x0=6 * scale, gap=4 * scale)
-    return [(key, label, r) for (key, label), r in zip(hl.TOOLS, rects)]
+    return [(key, label, r) for (key, label), r in zip(tools, rects)]
 
 
 def strip_hit(region, scale, x, y):
@@ -345,7 +347,7 @@ def draw():
         blf.size(0, 12.0 * scale)
         blf.color(0, 0.7, 0.7, 0.7, 1.0)
         blf.position(0, 20 * scale, region.height / 2, 0)
-        blf.draw(0, "No objects in the scene")
+        blf.draw(0, i18n.iface("No objects in the scene"))
 
     # the tool strip
     sh = strip_height(scale)
