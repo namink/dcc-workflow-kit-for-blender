@@ -11,8 +11,26 @@ here, and are dedicated to the public domain under CC0 1.0 Universal
   welcome.png                                     tools/make_splash.py
   app_template/Maya_Workflow_Kit/startup.blend    tools/make_startup.py
 
+i18n/template_en.json (made by tools/gen_i18n_template.py) lists the
+interface texts of the kit for translators and is licensed
+GPL-3.0-or-later like the code.
+
 Icons in the user interface (shelf, Status Line, viewport toolbar) are drawn
-by code at run time; no image files ship for them.
+by code at run time. One archive of Blender UI icon images ships so that the
+GPU-drawn shelf can show Blender's own icons (Python can name Blender's
+built-in icons but cannot read their pixels):
+
+  icons/blender_icons.zip
+    blender_svg/*.png   64 x 64 RGBA images rasterized from Blender 5.2's SVG
+                        icon sources (release/datafiles/icons_svg/ in the
+                        Blender source code)
+    blender/*.png       64 x 64 RGBA images of Blender 5.2's built-in UI
+                        icons, for the icon identifiers the shelf uses
+
+These icons are part of Blender, (c) 2011-2026 Blender Foundation, and are
+licensed GPL-3.0-or-later like Blender itself. The archive holds no Blender
+logo and no Blender Development Fund mark. The shelf extracts only the icons
+it draws.
 
 The package contains no Autodesk code, icons, MEL scripts, screenshots or
 other Autodesk assets.

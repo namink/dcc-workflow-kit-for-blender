@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Adapted for DCC Workflow Kit.
-from .i18n import msg as _msg, display as _dcc_ui_text, format_message as _dcc_format, error_text as _dcc_ui_error
+from .i18n import msg as _msg, display as _dcc_ui_text, format_message as _dcc_format
 '3ds Max command vocabulary mapped onto Blender data and operators.\n\nEvery menu, quad and toolbar entry that has no single Blender operator goes\nthrough ``bsm.max_command``. Commands without a Blender equivalent are listed\nin ``UNAVAILABLE`` so menus can draw them disabled instead of pretending.\n'
 import math
 import os
@@ -365,6 +365,11 @@ def run(context, command):
         obj = context.view_layer.objects.active
         if obj is None or obj.type not in {'MESH', 'CURVE', 'SURFACE', 'META', 'FONT', 'LATTICE', 'ARMATURE'}:
             raise RuntimeError(_msg('Select an object with sub-objects'))
+        from . import edit_poly
+        if obj.type == 'MESH' and (edit_poly.editing(obj.data) or edit_poly.is_layer(obj.modifiers.get(state.active_modifier))):
+            select = tuple(context.tool_settings.mesh_select_mode)
+            level = 0 if obj.mode == 'EDIT' else {(False, True, False): 2, (False, False, True): 4}.get(select, 1)
+            return bpy.ops.bsm.component(level=level)
         with context.temp_override(**viewport_override(context)):
             bpy.ops.object.mode_set(mode='OBJECT' if obj.mode == 'EDIT' else 'EDIT')
         return {'FINISHED'}
@@ -550,7 +555,7 @@ class BSM_OT_max_command(Active, bpy.types.Operator):
         try:
             result = run(context, self.command)
         except RuntimeError as error:
-            self.report({'WARNING'}, _dcc_ui_error(error))
+            self.report({'WARNING'}, _dcc_ui_text(str(error)))
             return {'CANCELLED'}
         result = result if isinstance(result, set) else {'FINISHED'}
         if 'FINISHED' in result and self.command not in NO_UNDO:
@@ -616,7 +621,7 @@ def _set(**values):
             setattr(mod, key, value)
     return setup
 MODIFIERS = {_msg('Bend'): _deform('BEND', 'angle'), _msg('Twist'): _deform('TWIST', 'angle'), _msg('Taper'): _deform('TAPER', 'factor'), _msg('Stretch'): _deform('STRETCH', 'factor'), _msg('Noise'): ('DISPLACE', _displace_noise), _msg('Noise Plus'): ('DISPLACE', _displace_noise), _msg('Displace'): ('DISPLACE', _set(strength=0.0)), _msg('Lattice'): ('WIREFRAME', _set(thickness=0.02, use_replace=False)), _msg('Mirror'): ('MIRROR', None), _msg('Symmetry'): ('MIRROR', _set(use_bisect_axis=(True, False, False), use_mirror_merge=True)), _msg('Shell'): ('SOLIDIFY', _set(thickness=0.1, offset=1.0)), _msg('Chamfer'): ('BEVEL', _set(width=0.1, segments=1, limit_method='NONE')), _msg('TurboSmooth'): ('SUBSURF', _set(levels=1, render_levels=1)), _msg('MeshSmooth'): ('SUBSURF', _set(levels=1, render_levels=1)), _msg('OpenSubdiv'): ('SUBSURF', _set(levels=1, render_levels=1)), _msg('Subdivide'): ('SUBSURF', _set(subdivision_type='SIMPLE', levels=1)), _msg('Tessellate'): ('SUBSURF', _set(subdivision_type='SIMPLE', levels=1)), _msg('Relax'): ('SMOOTH', _set(factor=0.5, iterations=1)), _msg('Push'): ('DISPLACE', _push), _msg('Spherify'): ('CAST', _set(cast_type='SPHERE', factor=1.0)), _msg('Wave'): ('WAVE', _set(use_normal=False)), _msg('Ripple'): ('WAVE', None), _msg('Optimize'): ('DECIMATE', _set(ratio=1.0)), _msg('ProOptimizer'): ('DECIMATE', _set(ratio=1.0)), _msg('Vertex Weld'): ('WELD', None), _msg('Weld'): ('WELD', None), _msg('Edit Normals'): ('NORMAL_EDIT', None), _msg('Weighted Normals'): ('WEIGHTED_NORMAL', None), _msg('Skin'): ('ARMATURE', None), _msg('Skin Wrap'): ('SURFACE_DEFORM', None), _msg('Surf Deform'): ('SURFACE_DEFORM', None), _msg('Path Deform'): ('CURVE', None), _msg('Path Deform (WSM)'): ('CURVE', None), _msg('FFD 2x2x2'): _ffd(2), _msg('FFD 3x3x3'): _ffd(3), _msg('FFD 4x4x4'): _ffd(4), _msg('FFD Box'): _ffd(4), _msg('FFD Cylinder'): _ffd(4), _msg('UVW Map'): ('UV_PROJECT', _uvw_map), _msg('Boolean'): ('BOOLEAN', None), _msg('ProBoolean'): ('BOOLEAN', None), _msg('Array'): ('ARRAY', None), _msg('Lathe'): ('SCREW', _set(steps=16, render_steps=16)), _msg('Turn To Mesh'): ('TRIANGULATE', None), _msg('Retopology'): ('REMESH', _set(mode='VOXEL')), _msg('Conform'): ('SHRINKWRAP', None), _msg('Conform Modifier'): ('SHRINKWRAP', None), _msg('Attribute Transfer'): ('DATA_TRANSFER', None), _msg('Point Cache'): ('MESH_CACHE', None), _msg('Point Cache (WSM)'): ('MESH_CACHE', None), _msg('MultiRes'): ('MULTIRES', None), _msg('Melt'): None, _msg('Edit Poly'): None, _msg('Edit Mesh'): None, _msg('Cap Holes'): None, _msg('Slice'): None, _msg('Normal Modifier'): None, _msg('Quadify Mesh'): None, _msg('Turn To Poly'): None, _msg('Morpher'): None}
-SPECIAL_MODIFIERS = {_msg('Smooth'), _msg('Cloth'), _msg('Flex'), _msg('Unwrap UVW'), _msg('Hair and Fur (WSM)'), _msg('Extrude'), _msg('Renderable Spline Modifier'), _msg('Bevel')}
+SPECIAL_MODIFIERS = {_msg('Smooth'), _msg('Cloth'), _msg('Flex'), _msg('Unwrap UVW'), _msg('Hair and Fur (WSM)'), _msg('Extrude'), _msg('Renderable Spline Modifier'), _msg('Bevel'), _msg('Edit Poly'), _msg('Edit Mesh')}
 
 def modifier_available(name):
     return name in SPECIAL_MODIFIERS or MODIFIERS.get(name) is not None
@@ -653,6 +658,16 @@ class BSM_OT_max_modifier(Active, bpy.types.Operator):
                 return {'FINISHED'}
             if name == _msg('Unwrap UVW'):
                 return bpy.ops.bsm.editor(kind='UV')
+            if name in {_msg('Edit Poly'), _msg('Edit Mesh')}:
+                from . import edit_poly
+                if obj.type != 'MESH':
+                    self.report({'WARNING'}, _dcc_ui_text(_dcc_format('{0} applies to Editable Poly objects', name)))
+                    return {'CANCELLED'}
+                if obj.mode != 'OBJECT':
+                    edit_poly.leave(context, obj)
+                    context.window_manager.bsm.component = 0
+                context.window_manager.bsm.active_modifier = edit_poly.add(obj, name).name
+                return {'FINISHED'}
             if name in {_msg('Extrude'), _msg('Renderable Spline Modifier'), _msg('Bevel')}:
                 if obj.type != 'CURVE':
                     self.report({'WARNING'}, _dcc_ui_text(_dcc_format('{0} applies to shapes', name)))
@@ -666,7 +681,7 @@ class BSM_OT_max_modifier(Active, bpy.types.Operator):
         try:
             mod = obj.modifiers.new(name, kind)
         except (RuntimeError, TypeError) as error:
-            self.report({'WARNING'}, _dcc_ui_error(error))
+            self.report({'WARNING'}, _dcc_ui_text(str(error)))
             return {'CANCELLED'}
         if mod is None:
             self.report({'WARNING'}, _dcc_ui_text(_dcc_format('{0} cannot be applied to {1}', name, obj.type.title())))
@@ -777,7 +792,7 @@ class BSM_OT_viewport_shading(Active, bpy.types.Operator):
         try:
             _set_shading(context, self.style)
         except RuntimeError as error:
-            self.report({'WARNING'}, _dcc_ui_error(error))
+            self.report({'WARNING'}, _dcc_ui_text(str(error)))
             return {'CANCELLED'}
         runtime.redraw()
         return {'FINISHED'}
@@ -932,7 +947,7 @@ class BSM_OT_pick_object(Active, bpy.types.Operator):
                 try:
                     setattr(mod, slot, obj)
                 except (TypeError, AttributeError) as error:
-                    self.report({'WARNING'}, _dcc_ui_error(error))
+                    self.report({'WARNING'}, _dcc_ui_text(str(error)))
                     return {'RUNNING_MODAL'}
                 if mod.type == 'BOOLEAN':
                     obj.display_type = 'WIRE'
@@ -941,9 +956,15 @@ class BSM_OT_pick_object(Active, bpy.types.Operator):
             active = context.view_layer.objects.active
             if active is None or obj == active or obj.type != active.type:
                 return {'RUNNING_MODAL'}
+            from . import edit_poly
+            if active.type == 'MESH' and edit_poly.editing(active.data):
+                self.report({'WARNING'}, _dcc_ui_text(_msg('Attach: return to the Edit Poly top level first')))
+                return self._finish(context, {'CANCELLED'})
             mode = active.mode
             if mode != 'OBJECT':
                 bpy.ops.object.mode_set(mode='OBJECT')
+            if obj.type == 'MESH':
+                edit_poly.strip(obj)
             for other in context.view_layer.objects:
                 other.select_set(other in {obj, active})
             with context.temp_override(active_object=active, object=active, selected_objects=[active, obj], selected_editable_objects=[active, obj]):
@@ -1335,7 +1356,7 @@ class BSM_OT_manage_sets(Active, bpy.types.Operator):
         l = self.layout
         l.label(text=_dcc_ui_text(_msg('Named Selection Sets')))
         row = l.row(align=True)
-        row.prop(self, 'name', text=_dcc_ui_text(''))
+        row.prop(self, _msg('name'), text=_dcc_ui_text(''))
         op = row.operator('bsm.set_action', text=_dcc_ui_text(_msg('Create New Set')), icon='ADD')
         (op.name, op.action) = (self.name, 'CREATE')
         sets = [c for c in bpy.data.collections if c.get('bsm_selection_set')]
@@ -1368,7 +1389,7 @@ class BSM_OT_object_properties(Active, bpy.types.Operator):
         l = self.layout
         box = l.box()
         box.label(text=_dcc_ui_text(_msg('Object Information')))
-        box.prop(obj, 'name', text=_dcc_ui_text(_msg('Name')))
+        box.prop(obj, _msg('name'), text=_dcc_ui_text(_msg('Name')))
         box.label(text=_dcc_ui_text(_dcc_format('Dimensions: {0:.3f} x {1:.3f} x {2:.3f}', obj.dimensions.x, obj.dimensions.y, obj.dimensions.z)))
         if obj.type == 'MESH':
             box.label(text=_dcc_ui_text(_dcc_format('Vertices: {0}    Faces: {1}', len(obj.data.vertices), len(obj.data.polygons))))
@@ -1416,7 +1437,7 @@ class BSM_OT_settings_popup(Active, bpy.types.Operator):
         elif self.kind == 'LIGHT_GROUPS':
             layer = context.view_layer
             for group in getattr(layer, 'lightgroups', ()):
-                l.prop(group, 'name', text=_dcc_ui_text(''))
+                l.prop(group, _msg('name'), text=_dcc_ui_text(''))
             l.operator('scene.view_layer_add_lightgroup', text=_dcc_ui_text(_msg('Add Light Group')))
             for obj in [o for o in scene.objects if o.type == 'LIGHT']:
                 l.prop(obj, 'lightgroup', text=_dcc_ui_text(obj.name))
@@ -1614,7 +1635,7 @@ class BSM_OT_render_view(Active, bpy.types.Operator):
         try:
             return render_active_view(context)
         except RuntimeError as error:
-            self.report({'WARNING'}, _dcc_ui_error(error))
+            self.report({'WARNING'}, _dcc_ui_text(str(error)))
             return {'CANCELLED'}
     bl_translation_context = _msg('DCCWorkflowKit.Max')
 

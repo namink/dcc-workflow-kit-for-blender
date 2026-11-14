@@ -17,5 +17,6 @@
   "Color changes apply the next time Max mode starts.": "主题设置在下次进入 Max 模式时生效。",
   "Import Maya Shelves": "导入 Maya 工具架",
   "Copy custom shelves from the original Maya Workflow Kit; keep existing shelves and source file": "复制原版 Maya Workflow Kit 的自定义工具架，保留当前工具架和原文件",
-  "Imported shelves: ": "已导入工具架数量："
+  "Imported shelves: ": "已导入工具架数量：",
+  "Choose this workflow pair in DCC Workflow Kit Preferences first.": "请先在 DCC Workflow Kit 偏好设置中选择该工作流组合。"
 }

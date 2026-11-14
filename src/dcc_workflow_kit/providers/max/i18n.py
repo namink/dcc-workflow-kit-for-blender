@@ -57,3 +57,6 @@ def format_message(template, *values):
 def error_text(error):
     value = error.args[0] if len(getattr(error, 'args', ())) == 1 else str(error)
     return display(value)
+
+# MaxFlow custom surfaces use the same source markers as the integration.
+tr_ui = display

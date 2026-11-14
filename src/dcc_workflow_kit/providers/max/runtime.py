@@ -15,8 +15,8 @@ _patched_polls = []
 _saved_lock_state = []
 _saved_orientation = {}
 _msgbus_owner = object()
-WORKSPACE_NAME = _msg('Blender Max')
-OLD_WORKSPACE_NAMES = (_msg('Blender Studio Max'),)
+WORKSPACE_NAME = _msg('MaxFlow')
+OLD_WORKSPACE_NAMES = (_msg('Blender Studio Max'), _msg('Blender Max'))
 _splash_before = []
 SPLASH_ENV = 'BLENDER_CUSTOM_SPLASH'
 
@@ -115,7 +115,7 @@ def restore_theme():
             except (AttributeError, TypeError, ValueError):
                 continue
     except (TypeError, ValueError):
-        print(_msg('Blender Max: invalid theme recovery data; snapshot retained'))
+        print(_msg('MaxFlow: invalid theme recovery data; snapshot retained'))
         return
     prefs.theme_backup = ''
 
@@ -226,7 +226,7 @@ def sync_reference(context, region=None):
 
 def apply_selection_filter(context):
     state = context.window_manager.bsm
-    allowed = {'ALL': None, 'GEOMETRY': {'mesh', 'surf', 'meta', 'font', 'curves', 'pointcloud', 'volume'}, 'SHAPES': {'curve', 'font'}, 'LIGHTS': {'light'}, 'CAMERAS': {'camera'}, 'HELPERS': {'empty'}, 'WARPS': {'empty'}, 'BONE': {'armature'}}[state.selection_filter]
+    allowed = {'ALL': None, 'GEOMETRY': {'mesh', 'surf', 'meta', 'font', _msg('curves'), 'pointcloud', 'volume'}, 'SHAPES': {'curve', 'font'}, 'LIGHTS': {'light'}, 'CAMERAS': {_msg('camera')}, 'HELPERS': {'empty'}, 'WARPS': {'empty'}, 'BONE': {'armature'}}[state.selection_filter]
     for space in _studio_spaces(context):
         for prop in space.bl_rna.properties:
             name = prop.identifier
@@ -272,7 +272,8 @@ def _object_mode_changed():
             context.window_manager.bsm.component = 0
         return
     prim = getattr(obj, 'bsm_prim', None)
-    if prim is not None and prim.kind:
+    from . import edit_poly
+    if prim is not None and prim.kind and (not edit_poly.editing(obj.data)):
         from . import params
         params.collapse(obj)
         context.window_manager.bsm.prompt = _dcc_format('{0} converted to Editable Poly', obj.name)
@@ -343,7 +344,6 @@ def clear_factory_scene(scene):
     return True
 
 def apply_scene_defaults(context):
-    """Workflow changes preserve scene data; scene defaults belong to explicit New commands."""
     return None
 
 def enter_workspace(window):
@@ -365,7 +365,7 @@ def enter_workspace(window):
             bpy.ops.workspace.append_activate(idname=_msg('BSM_Layout'), filepath=str(Path(__file__).with_name('workspace.blend')))
         target = next((w for w in bpy.data.workspaces if w not in before and w.name.startswith(_msg('BSM_Layout'))), None)
         if target is None:
-            raise RuntimeError(_msg('The Blender Max workspace could not be appended'))
+            raise RuntimeError(_msg('The MaxFlow workspace could not be appended'))
         target.name = WORKSPACE_NAME
         target['bsm_workspace'] = True
         target['bsm_primary_workspace'] = True
@@ -482,14 +482,14 @@ def _apply_pending():
         try:
             set_active(on)
         except Exception as error:
-            print(_msg('Blender Max switch failed:'), error)
+            print(_msg('MaxFlow switch failed:'), error)
             import traceback
             traceback.print_exc()
     return None
 
 def request(on):
-    from ...core import request
-    request('MAX' if on else 'BLENDER')
+    from ...core import request as switch
+    return switch('MAX' if on else 'BLENDER')
 
 @persistent
 def load_post(_):
@@ -500,24 +500,9 @@ def load_post(_):
     _activeshade.clear()
     _quad_memory.clear()
     recover_selection_lock()
-    if _active:
-        subscribe()
-
-        def activate():
-            if _active and (not bpy.app.background):
-                from . import chrome
-                chrome.restart_events()
-                apply_scene_defaults(bpy.context)
-                for window in bpy.context.window_manager.windows:
-                    enter_workspace(window)
-                chrome.register_mode()
-            elif _active:
-                apply_scene_defaults(bpy.context)
-            return None
-        bpy.app.timers.register(activate, first_interval=0.25)
 
 def recover_selection_lock():
-    if not hasattr(bpy.data, 'objects'):
+    if not hasattr(bpy.data, _msg('objects')):
         return
     for obj in bpy.data.objects:
         if '_bsm_selectable_before_lock' in obj:
@@ -606,7 +591,7 @@ def unregister():
     if hasattr(bpy.app.handlers, 'save_post_fail') and save_post in bpy.app.handlers.save_post_fail:
         bpy.app.handlers.save_post_fail.remove(save_post)
     if _active:
-        _set_active(False)
+        _set_active(False, layout=False)
     else:
         restore_theme()
         recover_selection_lock()

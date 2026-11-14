@@ -20,6 +20,7 @@ step = 0
 snapshot = None
 window = None
 preference_window = None
+maya_workspace = None
 cycles = [('MAX', 'MAX'), ('MAX', 'BLENDER'), ('MAYA', 'MAYA'), ('MAYA', 'BLENDER'),
           ('MAX', 'MAX'), ('MAX', 'BLENDER'), ('MAYA', 'MAYA'), ('MAYA', 'BLENDER')]
 if QUICK:
@@ -38,7 +39,7 @@ def finish():
 
 
 def tick():
-    global step, snapshot, window, preference_window
+    global step, snapshot, window, preference_window, maya_workspace
     try:
         if step == 0:
             window = bpy.context.window_manager.windows[0]
@@ -69,6 +70,10 @@ def tick():
                     if target == 'MAYA':
                         maya = import_module(MODULE + ".providers.maya")
                         assert maya.switch.is_maya_workspace(window.workspace)
+                        if maya_workspace is None:
+                            maya_workspace = window.workspace.name
+                        assert window.workspace.name == maya_workspace, "Maya workspace was duplicated"
+                        assert maya.i18n.iface('Common Selection Options') == '常用选择选项'
                     if target == 'BLENDER':
                         assert not core._foreign(window.workspace)
                     bpy.ops.screen.screenshot(filepath=str(OUT / f'{index:02d}-{target}.png'))

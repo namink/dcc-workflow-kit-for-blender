@@ -12,7 +12,7 @@ GOLD = (1.0, 0.72, 0.03, 1.0)
 BLUE = (0.3, 0.52, 0.73, 1.0)
 RED = (0.79, 0.37, 0.34, 1.0)
 GREEN = (0.38, 0.68, 0.46, 1.0)
-ICON_NAMES = ('undo', 'redo', 'link', 'unlink', 'bind', 'selection', 'cursor', 'select_list', 'box', 'circle', 'lasso', 'move', 'rotate', 'scale', 'orientation', 'pivot', 'snap3', 'snap_angle', 'snap_percent', 'snap_settings', 'selection_lock', 'selection_set', 'mirror', 'align', 'array', 'clone', 'explorer', 'graph', 'curve', 'dope', 'material', 'render_setup', 'render', 'teapot', 'frame', 'quad', 'maximize', 'smooth', 'flat', 'hide', 'unhide', 'isolate', 'create', 'modify', 'hierarchy', 'motion', 'display', 'utilities', 'geometry', 'shapes', 'lights', 'cameras', 'helpers', 'spacewarps', 'systems', 'paint', 'object_paint', 'freeform', 'populate', 'measure', 'script', 'asset', 'layer', 'frozen', 'visible', 'folder', 'search', 'clear', 'dropdown', 'left', 'right', 'zoom', 'orbit', 'pan', 'walk', 'home', 'key', 'first', 'previous', 'play', 'stop', 'next', 'last', 'auto_key', 'set_key', 'lock', 'unlock', 'save', 'open', 'new', 'import', 'export', 'help', 'vertex', 'edge', 'border', 'polygon', 'element', 'plus', 'minus', 'settings', 'filter', 'time', 'viewport', 'camera', 'light', 'mesh', 'shape', 'modifiers', 'material_library', 'texture', 'schematic', 'playback', 'render_output', 'selection_region', 'angle', 'percent', 'window_crossing', 'fence', 'paint_select', 'select_place', 'selection_center', 'transform_center', 'manipulate', 'keyboard_override', 'snap2', 'snap25', 'spinner_snap', 'manage_sets', 'layer_explorer', 'toggle_ribbon', 'compact_material', 'rendered_frame', 'render_iterative', 'activeshade', 'project_folder', 'project_set', 'project_new', 'project_config', 'pin', 'end_result', 'make_unique', 'remove_modifier', 'configure_sets', 'bulb_on', 'bulb_off', 'arv', 'arv_render', 'arv_ipr', 'flow_render', 'flow_monitor', 'denoiser', 'arnold_light', 'arnold_procedural', 'arnold_alembic', 'arnold_volume', 'bake_geometry', 'arnold_props', 'aovs', 'light_groups', 'operator_graph', 'groups', 'xrefs', 'bones', 'containers', 'display_all', 'display_none', 'display_invert', 'find_filter', 'time_config', 'key_filters', 'zoom_all', 'zoom_extents', 'zoom_extents_all', 'zoom_region', 'fov', 'add_time_tag', 'isolate_toggle', 'abs_rel', 'key_mode', 'mini_curve', 'set_keys', 'shield', 'tag_cube', 'tan_auto', 'tan_linear', 'tan_step', 'tan_custom', 'sme_select', 'sme_pick', 'sme_put', 'sme_assign', 'sme_delete', 'sme_move_children', 'sme_hide_unused', 'sme_shaded', 'sme_background', 'sme_material_id', 'sme_layout_all', 'sme_layout_children', 'sme_browser', 'sme_parameters', 'sme_select_by_material')
+ICON_NAMES = ('undo', 'redo', 'link', 'unlink', 'bind', 'selection', _msg('cursor'), 'select_list', 'box', 'circle', 'lasso', 'move', 'rotate', 'scale', 'orientation', 'pivot', 'snap3', 'snap_angle', 'snap_percent', 'snap_settings', 'selection_lock', 'selection_set', 'mirror', 'align', 'array', 'clone', 'explorer', 'graph', 'curve', 'dope', 'material', 'render_setup', 'render', 'teapot', 'frame', 'quad', 'maximize', 'smooth', 'flat', 'hide', 'unhide', 'isolate', 'create', 'modify', 'hierarchy', 'motion', 'display', 'utilities', 'geometry', 'shapes', _msg('lights'), _msg('cameras'), 'helpers', 'spacewarps', 'systems', 'paint', 'object_paint', 'freeform', 'populate', 'measure', 'script', 'asset', 'layer', 'frozen', 'visible', 'folder', 'search', 'clear', 'dropdown', _msg('left'), _msg('right'), 'zoom', 'orbit', 'pan', 'walk', 'home', 'key', 'first', 'previous', 'play', 'stop', 'next', 'last', 'auto_key', 'set_key', 'lock', 'unlock', 'save', 'open', 'new', 'import', 'export', 'help', 'vertex', 'edge', 'border', 'polygon', 'element', 'plus', 'minus', 'settings', 'filter', 'time', 'viewport', _msg('camera'), 'light', 'mesh', 'shape', 'modifiers', 'material_library', 'texture', 'schematic', 'playback', 'render_output', 'selection_region', 'angle', 'percent', 'window_crossing', 'fence', 'paint_select', 'select_place', 'selection_center', 'transform_center', 'manipulate', 'keyboard_override', 'snap2', 'snap25', 'spinner_snap', 'manage_sets', 'layer_explorer', 'toggle_ribbon', 'compact_material', 'rendered_frame', 'render_iterative', 'activeshade', 'project_folder', 'project_set', 'project_new', 'project_config', 'pin', 'end_result', 'make_unique', 'remove_modifier', 'configure_sets', 'bulb_on', 'bulb_off', 'arv', 'arv_render', 'arv_ipr', 'flow_render', 'flow_monitor', 'denoiser', 'arnold_light', 'arnold_procedural', 'arnold_alembic', 'arnold_volume', 'bake_geometry', 'arnold_props', 'aovs', 'light_groups', 'operator_graph', 'groups', 'xrefs', 'bones', 'containers', 'display_all', 'display_none', 'display_invert', 'find_filter', 'time_config', 'key_filters', 'zoom_all', 'zoom_extents', 'zoom_extents_all', 'zoom_region', 'fov', 'add_time_tag', 'isolate_toggle', 'abs_rel', 'key_mode', 'mini_curve', 'set_keys', 'shield', 'tag_cube', 'tan_auto', 'tan_linear', 'tan_step', 'tan_custom', 'sme_select', 'sme_pick', 'sme_put', 'sme_assign', 'sme_delete', 'sme_move_children', 'sme_hide_unused', 'sme_shaded', 'sme_background', 'sme_material_id', 'sme_layout_all', 'sme_layout_children', 'sme_browser', 'sme_parameters', 'sme_select_by_material')
 _geometry = {}
 _batches = {}
 _shader = None
@@ -275,7 +275,7 @@ def _toolbar_shape(name):
         for y in (4, 9, 14):
             p.line([(x, y + 1.5 * sin((x - 1) * pi / 9)) for x in range(1, 23)], SILVER, 1.8)
         _capsule(p, 16, 19, 5, 2.4, color=GOLD, width=1.8)
-    elif name == 'cursor':
+    elif name == _msg('cursor'):
         p.rect(1, 3, 18, 19, SILVER)
         p.cursor(15, 0, 0.58, GOLD)
     elif name == 'select_list':
@@ -799,7 +799,7 @@ def _make(name):
     p = _Pen()
     if name.startswith('sme_'):
         return _sme_shape(name)
-    aliases = {'selection': 'cursor', 'camera': 'cameras', 'light': 'lights', 'mesh': 'geometry', 'shape': 'shapes', 'modifiers': 'modify', 'playback': 'dope', 'selection_region': 'box', 'settings': 'utilities', 'angle': 'snap_angle', 'percent': 'snap_percent', 'open': 'folder', 'render_output': 'render', 'texture': 'material_library'}
+    aliases = {'selection': _msg('cursor'), _msg('camera'): _msg('cameras'), 'light': _msg('lights'), 'mesh': 'geometry', 'shape': 'shapes', 'modifiers': 'modify', 'playback': 'dope', 'selection_region': 'box', 'settings': 'utilities', 'angle': 'snap_angle', 'percent': 'snap_percent', 'open': 'folder', 'render_output': 'render', 'texture': 'material_library'}
     name = aliases.get(name, name)
     specific = _toolbar_shape(name)
     if specific is None:
@@ -823,7 +823,7 @@ def _make(name):
         else:
             p.line(((7, 8), (16, 17)), TEAL, 2.3)
             p.line(((16, 20), (20, 20), (20, 16)), GOLD, 1.6)
-    elif name == 'cursor':
+    elif name == _msg('cursor'):
         p.cursor()
         p.polygon(((6, 20), (6, 15), (10, 16)), GOLD)
     elif name == 'select_list':
@@ -1035,14 +1035,14 @@ def _make(name):
         p.line(((4, 3), (4, 17), (8, 21), (19, 20), (21, 14), (16, 10), (9, 10), (5, 6)), SILVER, 1.7)
         for (x, y) in ((4, 3), (8, 21), (21, 14), (9, 10)):
             p.rect(x - 1.4, y - 1.4, 2.8, 2.8, TEAL)
-    elif name == 'lights':
+    elif name == _msg('lights'):
         p.disc(12, 14, 5.4, SILVER, 20)
         p.rect(9, 5, 6, 4, SILVER)
         p.rect(10, 2, 4, 2, SILVER)
         for i in range(7):
             a = (i * 0.25 + 0.25) * pi
             p.line(((12 + 7.5 * cos(a), 14 + 7.5 * sin(a)), (12 + 10.5 * cos(a), 14 + 10.5 * sin(a))), SILVER, 1.3)
-    elif name == 'cameras':
+    elif name == _msg('cameras'):
         p.rect(3, 7, 13, 11, SILVER)
         p.polygon(((16, 10), (22, 6), (22, 19), (16, 15)), SILVER)
         p.disc(7, 20, 2.6, SILVER)
@@ -1107,8 +1107,8 @@ def _make(name):
         p.line(((6, 6), (18, 18), (6, 18), (18, 6)), SILVER, 1.8)
     elif name == 'dropdown':
         p.polygon(((6, 15), (18, 15), (12, 8)), SILVER)
-    elif name in ('left', 'right'):
-        points = ((15, 5), (8, 12), (15, 19)) if name == 'left' else ((9, 5), (16, 12), (9, 19))
+    elif name in (_msg('left'), _msg('right')):
+        points = ((15, 5), (8, 12), (15, 19)) if name == _msg('left') else ((9, 5), (16, 12), (9, 19))
         p.line(points, SILVER, 1.9)
     elif name == 'orbit':
         p.ellipse(12, 12, 10, 5, TEAL, 1.6, 0.1, 5.8, 28)

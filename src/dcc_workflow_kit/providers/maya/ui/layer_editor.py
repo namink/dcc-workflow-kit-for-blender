@@ -1,42 +1,58 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Simplified Chinese localization by namink; additional display integration 2026-10-31.
 """Maya Layer Editor (Display Layers) wrapped on collections.
 
-Maya's Layer Editor; design docs/steps/step_6.md 「계획」.
+Maya's Layer Editor.
 A display layer is a child collection of a "Display Layers" collection that
 is excluded from every view layer, so layers are membership lists that do
 not change the scene hierarchy or visibility by themselves. The layer state
 is an override on its member objects that never changes their own Maya
-attributes (step 129 #26; the object's visibility is ``hide_viewport``):
+attributes (#26; the object's visibility is ``hide_viewport``):
   V (visible)  -> the view-layer flag (``hide_set``)
   T (template) -> unselectable, wireframe; R (reference) -> unselectable
                   (the member's own display type / selectability are kept in ``OWN`` and put back)
   P (playback) -> off: members hidden (view-layer flag) while animation plays
-An object belongs to at most one display layer, as in Maya.
+An object belongs to at most one display layer, like Maya. Like V, T and R reach every object below a member
+(``operators/dag.py`` marks those with ``INHERITED``); a Template or Reference above wins over the object's own layer.
+
+A joint picked in a view is a member of its own (``ui/layer_joints.py``): the layer's state reaches the joint and
+everything below it through the kit's joint drawing and picking, never through the skeleton object; a kit skeleton
+picked as a whole stands for its root joints. Layers of older files that hold a skeleton object keep it.
 """
-from ..i18n import source_message as _dcc_source, display_message as _dcc_display, format_message as _dcc_format
-from ..i18n import tr as _zh, enum_items as _zh_enum, native as _zh_native
-import re
+
+
 import bpy
 from bpy.app.handlers import persistent
 from bpy.props import BoolProperty, EnumProperty, IntProperty, PointerProperty
-from . import chrome
+
+from .. import compat, i18n
+from . import chrome, layer_joints
 from ..operators import naming
-ROOT_NAME = _dcc_source('Display Layers')
-TYPES = (('NORMAL', _dcc_source('Normal'), _dcc_source('Selectable, normal display')), ('TEMPLATE', _dcc_source('Template'), _dcc_source('Unselectable, wireframe (Maya T)')), ('REFERENCE', _dcc_source('Reference'), _dcc_source('Unselectable (Maya R)')))
-TYPE_LETTER = {'NORMAL': ' ', 'TEMPLATE': 'T', 'REFERENCE': 'R'}
+
+ROOT_NAME = "Display Layers"
+TYPES = (("NORMAL", "Normal", "Selectable, normal display"),
+         ("TEMPLATE", "Template", "Unselectable, wireframe (Maya T)"),
+         ("REFERENCE", "Reference", "Unselectable (Maya R)"))
+TYPE_LETTER = {"NORMAL": " ", "TEMPLATE": "T", "REFERENCE": "R"}
+
 
 def _update(self, context):
     coll = self.id_data
     if self.is_layer:
         apply_layer(coll)
 
+
 class ALLSET_PG_layer(bpy.types.PropertyGroup):
-    is_layer: BoolProperty(options={'HIDDEN'}, translation_context='MWK:ui/layer_editor.py:42')
-    visible: BoolProperty(name=_zh_native('Visible', 'MWK:ui/layer_editor.py:43'), default=True, update=_update, description=_zh_native("Show the layer's objects (Maya V)", 'MWK:ui/layer_editor.py:43'), translation_context='MWK:ui/layer_editor.py:43')
-    playback: BoolProperty(name=_zh_native('Playback', 'MWK:ui/layer_editor.py:45'), default=True, update=_update, description=_zh_native("Show the layer's objects during playback (Maya P)", 'MWK:ui/layer_editor.py:45'), translation_context='MWK:ui/layer_editor.py:45')
-    display_type: EnumProperty(name=_zh_native('Display Type', 'MWK:ui/layer_editor.py:47'), items=_zh_enum(TYPES, 'MWK:ui/layer_editor.py:47'), default='NORMAL', update=_update, translation_context='MWK:ui/layer_editor.py:47')
-    order: IntProperty(options={'HIDDEN'}, translation_context='MWK:ui/layer_editor.py:49')
+    is_layer: BoolProperty(options={'HIDDEN'})
+    visible: BoolProperty(name="Visible", default=True, update=_update,
+                          description="Show the layer's objects (Maya V)")
+    playback: BoolProperty(name="Playback", default=True, update=_update,
+                           description="Show the layer's objects during playback (Maya P)")
+    display_type: EnumProperty(name="Display Type", items=TYPES, default="NORMAL", update=_update)
+    # list position: Maya lists the newest layer on top and Move Up / Down reorders (Maya 2022 Layer Editor)
+    order: IntProperty(options={'HIDDEN'})
+
+
+# --- data helpers -------------------------------------------------------------------------------
 
 def root(scene, create=False):
     coll = scene.collection.children.get(ROOT_NAME)
@@ -49,14 +65,17 @@ def root(scene, create=False):
                 lc.exclude = True
     return coll
 
+
 def layers(scene):
     r = root(scene)
     return [c for c in r.children if c.allset_layer.is_layer] if r else []
+
 
 def display_order(scene):
     """Layers top to bottom as Maya lists them: highest ``order`` (newest) first."""
     ls = layers(scene)
     return sorted(ls, key=lambda c: (-c.allset_layer.order, -ls.index(c)))
+
 
 def move_layer(scene, coll, delta):
     """Move ``coll`` ``delta`` rows down the list (-1 = up)."""
@@ -66,9 +85,10 @@ def move_layer(scene, coll, delta):
     if i == j:
         return False
     seq.insert(j, seq.pop(i))
-    for (n, c) in enumerate(reversed(seq)):
+    for n, c in enumerate(reversed(seq)):
         c.allset_layer.order = n + 1
     return True
+
 
 def layer_of(ob, scene):
     for coll in layers(scene):
@@ -76,10 +96,15 @@ def layer_of(ob, scene):
             return coll
     return None
 
+
 def next_layer_name():
     """Maya ``layer<N>``: one past the highest, gaps not filled."""
     return f"layer{naming.next_number('layer', {c.name for c in bpy.data.collections})}"
-OWN = 'allset_layer_own'
+
+
+OWN = "allset_layer_own"   # the member's own display_type / hide_select while a layer overrides them
+INHERITED = "allset_layer_inherited"   # TEMPLATE / REFERENCE an object takes from a layer above it
+
 
 def _layer_hide(ob, hidden):
     """The layer's V / P: the view-layer flag, never the object's own visibility (hide_viewport)."""
@@ -87,53 +112,141 @@ def _layer_hide(ob, hidden):
         try:
             if ob.hide_get(view_layer=vl) != hidden:
                 ob.hide_set(hidden, view_layer=vl)
-        except RuntimeError:
+        except RuntimeError:   # not in this view layer
             pass
+
 
 def _override_display(ob, display_type, unselectable):
     if OWN not in ob:
-        ob[OWN] = {'display_type': ob.display_type, 'hide_select': bool(ob.hide_select)}
-    ob.display_type = display_type
-    ob.hide_select = unselectable
+        ob[OWN] = {"display_type": ob.display_type, "hide_select": bool(ob.hide_select)}
+    if ob.display_type != display_type:
+        ob.display_type = display_type
+    if ob.hide_select != unselectable:
+        ob.hide_select = unselectable
+
 
 def _restore_display(ob):
     own = ob.get(OWN)
     if own is None:
         return
-    ob.display_type = own.get('display_type', 'TEXTURED')
-    ob.hide_select = bool(own.get('hide_select', False))
+    ob.display_type = own.get("display_type", 'TEXTURED')
+    ob.hide_select = bool(own.get("hide_select", False))
     del ob[OWN]
+
+
+def display_kind(ob, scene):
+    """TEMPLATE / REFERENCE of the object's own display layer, None for no layer or a Normal one."""
+    coll = layer_of(ob, scene)
+    kind = coll.allset_layer.display_type if coll is not None else "NORMAL"
+    return None if kind == "NORMAL" else kind
+
+
+def apply_display(ob, kind):
+    """Template (wireframe, unselectable), Reference (unselectable) or, for None, the object's own display."""
+    if kind is None:
+        _restore_display(ob)
+        return
+    own = ob.get(OWN)
+    own_type = own.get("display_type", ob.display_type) if own is not None else ob.display_type
+    _override_display(ob, 'WIRE' if kind == "TEMPLATE" else own_type, True)
+
 
 def apply_object(ob, layer):
     """Apply a layer's state to one member (None = back to the object's own state). Maya: a display layer is an
-    override (drawOverride) that never changes the node's own attributes (step 129 #26)."""
+    override (drawOverride) that never changes the node's own attributes (#26). A Template / Reference from a layer
+    above (``INHERITED``) wins over the member's own layer."""
     if layer is None:
         _layer_hide(ob, False)
-        _restore_display(ob)
+        apply_display(ob, ob.get(INHERITED))
         return
     st = layer.allset_layer
     _layer_hide(ob, not st.visible)
-    if st.display_type == 'NORMAL':
-        _restore_display(ob)
-    else:
-        own = ob.get(OWN)
-        own_type = own.get('display_type', ob.display_type) if own is not None else ob.display_type
-        _override_display(ob, 'WIRE' if st.display_type == 'TEMPLATE' else own_type, True)
+    apply_display(ob, ob.get(INHERITED) or (None if st.display_type == "NORMAL" else st.display_type))
+
 
 def apply_layer(coll):
     for ob in coll.objects:
         apply_object(ob, coll)
+    layer_joints.bump()             # member joints and the joints below them (kit drawing / picking)
     from ..operators import dag
-    dag.sync()
+    dag.sync()                      # a hidden layer hides its members' children too (Maya)
 
-def new_layer(scene, objects=()):
+
+def selected_nodes(context):
+    """The selection as Maya nodes for a display layer: (objects, {skeleton: [joint names]}, skeletons picked as a
+    whole). A joint picked in a view is a node (Pose Mode, or Edit Mode with the Move tool; in Object Mode the joints
+    still picked on a skeleton selected with other objects). A kit skeleton picked as a whole stands for its root
+    joints (Maya's top node of a skeleton is its root joint); another skeleton (a Rigify rig) is an object."""
+    from ..operators import joint_selection
+    from . import outliner_tree
+    from .channel_box import bone_selected
+    objects, joints, whole = [], {}, []
+    for ob in context.selected_objects:
+        if ob.type != 'ARMATURE' or ob.pose is None:
+            objects.append(ob)
+            continue
+        pbs = ob.pose.bones
+        if ob.mode == 'EDIT':
+            names = [eb.name for eb in joint_selection._edit_picked(ob) if eb.name in pbs]
+        else:
+            names = [pb.name for pb in pbs if bone_selected(pb) and not compat.bone_hidden(pb)
+                     and not joint_selection._collection_hidden(pb.bone)]
+        if not names and ob.mode != 'EDIT':
+            bones = outliner_tree._Bones(ob)
+            if outliner_tree.is_kit_skeleton(ob, bones):
+                names = [n for n in bones.roots if n in pbs]
+                whole.append(ob)
+        if names:
+            joints[ob] = names
+        else:
+            objects.append(ob)
+    return objects, joints, whole
+
+
+def add_nodes(scene, coll, objects=(), joints=None, whole=()):
+    """``add_objects`` for the objects; the joints move into ``coll`` (from any other layer). A kit skeleton picked
+    as a whole is its root joints: an older file's layer holding the skeleton object lets it go."""
+    add_objects(scene, coll, objects)
+    for ob in whole if joints else ():
+        old = layer_of(ob, scene)
+        if old is not None:
+            old.objects.unlink(ob)
+            apply_object(ob, None)
+    for ob, names in (joints or {}).items():
+        for n in names:
+            pb = ob.pose.bones.get(n)
+            if pb is not None:
+                layer_joints.set_layer(pb, coll)
+    _members_changed()
+
+
+def remove_nodes(scene, coll, objects=(), joints=None, whole=()):
+    """``remove_objects`` for the objects; the joints of ``coll`` leave it (a skeleton picked as a whole: its root
+    joints, and the skeleton object when an older file's layer holds it)."""
+    remove_objects(scene, coll, [*objects, *(ob for ob in whole if ob.name in coll.objects)])
+    for ob, names in (joints or {}).items():
+        for n in names:
+            pb = ob.pose.bones.get(n)
+            if pb is not None and layer_joints.layer_of(pb) == coll:
+                layer_joints.set_layer(pb, None)
+    _members_changed()
+
+
+def _members_changed():
+    layer_joints.bump()
+    from ..operators import dag
+    dag.sync()                      # what is below the members follows them (Maya)
+
+
+def new_layer(scene, objects=(), joints=None, whole=()):
     top = max((c.allset_layer.order for c in layers(scene)), default=0)
     coll = bpy.data.collections.new(next_layer_name())
     root(scene, create=True).children.link(coll)
     coll.allset_layer.is_layer = True
     coll.allset_layer.order = top + 1
-    add_objects(scene, coll, objects)
+    add_nodes(scene, coll, objects, joints, whole)
     return coll
+
 
 def add_objects(scene, coll, objects):
     for ob in objects:
@@ -144,31 +257,50 @@ def add_objects(scene, coll, objects):
             coll.objects.link(ob)
         apply_object(ob, coll)
 
+
 def remove_objects(scene, coll, objects):
     for ob in objects:
         if ob.name in coll.objects:
             coll.objects.unlink(ob)
             apply_object(ob, None)
 
-def delete_layer(scene, coll):
+
+def empty_layer(scene, coll):
     remove_objects(scene, coll, list(coll.objects))
+    remove_nodes(scene, coll, joints=layer_joints.members(coll, scene))
+
+
+def delete_layer(scene, coll):
+    empty_layer(scene, coll)
     bpy.data.collections.remove(coll)
+
 
 def active_layer(context):
     ls = layers(context.scene)
     i = context.scene.allset_layer_index
     return ls[i] if 0 <= i < len(ls) else None
+
+
+# --- playback (P) -------------------------------------------------------------------------------
+
 _hidden_for_playback = []
+
 
 @persistent
 def on_playback_pre(scene, *_args):
     _hidden_for_playback.clear()
+    joints = False
     for coll in layers(scene):
         st = coll.allset_layer
-        if st.visible and (not st.playback):
+        if st.visible and not st.playback:
             for ob in coll.objects:
                 _layer_hide(ob, True)
                 _hidden_for_playback.append(ob.name)
+            joints = joints or bool(layer_joints.members(coll, scene))
+    layer_joints.set_playing(True)  # member joints of a layer with Playback off: hidden while playing
+    if joints:
+        _playback_dag(scene)
+
 
 @persistent
 def on_playback_post(scene, *_args):
@@ -177,31 +309,46 @@ def on_playback_post(scene, *_args):
         if ob is not None:
             _layer_hide(ob, False)
     _hidden_for_playback.clear()
+    layer_joints.set_playing(False)
+    if layer_joints.has_members(scene):
+        _playback_dag(scene)
+
+
+def _playback_dag(scene):
+    """Objects under joints of a layer with Playback off follow them."""
+    from ..operators import dag
+    try:
+        dag.sync(scene)
+    except (ReferenceError, RuntimeError, AttributeError):
+        pass
+
+
+# --- operators -----------------------------------------------------------------------------------
 
 class _LayerOp:
     bl_options = {'REGISTER', 'UNDO'}
 
+
 class ALLSET_OT_layer_new(_LayerOp, bpy.types.Operator):
     """Create a display layer (optionally with the selected objects)"""
-    bl_translation_context = 'MWK:ui/layer_editor.py:227'
-    bl_idname = 'allset.layer_new'
-    bl_label = _zh_native('New Layer', 'MWK:ui/layer_editor.py:227')
-    bl_description = _zh_native('Create a display layer (optionally with the selected objects)', 'MWK:ui/layer_editor.py:227')
-    selected: BoolProperty(name=_zh_native('Assign Selected', 'MWK:ui/layer_editor.py:229'), default=False, translation_context='MWK:ui/layer_editor.py:229')
+    bl_idname = "allset.layer_new"
+    bl_label = "New Layer"
+
+    selected: BoolProperty(name="Assign Selected", default=False)
 
     def execute(self, context):
-        objs = list(context.selected_objects) if self.selected else []
-        coll = new_layer(context.scene, objs)
+        nodes = selected_nodes(context) if self.selected else ((), None, ())
+        coll = new_layer(context.scene, *nodes)
         context.scene.allset_layer_index = layers(context.scene).index(coll)
         return {'FINISHED'}
 
+
 class ALLSET_OT_layer_assign(_LayerOp, bpy.types.Operator):
     """Add (or remove) the selected objects to the active display layer"""
-    bl_translation_context = 'MWK:ui/layer_editor.py:241'
-    bl_idname = 'allset.layer_assign'
-    bl_label = _zh_native('Add Selected Objects', 'MWK:ui/layer_editor.py:241')
-    bl_description = _zh_native('Add (or remove) the selected objects to the active display layer', 'MWK:ui/layer_editor.py:241')
-    remove: BoolProperty(default=False, translation_context='MWK:ui/layer_editor.py:243')
+    bl_idname = "allset.layer_assign"
+    bl_label = "Add Selected Objects"
+
+    remove: BoolProperty(default=False)
 
     @classmethod
     def poll(cls, context):
@@ -209,16 +356,15 @@ class ALLSET_OT_layer_assign(_LayerOp, bpy.types.Operator):
 
     def execute(self, context):
         coll = active_layer(context)
-        fn = remove_objects if self.remove else add_objects
-        fn(context.scene, coll, list(context.selected_objects))
+        fn = remove_nodes if self.remove else add_nodes
+        fn(context.scene, coll, *selected_nodes(context))
         return {'FINISHED'}
+
 
 class ALLSET_OT_layer_select(_LayerOp, bpy.types.Operator):
     """Select the objects of the active display layer"""
-    bl_translation_context = 'MWK:ui/layer_editor.py:259'
-    bl_idname = 'allset.layer_select'
-    bl_label = _zh_native('Select Objects', 'MWK:ui/layer_editor.py:259')
-    bl_description = _zh_native('Select the objects of the active display layer', 'MWK:ui/layer_editor.py:259')
+    bl_idname = "allset.layer_select"
+    bl_label = "Select Objects"
 
     @classmethod
     def poll(cls, context):
@@ -226,16 +372,50 @@ class ALLSET_OT_layer_select(_LayerOp, bpy.types.Operator):
 
     def execute(self, context):
         coll = active_layer(context)
-        for ob in context.view_layer.objects:
-            ob.select_set(ob.name in coll.objects and (not ob.hide_select))
+        select_members(context, coll, layer_joints.members(coll, context.scene))
         return {'FINISHED'}
+
+
+def select_members(context, coll, joints):
+    """Maya Select Objects: only the members are picked (not what is below them), also in a Template or Reference
+    layer or a hidden one. Objects Blender can't select (Template / Reference, hidden) stay picked the way the kit
+    Outliner keeps them (``outliner_tree._keep_hidden``). Member joints alone: Pose Mode on their skeletons, the last
+    member the lead; with objects the skeletons are selected in Object Mode with the member joints picked on them."""
+    from ..operators import joint_selection
+    from . import outliner_tree
+    from .channel_box import set_bone_selected
+    if joints or context.mode != 'OBJECT':
+        joint_selection.leave(context, clear_selection=True)
+    view_layer = context.view_layer
+    objects = [ob for ob in view_layer.objects if ob.name in coll.objects]
+    locked = [ob for ob in objects if outliner_tree.unselectable(ob)]
+    for ob in view_layer.objects:
+        if ob.select_get():
+            ob.select_set(False)
+    last = None
+    for ob in (*(o for o in objects if o not in locked), *joints):
+        try:
+            ob.select_set(True)
+            last = ob
+        except RuntimeError:           # not in the view layer / hidden
+            continue
+    for arm, names in joints.items():
+        for pb in arm.pose.bones:
+            set_bone_selected(pb, pb.name in names)
+        arm.data.bones.active = arm.data.bones.get(names[-1])
+    view_layer.objects.active = last if last is not None else (locked[-1] if locked else None)
+    outliner_tree._keep_hidden(context, locked, replace=True)
+    if not objects and last is not None and last.type == 'ARMATURE':
+        try:
+            bpy.ops.object.mode_set(mode='POSE')    # every selected skeleton (several: multi-object Pose Mode)
+        except RuntimeError:                         # a skeleton an older layer hides: the joints stay picked
+            pass
+
 
 class ALLSET_OT_layer_delete(_LayerOp, bpy.types.Operator):
     """Delete the active display layer (its objects stay, back to normal display)"""
-    bl_translation_context = 'MWK:ui/layer_editor.py:275'
-    bl_idname = 'allset.layer_delete'
-    bl_label = _zh_native('Delete Layer', 'MWK:ui/layer_editor.py:275')
-    bl_description = _zh_native('Delete the active display layer (its objects stay, back to normal display)', 'MWK:ui/layer_editor.py:275')
+    bl_idname = "allset.layer_delete"
+    bl_label = "Delete Layer"
 
     @classmethod
     def poll(cls, context):
@@ -246,13 +426,13 @@ class ALLSET_OT_layer_delete(_LayerOp, bpy.types.Operator):
         context.scene.allset_layer_index = max(0, context.scene.allset_layer_index - 1)
         return {'FINISHED'}
 
+
 class ALLSET_OT_layer_cycle_type(_LayerOp, bpy.types.Operator):
     """Cycle display type: normal -> template (T) -> reference (R)"""
-    bl_translation_context = 'MWK:ui/layer_editor.py:290'
-    bl_idname = 'allset.layer_cycle_type'
-    bl_label = _zh_native('Cycle Layer Type', 'MWK:ui/layer_editor.py:290')
-    bl_description = _zh_native('Cycle display type: normal -> template (T) -> reference (R)', 'MWK:ui/layer_editor.py:290')
-    layer: bpy.props.StringProperty(translation_context='MWK:ui/layer_editor.py:292')
+    bl_idname = "allset.layer_cycle_type"
+    bl_label = "Cycle Layer Type"
+
+    layer: bpy.props.StringProperty()
 
     def execute(self, context):
         coll = bpy.data.collections.get(self.layer)
@@ -263,18 +443,20 @@ class ALLSET_OT_layer_cycle_type(_LayerOp, bpy.types.Operator):
         st.display_type = order[(order.index(st.display_type) + 1) % len(order)]
         return {'FINISHED'}
 
+
 class ALLSET_OT_layer_toggle(_LayerOp, bpy.types.Operator):
     """Toggle the layer's visibility (V) or playback (P)"""
-    bl_translation_context = 'MWK:ui/layer_editor.py:307'
-    bl_idname = 'allset.layer_toggle'
-    bl_label = _zh_native('Toggle Layer', 'MWK:ui/layer_editor.py:307')
-    bl_description = _zh_native("Toggle the layer's visibility (V) or playback (P)", 'MWK:ui/layer_editor.py:307')
-    layer: bpy.props.StringProperty(translation_context='MWK:ui/layer_editor.py:309')
-    attr: EnumProperty(items=_zh_enum((('visible', 'Visible', 'Maya V'), ('playback', 'Playback', 'Maya P')), 'MWK:ui/layer_editor.py:310'), translation_context='MWK:ui/layer_editor.py:310')
+    bl_idname = "allset.layer_toggle"
+    bl_label = "Toggle Layer"
+
+    layer: bpy.props.StringProperty()
+    attr: EnumProperty(items=(("visible", "Visible", "Maya V"), ("playback", "Playback", "Maya P")))
 
     @classmethod
+    @i18n.translated
     def description(cls, context, props):
-        return _zh("Visibility (Maya V): show or hide the layer's objects" if props.attr == 'visible' else "Playback (Maya P): show the layer's objects while animation plays", 'MWK:ui/layer_editor.py:314')
+        return ("Visibility (Maya V): show or hide the layer's objects" if props.attr == "visible" else
+                "Playback (Maya P): show the layer's objects while animation plays")
 
     def execute(self, context):
         coll = bpy.data.collections.get(self.layer)
@@ -284,17 +466,19 @@ class ALLSET_OT_layer_toggle(_LayerOp, bpy.types.Operator):
         setattr(st, self.attr, not getattr(st, self.attr))
         return {'FINISHED'}
 
+
 class ALLSET_OT_layer_move(_LayerOp, bpy.types.Operator):
     """Move the selected layer up or down in the list (Maya Layer Editor arrows)"""
-    bl_translation_context = 'MWK:ui/layer_editor.py:329'
-    bl_idname = 'allset.layer_move'
-    bl_label = _zh_native('Move Layer', 'MWK:ui/layer_editor.py:329')
-    bl_description = _zh_native('Move the selected layer up or down in the list (Maya Layer Editor arrows)', 'MWK:ui/layer_editor.py:329')
-    direction: EnumProperty(items=_zh_enum((('UP', 'Up', 'Move selection up in list'), ('DOWN', 'Down', 'Move selection down in list')), 'MWK:ui/layer_editor.py:331'), translation_context='MWK:ui/layer_editor.py:331')
+    bl_idname = "allset.layer_move"
+    bl_label = "Move Layer"
+
+    direction: EnumProperty(items=(("UP", "Up", "Move selection up in list"),
+                                   ("DOWN", "Down", "Move selection down in list")))
 
     @classmethod
+    @i18n.translated
     def description(cls, context, props):
-        return _zh(f'Move selection {props.direction.lower()} in list', 'MWK:ui/layer_editor.py:336')
+        return f"Move selection {props.direction.lower()} in list"
 
     @classmethod
     def poll(cls, context):
@@ -302,33 +486,31 @@ class ALLSET_OT_layer_move(_LayerOp, bpy.types.Operator):
 
     def execute(self, context):
         coll = active_layer(context)
-        move_layer(context.scene, coll, -1 if self.direction == 'UP' else 1)
+        move_layer(context.scene, coll, -1 if self.direction == "UP" else 1)
         context.scene.allset_layer_index = layers(context.scene).index(coll)
         return {'FINISHED'}
 
+
 class ALLSET_OT_layer_empty(_LayerOp, bpy.types.Operator):
     """Remove every object from the selected layer (Maya Empty the Layer)"""
-    bl_translation_context = 'MWK:ui/layer_editor.py:352'
-    bl_idname = 'allset.layer_empty'
-    bl_label = _zh_native('Empty the Layer', 'MWK:ui/layer_editor.py:352')
-    bl_description = _zh_native('Remove every object from the selected layer (Maya Empty the Layer)', 'MWK:ui/layer_editor.py:352')
+    bl_idname = "allset.layer_empty"
+    bl_label = "Empty the Layer"
 
     @classmethod
     def poll(cls, context):
         return active_layer(context) is not None
 
     def execute(self, context):
-        coll = active_layer(context)
-        remove_objects(context.scene, coll, list(coll.objects))
+        empty_layer(context.scene, active_layer(context))
         return {'FINISHED'}
+
 
 class ALLSET_OT_layer_set_type(_LayerOp, bpy.types.Operator):
     """Set the selected layer's display type (Maya Set Selected Layers)"""
-    bl_translation_context = 'MWK:ui/layer_editor.py:367'
-    bl_idname = 'allset.layer_set_type'
-    bl_label = _zh_native('Set Layer Type', 'MWK:ui/layer_editor.py:367')
-    bl_description = _zh_native("Set the selected layer's display type (Maya Set Selected Layers)", 'MWK:ui/layer_editor.py:367')
-    display_type: EnumProperty(items=_zh_enum(TYPES, 'MWK:ui/layer_editor.py:369'), translation_context='MWK:ui/layer_editor.py:369')
+    bl_idname = "allset.layer_set_type"
+    bl_label = "Set Layer Type"
+
+    display_type: EnumProperty(items=TYPES)
 
     @classmethod
     def poll(cls, context):
@@ -337,8 +519,16 @@ class ALLSET_OT_layer_set_type(_LayerOp, bpy.types.Operator):
     def execute(self, context):
         active_layer(context).allset_layer.display_type = self.display_type
         return {'FINISHED'}
+
+
+# --- UI ------------------------------------------------------------------------------------------
+
+# Maya layer row: three 20x14 boxes V / P / type with 3 px gaps, a 16x14
+# colour swatch, then the name as plain text, rows 20 px: boxes one UI unit wide in a left-aligned row (natural
+# widths, small gaps).
 BOX_UNITS = 1.4
 SWATCH_UNITS = 0.9
+
 
 class ALLSET_UL_layers(bpy.types.UIList):
     """Maya display layer rows: newest on top (``order``), click = select the layer, double-click = rename"""
@@ -346,44 +536,60 @@ class ALLSET_UL_layers(bpy.types.UIList):
     def filter_items(self, context, data, propname):
         items = list(getattr(data, propname))
         flags = [self.bitflag_filter_item if c.allset_layer.is_layer else 0 for c in items]
+        # neworder[i] = display position of item i: highest order first (Maya lists the newest layer on top)
         ranked = sorted(range(len(items)), key=lambda i: (-items[i].allset_layer.order, -i))
         neworder = [0] * len(items)
-        for (pos, i) in enumerate(ranked):
+        for pos, i in enumerate(ranked):
             neworder[i] = pos
-        return (flags, neworder)
+        return flags, neworder
 
     def draw_filter(self, context, layout):
-        pass
+        pass   # Maya's layer list has no filter / sort options
 
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
         st = item.allset_layer
         row = layout.row(align=False)
         boxes = row.row(align=True)
-        boxes.alignment = 'LEFT'
-        for (attr, letter) in (('visible', 'V'), ('playback', 'P')):
+        boxes.alignment = 'LEFT'           # natural widths: fixed boxes, the name takes the rest
+        for attr, letter in (("visible", "V"), ("playback", "P")):
             cell = boxes.row(align=True)
             cell.ui_units_x = BOX_UNITS
-            op = cell.operator('allset.layer_toggle', text=_zh(letter if getattr(st, attr) else ' ', 'MWK:ui/layer_editor.py:413'))
-            (op.layer, op.attr) = (item.name, attr)
+            op = cell.operator("allset.layer_toggle", text=letter if getattr(st, attr) else " ")
+            op.layer, op.attr = item.name, attr
             boxes.separator(factor=0.3)
         cell = boxes.row(align=True)
         cell.ui_units_x = BOX_UNITS
-        cell.operator('allset.layer_cycle_type', text=_zh(TYPE_LETTER[st.display_type], 'MWK:ui/layer_editor.py:418')).layer = item.name
+        cell.operator("allset.layer_cycle_type", text=TYPE_LETTER[st.display_type]).layer = item.name
         sw = boxes.row(align=True)
         sw.ui_units_x = SWATCH_UNITS
-        sw.prop(item, 'color_tag', text=_dcc_display(''), icon_only=True, emboss=False)
-        row.prop(item, 'name', text=_dcc_display(''), emboss=False)
-LAYER_MENU = (('allset.layer_assign', _dcc_source('Add Selected Objects'), {'remove': False}), ('allset.layer_assign', _dcc_source('Remove Selected Objects'), {'remove': True}), ('allset.layer_select', _dcc_source('Select Objects'), {}), None, ('allset.layer_set_type', _dcc_source('Set Normal'), {'display_type': 'NORMAL'}), ('allset.layer_set_type', _dcc_source('Set Template'), {'display_type': 'TEMPLATE'}), ('allset.layer_set_type', _dcc_source('Set Reference'), {'display_type': 'REFERENCE'}), None, ('allset.layer_empty', _dcc_source('Empty the Layer'), {}), ('allset.layer_delete', _dcc_source('Delete Layer'), {}))
+        sw.prop(item, "color_tag", text="", icon_only=True, emboss=False)
+        row.prop(item, "name", text="", emboss=False)
+
+
+LAYER_MENU = (   # Maya's layer RMB menu
+    ("allset.layer_assign", "Add Selected Objects", {"remove": False}),
+    ("allset.layer_assign", "Remove Selected Objects", {"remove": True}),
+    ("allset.layer_select", "Select Objects", {}),
+    None,
+    ("allset.layer_set_type", "Set Normal", {"display_type": "NORMAL"}),
+    ("allset.layer_set_type", "Set Template", {"display_type": "TEMPLATE"}),
+    ("allset.layer_set_type", "Set Reference", {"display_type": "REFERENCE"}),
+    None,
+    ("allset.layer_empty", "Empty the Layer", {}),
+    ("allset.layer_delete", "Delete Layer", {}),
+)
+
 
 def draw_layer_items(layout):
     for entry in LAYER_MENU:
         if entry is None:
             layout.separator()
             continue
-        (idname, text, props) = entry
-        op = layout.operator(idname, text=_zh(text, 'MWK:ui/layer_editor.py:445'))
-        for (k, v) in props.items():
+        idname, text, props = entry
+        op = layout.operator(idname, text=text)
+        for k, v in props.items():
             setattr(op, k, v)
+
 
 def draw_anim_layer_mode(layout, context):
     """Maya's Override / Additive choice for the selected layer (its layer menu), as two check items."""
@@ -392,13 +598,13 @@ def draw_anim_layer_mode(layout, context):
     if sel is None or sel.name == anim_layers.BASE:
         return
     layout.separator()
-    layout.prop(sel, 'override', text=_zh('Override', 'MWK:ui/layer_editor.py:457'))
-    layout.prop(sel, 'override', text=_zh('Additive', 'MWK:ui/layer_editor.py:458'), invert_checkbox=True)
+    layout.prop(sel, "override", text="Override")
+    layout.prop(sel, "override", text="Additive", invert_checkbox=True)
+
 
 class ALLSET_MT_le_layers(bpy.types.Menu):
     """Maya Layer Editor Layers menu"""
-    bl_translation_context = 'MWK:ui/layer_editor.py:463'
-    bl_label = _zh_native('Layers', 'MWK:ui/layer_editor.py:463')
+    bl_label = "Layers"
 
     def draw(self, context):
         lay = self.layout
@@ -406,18 +612,28 @@ class ALLSET_MT_le_layers(bpy.types.Menu):
             draw_anim_layer_items(lay, context)
             draw_anim_layer_mode(lay, context)
             return
-        lay.operator('allset.layer_new', text=_zh('Create Empty Layer', 'MWK:ui/layer_editor.py:471')).selected = False
-        lay.operator('allset.layer_new', text=_zh('Create Layer from Selected', 'MWK:ui/layer_editor.py:472')).selected = True
+        lay.operator("allset.layer_new", text="Create Empty Layer").selected = False
+        lay.operator("allset.layer_new", text="Create Layer from Selected").selected = True
         lay.separator()
         draw_layer_items(lay)
 
+
 def is_layer_button(context):
-    """The button under the mouse belongs to a display layer row (for its RMB menu)."""
-    op = getattr(context, 'button_operator', None)
-    if op is not None and op.bl_rna.identifier in ('ALLSET_OT_layer_toggle', 'ALLSET_OT_layer_cycle_type'):
+    """The button under the mouse belongs to a display layer row (for its RMB menu): one of its boxes, its
+    name / colour, or the row itself (Blender's list row button, whose property is the list's active index)."""
+    op = getattr(context, "button_operator", None)
+    if op is not None and op.bl_rna.identifier in ("ALLSET_OT_layer_toggle", "ALLSET_OT_layer_cycle_type"):
         return True
-    ptr = getattr(context, 'button_pointer', None)
-    return isinstance(ptr, bpy.types.Collection) and getattr(ptr.allset_layer, 'is_layer', False)
+    ptr = getattr(context, "button_pointer", None)
+    if isinstance(ptr, bpy.types.Collection) and getattr(ptr.allset_layer, "is_layer", False):
+        return True
+    return is_layer_row(context)
+
+
+def is_layer_row(context):
+    prop = getattr(context, "button_prop", None)
+    return prop is not None and getattr(prop, "identifier", "") == "allset_layer_index"
+
 
 def draw_button_menu(self, context):
     """Maya's layer RMB menu on top of Blender's button context menu (a C menu, not a keymap item)."""
@@ -428,37 +644,107 @@ def draw_button_menu(self, context):
         return
     if not is_layer_button(context):
         return
+    if is_layer_row(context):
+        # the row button carries no layer: the items act on the current (highlighted) layer, named here
+        sel = active_layer(context)
+        if sel is not None:
+            self.layout.label(text=sel.name, icon='OUTLINER_COLLECTION')
     draw_layer_items(self.layout)
     self.layout.separator()
 
+
 class ALLSET_MT_le_options(bpy.types.Menu):
     """Maya Layer Editor Options menu"""
-    bl_translation_context = 'MWK:ui/layer_editor.py:501'
-    bl_label = _zh_native('Options', 'MWK:ui/layer_editor.py:501')
+    bl_label = "Options"
 
     def draw(self, context):
-        for label in (_dcc_source('Make New Layers Current'), _dcc_source('Add New Objects to Current Layer'), _dcc_source('Auto Overwrite'), _dcc_source('Show Namespace')):
+        for label in ("Make New Layers Current", "Add New Objects to Current Layer", "Auto Overwrite",
+                      "Show Namespace"):
             chrome.grey(self.layout, label)
 
+
 class ALLSET_MT_le_help(bpy.types.Menu):
-    bl_translation_context = 'MWK:ui/layer_editor.py:510'
-    bl_label = _zh_native('Help', 'MWK:ui/layer_editor.py:510')
+    bl_label = "Help"
 
     def draw(self, context):
-        self.layout.operator('wm.url_open', text=_zh('Help on Display Layers (Blender collections)', 'MWK:ui/layer_editor.py:513')).url = HELP_URL
-HELP_URL = 'https://docs.blender.org/manual/en/4.5/scene_layout/collections/collections.html'
-TABS = (('DISPLAY', _dcc_source('Display'), _dcc_source('Display layers')), ('ANIM', _dcc_source('Anim'), _dcc_source('Animation layers')))
-MENU_BAR = ((_dcc_source('Layers'), 'ALLSET_MT_le_layers'), (_dcc_source('Options'), 'ALLSET_MT_le_options'), (_dcc_source('Help'), 'ALLSET_MT_le_help'))
-ANIM_LAYER_MENU = (('allset.anim_layer_create', _dcc_source('Create Empty Layer'), {'from_selected': False}), ('allset.anim_layer_create', _dcc_source('Create Layer from Selected'), {'from_selected': True}), None, ('allset.anim_layer_members', _dcc_source('Add Selected Objects'), {'add': True}), ('allset.anim_layer_members', _dcc_source('Remove Selected Objects'), {'add': False}), ('allset.anim_layer_extract', _dcc_source('Extract Selected Objects'), {}), None, ('allset.anim_layer_duplicate', _dcc_source('Duplicate Layer'), {'no_animation': False}), ('allset.anim_layer_duplicate', _dcc_source('Duplicate Layer (No Animation)'), {'no_animation': True}), ('allset.anim_layer_merge', _dcc_source('Merge Layers'), {}), ('allset.anim_layer_zero_key', _dcc_source('Zero Key Layer'), {}), None, ('allset.anim_layer_extract', _dcc_source('Extract Non-Layered Animation for Selected Objects'), {'base': True}), ('allset.anim_layer_extract', _dcc_source('Extract Non-Layered Animation for All Objects'), {'all_objects': True}), None, ('allset.anim_layer_delete', _dcc_source('Delete'), {}), ('allset.anim_layer_empty', _dcc_source('Empty'), {}), ('allset.anim_layer_delete_empty', _dcc_source('Delete Empty Layers'), {}))
-ANIM_TOOLBAR = (('allset.anim_layer_zero_key', 'KEYFRAME', {}), ('allset.anim_layer_key_weight', 'KEY_DEHLT', {'weight': 0.0}), ('allset.anim_layer_key_weight', 'KEY_HLT', {'weight': 1.0}))
-ANIM_TOGGLES = (('lock', ('UNLOCKED', 'LOCKED')), ('solo', ('SOLO_OFF', 'SOLO_ON')), ('mute', ('MUTE_IPO_OFF', 'MUTE_IPO_ON')))
-GREY_WITH_BASE = (_dcc_source('Add Selected Objects'), _dcc_source('Remove Selected Objects'), _dcc_source('Delete'), _dcc_source('Empty'), _dcc_source('Delete Empty Layers'))
-ANIM_ROW_MENU = (('allset.anim_layer_members', _dcc_source('Add Selected Objects'), {'add': True}), ('allset.anim_layer_members', _dcc_source('Remove Selected Objects'), {'add': False}), ('allset.anim_layer_extract', _dcc_source('Extract Selected Objects'), {}), None, ('allset.anim_layer_duplicate', _dcc_source('Duplicate Layer'), {'no_animation': False}), ('allset.anim_layer_duplicate', _dcc_source('Duplicate Layer (No Animation)'), {'no_animation': True}), ('allset.anim_layer_merge', _dcc_source('Merge Layers'), {}), None, ('lock', _dcc_source('Lock'), None), ('mute', _dcc_source('Mute'), None), ('solo', _dcc_source('Solo'), None), None, ('allset.anim_layer_delete', _dcc_source('Delete'), {}), ('allset.anim_layer_empty', _dcc_source('Empty'), {}), ('allset.anim_layer_delete_empty', _dcc_source('Delete Empty Layers'), {}))
-ROW_ON_BASE = (_dcc_source('Extract Selected Objects'), _dcc_source('Duplicate Layer'), _dcc_source('Duplicate Layer (No Animation)'), _dcc_source('Merge Layers'), _dcc_source('Lock'))
+        self.layout.operator("wm.url_open", text="Help on Display Layers (Blender collections)").url = HELP_URL
+
+
+HELP_URL = "https://docs.blender.org/manual/en/5.2/scene_layout/collections/collections.html"
+# Maya Layer Editor: tabs Display / Anim, menu bar Layers / Options / Help,
+# toolbar on the right.
+TABS = (('DISPLAY', "Display", "Display layers"), ('ANIM', "Anim", "Animation layers"))
+MENU_BAR = (("Layers", "ALLSET_MT_le_layers"), ("Options", "ALLSET_MT_le_options"), ("Help", "ALLSET_MT_le_help"))
+
+# Maya Anim tab Layers menu (Maya order and labels): the items the kit's
+# NLA layers carry (operators/anim_layers.py, operators/anim_layers_204.py). Zero Key Layer is a Maya
+# toolbar button (also on the kit toolbar), kept here after Merge Layers.
+ANIM_LAYER_MENU = (
+    ("allset.anim_layer_create", "Create Empty Layer", {"from_selected": False}),
+    ("allset.anim_layer_create", "Create Layer from Selected", {"from_selected": True}),
+    None,
+    ("allset.anim_layer_members", "Add Selected Objects", {"add": True}),
+    ("allset.anim_layer_members", "Remove Selected Objects", {"add": False}),
+    ("allset.anim_layer_extract", "Extract Selected Objects", {}),
+    None,
+    ("allset.anim_layer_duplicate", "Duplicate Layer", {"no_animation": False}),
+    ("allset.anim_layer_duplicate", "Duplicate Layer (No Animation)", {"no_animation": True}),
+    ("allset.anim_layer_merge", "Merge Layers", {}),
+    ("allset.anim_layer_zero_key", "Zero Key Layer", {}),
+    None,
+    ("allset.anim_layer_extract", "Extract Non-Layered Animation for Selected Objects", {"base": True}),
+    ("allset.anim_layer_extract", "Extract Non-Layered Animation for All Objects", {"all_objects": True}),
+    None,
+    ("allset.anim_layer_delete", "Delete", {}),
+    ("allset.anim_layer_empty", "Empty", {}),
+    ("allset.anim_layer_delete_empty", "Delete Empty Layers", {}),
+)
+# Maya's Anim tab toolbar, left part (Zero Key / Zero Weight / Full Weight buttons;
+# Blender icons until kit glyphs are drawn)
+ANIM_TOOLBAR = (
+    ("allset.anim_layer_zero_key", 'KEYFRAME', {}),
+    ("allset.anim_layer_key_weight", 'KEY_DEHLT', {"weight": 0.0}),
+    ("allset.anim_layer_key_weight", 'KEY_HLT', {"weight": 1.0}),
+)
+# Maya's row buttons, left of the name: Lock, Solo, Mute (24 px pitch,
+# BaseAnimation only Lock); icons (off, on) instead of Maya's padlock / rectangle / circle-slash images
+ANIM_TOGGLES = (("lock", ('UNLOCKED', 'LOCKED')), ("solo", ('SOLO_OFF', 'SOLO_ON')),
+                ("mute", ('MUTE_IPO_OFF', 'MUTE_IPO_ON')))
+
+
+# Maya greys these Layers menu items while BaseAnimation is among the selected layers
+# (Add / Remove Selected Objects, Select Objects, Select Branch / Layer Node,
+# Export, Membership, Attribute Editor, Delete, Empty, Delete Empty Layers, Layer Mode). With no layer selected Maya
+# enables everything; the kit always has a selected layer.
+GREY_WITH_BASE = ("Add Selected Objects", "Remove Selected Objects", "Delete", "Empty", "Delete Empty Layers")
+# Layer row right-click menu: the Layers menu without
+# the Create / Extract Non-Layered items, plus Lock / Mute / Solo; on BaseAnimation only Extract, Duplicate x2, Merge
+# and Lock stay enabled. Exclusive solo, Select Objects / All / Branch / Layer Node, Export, Membership and Attribute
+# Editor are not in the kit (remaining).
+ANIM_ROW_MENU = (
+    ("allset.anim_layer_members", "Add Selected Objects", {"add": True}),
+    ("allset.anim_layer_members", "Remove Selected Objects", {"add": False}),
+    ("allset.anim_layer_extract", "Extract Selected Objects", {}),
+    None,
+    ("allset.anim_layer_duplicate", "Duplicate Layer", {"no_animation": False}),
+    ("allset.anim_layer_duplicate", "Duplicate Layer (No Animation)", {"no_animation": True}),
+    ("allset.anim_layer_merge", "Merge Layers", {}),
+    None,
+    ("lock", "Lock", None),
+    ("mute", "Mute", None),
+    ("solo", "Solo", None),
+    None,
+    ("allset.anim_layer_delete", "Delete", {}),
+    ("allset.anim_layer_empty", "Empty", {}),
+    ("allset.anim_layer_delete_empty", "Delete Empty Layers", {}),
+)
+ROW_ON_BASE = ("Extract Selected Objects", "Duplicate Layer", "Duplicate Layer (No Animation)", "Merge Layers", "Lock")
+
 
 def _base_selected(context):
     from ..operators import anim_layers_204
     return anim_layers_204.base_selected(context.scene)
+
 
 def draw_anim_layer_items(layout, context=None):
     grey = context is not None and _base_selected(context)
@@ -466,14 +752,15 @@ def draw_anim_layer_items(layout, context=None):
         if entry is None:
             layout.separator()
             continue
-        (idname, text, props) = entry
+        idname, text, props = entry
         line = layout
         if grey and text in GREY_WITH_BASE:
             line = layout.row()
             line.enabled = False
-        op = line.operator(idname, text=_zh(text, 'MWK:ui/layer_editor.py:603'))
-        for (k, v) in props.items():
+        op = line.operator(idname, text=text)
+        for k, v in props.items():
             setattr(op, k, v)
+
 
 def draw_anim_layer_mode(layout, context):
     """Maya's Override / Additive choice for the selected layer (its layer menu), as two check items (greyed while
@@ -485,60 +772,65 @@ def draw_anim_layer_mode(layout, context):
     layout.separator()
     col = layout.column()
     col.enabled = not _base_selected(context)
-    col.prop(sel, 'override', text=_zh('Override', 'MWK:ui/layer_editor.py:618'))
-    col.prop(sel, 'override', text=_zh('Additive', 'MWK:ui/layer_editor.py:619'), invert_checkbox=True)
+    col.prop(sel, "override", text="Override")
+    col.prop(sel, "override", text="Additive", invert_checkbox=True)
+
 
 def anim_layer_row(context):
     """The animation layer entry whose Layer Editor row is under the mouse (name button or its Lock / Solo / Mute
     toggle), for the row's right-click menu; None elsewhere."""
-    scene = getattr(context, 'scene', None)
-    ls = getattr(scene, 'allset_anim_layers', None)
+    scene = getattr(context, "scene", None)
+    ls = getattr(scene, "allset_anim_layers", None)
     if ls is None or not len(ls):
         return None
-    op = getattr(context, 'button_operator', None)
-    if op is not None and op.bl_rna.identifier == 'ALLSET_OT_anim_layer_select':
+    op = getattr(context, "button_operator", None)
+    if op is not None and op.bl_rna.identifier == "ALLSET_OT_anim_layer_select":
         i = op.index
         return ls[i] if 0 <= i < len(ls) else None
-    ptr = getattr(context, 'button_pointer', None)
-    if ptr is not None and getattr(ptr, 'bl_rna', None) is not None and (ptr.bl_rna.identifier == 'ALLSET_PG_anim_layer'):
+    ptr = getattr(context, "button_pointer", None)
+    if ptr is not None and getattr(ptr, "bl_rna", None) is not None and \
+            ptr.bl_rna.identifier == "ALLSET_PG_anim_layer":
         return next((e for e in ls if e.name == ptr.name), None)
     return None
+
 
 def draw_anim_row_menu(layout, context, entry):
     """Maya's layer right-click menu: the selected layers when the clicked row is selected, else that row only."""
     from ..operators import anim_layers
     picked = {e.name for e in anim_layers.selected_layers(context.scene)}
-    layer = '' if entry.name in picked else entry.name
+    layer = "" if entry.name in picked else entry.name
     base = entry.name == anim_layers.BASE
     grey_base = anim_layers.BASE in (picked if not layer else {layer})
     for item in ANIM_ROW_MENU:
         if item is None:
             layout.separator()
             continue
-        (idname, text, props) = item
+        idname, text, props = item
         line = layout.row()
         if (base or grey_base) and text not in ROW_ON_BASE:
             line.enabled = False
-        if props is None:
-            if base and idname != 'lock':
+        if props is None:                   # Lock / Mute / Solo of the clicked row
+            if base and idname != "lock":
                 line.enabled = False
-            line.prop(entry, idname, text=_zh(text, 'MWK:ui/layer_editor.py:658'))
+            line.prop(entry, idname, text=text)
             continue
-        op = line.operator(idname, text=_zh(text, 'MWK:ui/layer_editor.py:660'))
-        for (k, v) in props.items():
+        op = line.operator(idname, text=text)
+        for k, v in props.items():
             setattr(op, k, v)
-        if layer and idname != 'allset.anim_layer_delete_empty':
+        if layer and idname != "allset.anim_layer_delete_empty":
             op.layer = layer
     if not base:
         layout.separator()
         col = layout.column()
         col.enabled = not grey_base
-        col.prop(entry, 'override', text=_zh('Override', 'MWK:ui/layer_editor.py:669'))
-        col.prop(entry, 'override', text=_zh('Additive', 'MWK:ui/layer_editor.py:670'), invert_checkbox=True)
+        col.prop(entry, "override", text="Override")
+        col.prop(entry, "override", text="Additive", invert_checkbox=True)
+
 
 def anim_display_order(scene):
     """Indices of ``Scene.allset_anim_layers`` as Maya lists them: top layer first, BaseAnimation last."""
-    return list(reversed(range(len(getattr(scene, 'allset_anim_layers', ())))))
+    return list(reversed(range(len(getattr(scene, "allset_anim_layers", ())))))
+
 
 def draw_anim_tab(layout, context):
     """Maya's Anim tab: toolbar (Create Empty Layer, Create Layer from Selected), the layer rows (name = select,
@@ -551,103 +843,125 @@ def draw_anim_tab(layout, context):
     left = bar.row(align=True)
     left.alignment = 'LEFT'
     left.emboss = 'NONE'
-    for (idname, icon, props) in ANIM_TOOLBAR:
-        op = left.operator(idname, text=_dcc_display(''), icon=icon)
-        for (k, v) in props.items():
+    for idname, icon, props in ANIM_TOOLBAR:
+        op = left.operator(idname, text="", icon=icon)
+        for k, v in props.items():
             setattr(op, k, v)
     row = bar.row(align=True)
     row.alignment = 'RIGHT'
     row.emboss = 'NONE'
-    button(row, 'allset.anim_layer_create', 'layer:NEW_EMPTY', 'ADD', text='').from_selected = False
-    button(row, 'allset.anim_layer_create', 'layer:NEW_SELECTED', 'COLLECTION_NEW', text='').from_selected = True
+    button(row, "allset.anim_layer_create", "layer:NEW_EMPTY", 'ADD', text="").from_selected = False
+    button(row, "allset.anim_layer_create", "layer:NEW_SELECTED", 'COLLECTION_NEW', text="").from_selected = True
     ls = anim_layers.layers(scene)
     if not len(ls):
         return
     sel = anim_layers.selected(scene)
-    picked = {e.name for e in anim_layers.selected_layers(scene)}
+    picked = {e.name for e in anim_layers.selected_layers(scene)}     # Ctrl / Shift selection
     col = layout.column(align=True)
     for i in anim_display_order(scene):
         e = ls[i]
         line = col.row(align=True)
         base = e.name == anim_layers.BASE
-        for (attr, icons) in ANIM_TOGGLES:
+        for attr, icons in ANIM_TOGGLES:
             cell = line.row(align=True)
-            if base and attr != 'lock':
-                cell.label(text=_dcc_display(''), icon='BLANK1')
+            if base and attr != "lock":            # Maya: BaseAnimation has only Lock (empty Solo / Mute slots)
+                cell.label(text="", icon='BLANK1')
                 continue
-            cell.prop(e, attr, text=_dcc_display(''), icon=icons[bool(getattr(e, attr))], toggle=True)
+            cell.prop(e, attr, text="", icon=icons[bool(getattr(e, attr))], toggle=True)
         name = line.row(align=True)
-        name.active = not e.mute
-        name.operator('allset.anim_layer_select', text=_dcc_display(e.name), depress=e.name in picked).index = i
+        name.active = not e.mute                 # a muted layer's name reads greyed (#666666)
+        name.operator("allset.anim_layer_select", text=e.name, depress=e.name in picked).index = i
     if sel is None:
         return
     layout.separator(factor=0.5)
+    # Maya's bottom row: "Weight" field + slider, greyed while BaseAnimation is selected (anim180 state d);
+    # Additive / Override is Maya's layer menu choice (Layers menu here)
+    # Maya's K is a small square button right of the slider, not half the row
     w = layout.split(factor=0.88, align=True)
     slider = w.row(align=True)
     slider.enabled = sel.name != anim_layers.BASE
-    slider.prop(sel, 'weight', slider=True)
-    w.operator('allset.anim_layer_key_weight', text=_zh('K', 'MWK:ui/layer_editor.py:727')).current = True
+    slider.prop(sel, "weight", slider=True)
+    w.operator("allset.anim_layer_key_weight", text="K").current = True     # Maya's K: key the weight
+
 
 class ALLSET_PT_layer_editor(bpy.types.Panel):
-    bl_translation_context = 'MWK:ui/layer_editor.py:734'
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = _dcc_source('Channel Box / Layer Editor')
-    bl_label = _zh_native('Layer Editor', 'MWK:ui/layer_editor.py:734')
+    bl_category = "Channel Box / Layer Editor"   # not registered (ui/maya_dock.py draws it)
+    bl_label = "Layer Editor"
     bl_order = 1
-    bl_options = {'HIDE_HEADER'}
+    bl_options = {'HIDE_HEADER'}   # Maya: tabs + menu bar, no collapsible panel title
 
     def draw(self, context):
         layout = self.layout
         scene = context.scene
         wm = context.window_manager
-        sdk = getattr(wm, 'allset_sdk', None)
+        sdk = getattr(wm, "allset_sdk", None)
         if sdk is not None and sdk.open:
-            from . import set_driven_key
+            from . import set_driven_key   # the Set Driven Key window takes the Layer Editor's place
             set_driven_key.draw(layout, context)
             return
-        layout.separator(type='LINE')
+        layout.separator(type='LINE')   # Maya's splitter between Channel Box and Layer Editor
+        # Maya: slim tabs on the left, not a
+        # full-width switch
         tabs = layout.row(align=True)
         tabs.alignment = 'LEFT'
         tabs.scale_y = 0.9
-        for (ident, label, _tip) in TABS:
-            tabs.prop_enum(wm, 'allset_le_tab', ident, text=_dcc_display('  ' + _zh(label, 'MWK:ui/layer_editor.py:754') + '  '))
+        for ident, label, _tip in TABS:
+            tabs.prop_enum(wm, "allset_le_tab", ident, text=f"  {i18n.iface(label)}  ", translate=False)
         chrome.menu_bar(layout, MENU_BAR)
         if wm.allset_le_tab == 'ANIM':
-            draw_anim_tab(layout, context)
+            draw_anim_tab(layout, context)    # Maya animation layers on NLA tracks
             return
+        # Maya's toolbar, right-aligned, frameless icon buttons in Maya's order: move up, move down, create
+        # empty layer, create layer from selected (Maya 2022 Layer Editor)
         row = layout.row(align=True)
         row.alignment = 'RIGHT'
         row.emboss = 'NONE'
+        # kit-drawn Maya icons (#23; Blender's icon until the glyph is made)
         from .kit_icons import button
-        for (direction, icon) in (('UP', 'TRIA_UP_BAR'), ('DOWN', 'TRIA_DOWN_BAR')):
-            button(row, 'allset.layer_move', f'layer:{direction}', icon, text='').direction = direction
-        button(row, 'allset.layer_new', 'layer:NEW_EMPTY', 'ADD', text='').selected = False
-        button(row, 'allset.layer_new', 'layer:NEW_SELECTED', 'COLLECTION_NEW', text='').selected = True
+        for direction, icon in (("UP", 'TRIA_UP_BAR'), ("DOWN", 'TRIA_DOWN_BAR')):
+            button(row, "allset.layer_move", f"layer:{direction}", icon, text="").direction = direction
+        button(row, "allset.layer_new", "layer:NEW_EMPTY", 'ADD', text="").selected = False
+        button(row, "allset.layer_new", "layer:NEW_SELECTED", 'COLLECTION_NEW', text="").selected = True
+        # Maya shows the (empty) layer list area even with no layers: an empty
+        # list over the scene collection's children (the filter keeps display layers only).
         r = root(scene)
         owner = r if r is not None else scene.collection
-        layout.template_list('ALLSET_UL_layers', '', owner, 'children', scene, 'allset_layer_index', rows=list_rows(context), sort_lock=True)
+        layout.template_list("ALLSET_UL_layers", "", owner, "children", scene, "allset_layer_index",
+                             rows=list_rows(context), sort_lock=True)
+
 
 def list_rows(context):
     """Layer list rows that fill the dock to the bottom (Maya's Layer Editor pane is the dock's lower part,
-    channel_box.CB_SHARE; step 99)."""
+    channel_box.CB_SHARE)."""
     from .channel_box import _round_half_up, cb_share
     region = context.region
-    if region is None or region.type not in {'UI', 'WINDOW'}:
+    if region is None or region.type not in {'UI', 'WINDOW'}:   # the dock is a Properties WINDOW
         return 8
     u = _round_half_up(18.0 * context.preferences.system.ui_scale) + 2 * context.preferences.system.pixel_size
     return max(3, int((1.0 - cb_share(region, u)) * region.height / max(u, 1)) - 5)
-classes = (ALLSET_PG_layer, ALLSET_OT_layer_new, ALLSET_OT_layer_assign, ALLSET_OT_layer_select, ALLSET_OT_layer_delete, ALLSET_OT_layer_cycle_type, ALLSET_OT_layer_toggle, ALLSET_OT_layer_move, ALLSET_OT_layer_empty, ALLSET_OT_layer_set_type, ALLSET_UL_layers, ALLSET_MT_le_layers, ALLSET_MT_le_options, ALLSET_MT_le_help)
+
+
+classes = (ALLSET_PG_layer, ALLSET_OT_layer_new, ALLSET_OT_layer_assign, ALLSET_OT_layer_select,
+           ALLSET_OT_layer_delete, ALLSET_OT_layer_cycle_type, ALLSET_OT_layer_toggle, ALLSET_OT_layer_move,
+           ALLSET_OT_layer_empty, ALLSET_OT_layer_set_type, ALLSET_UL_layers,
+           ALLSET_MT_le_layers, ALLSET_MT_le_options, ALLSET_MT_le_help)
+# ALLSET_PT_layer_editor is drawn under the Channel Box by ui/maya_dock.py, not registered as a panel.
+
 
 def register():
     for cls in classes:
         bpy.utils.register_class(cls)
-    bpy.types.Collection.allset_layer = PointerProperty(type=ALLSET_PG_layer, translation_context='MWK:ui/layer_editor.py:799')
-    bpy.types.Scene.allset_layer_index = IntProperty(options={'HIDDEN'}, translation_context='MWK:ui/layer_editor.py:800')
-    bpy.types.WindowManager.allset_le_tab = EnumProperty(name=_zh_native('Layer Editor Tab', 'MWK:ui/layer_editor.py:801'), items=_zh_enum(TABS, 'MWK:ui/layer_editor.py:801'), options={'SKIP_SAVE'}, translation_context='MWK:ui/layer_editor.py:801')
+    bpy.types.Collection.allset_layer = PointerProperty(type=ALLSET_PG_layer)
+    layer_joints.register()
+    bpy.types.Scene.allset_layer_index = IntProperty(options={'HIDDEN'})
+    bpy.types.WindowManager.allset_le_tab = EnumProperty(name="Layer Editor Tab", items=TABS,
+                                                           options={'SKIP_SAVE'})
     bpy.app.handlers.animation_playback_pre.append(on_playback_pre)
     bpy.app.handlers.animation_playback_post.append(on_playback_post)
     bpy.types.UI_MT_button_context_menu.prepend(draw_button_menu)
+
 
 def unregister():
     bpy.types.UI_MT_button_context_menu.remove(draw_button_menu)
@@ -655,6 +969,7 @@ def unregister():
     bpy.app.handlers.animation_playback_pre.remove(on_playback_pre)
     del bpy.types.WindowManager.allset_le_tab
     del bpy.types.Scene.allset_layer_index
+    layer_joints.unregister()
     del bpy.types.Collection.allset_layer
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)

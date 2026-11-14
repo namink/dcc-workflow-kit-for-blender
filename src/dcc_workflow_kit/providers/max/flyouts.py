@@ -143,7 +143,6 @@ class BSM_MT_render_flyout(bpy.types.Menu):
         state = context.window_manager.bsm
         for (value, label) in (('PRODUCTION', _msg('Render Production')), ('ITERATIVE', _msg('Render Iterative')), ('ACTIVESHADE', _msg('ActiveShade'))):
             _choice(self.layout, label, state, 'render_mode', value)
-        _item(self.layout, _msg('Render in Autodesk A360'))
     bl_translation_context = _msg('DCCWorkflowKit.Max')
 
 class BSM_MT_subcategories(bpy.types.Menu):
@@ -165,7 +164,7 @@ def _modifier_labels():
             if isinstance(item, max_menus.Sub):
                 walk(item.items)
             elif isinstance(item, max_menus.Item) and item.op == 'bsm.max_modifier':
-                labels.append((item.props or {}).get('name', item.label))
+                labels.append((item.props or {}).get(_msg('name'), item.label))
     for (label, items) in max_menus.MAIN:
         if label == _msg('Modifiers'):
             walk(items)
@@ -247,7 +246,7 @@ class BSM_OT_stack_action(Active, bpy.types.Operator):
     bl_idname = 'bsm.stack_action'
     bl_label = _msg('Modifier Stack Action')
     bl_options = {'REGISTER', 'UNDO'}
-    action: EnumProperty(items=tuple(((a, a.replace('_', ' ').title(), '') for a in ('RENAME', 'DELETE', 'CUT', 'COPY', 'PASTE', 'MAKE_UNIQUE', 'COLLAPSE_TO', 'COLLAPSE_ALL', 'ON', 'OFF_VIEWPORT', 'OFF_RENDER', 'MOVE_UP', 'MOVE_DOWN', 'MOVE_TO', 'CONVERT_POLY', 'CONVERT_SPLINE'))), translation_context=_msg('DCCWorkflowKit.Max'))
+    action: EnumProperty(items=tuple(((a, a.replace('_', ' ').title(), '') for a in ('RENAME', 'DELETE', 'CUT', 'COPY', 'PASTE', 'MAKE_UNIQUE', 'COLLAPSE_TO', 'COLLAPSE_ALL', 'ON', 'OFF_VIEWPORT', 'OFF_RENDER', 'MOVE_UP', 'MOVE_DOWN', 'MOVE_TO', 'CONVERT_POLY', 'CONVERT_SPLINE', 'APPLY_EDIT_POLY'))), translation_context=_msg('DCCWorkflowKit.Max'))
     modifier: StringProperty(translation_context=_msg('DCCWorkflowKit.Max'))
     index: IntProperty(default=-1, translation_context=_msg('DCCWorkflowKit.Max'))
     new_name: StringProperty(name=_msg('Name'), translation_context=_msg('DCCWorkflowKit.Max'))
@@ -259,7 +258,7 @@ class BSM_OT_stack_action(Active, bpy.types.Operator):
         return self.execute(context)
 
     def execute(self, context):
-        from . import params
+        from . import params, edit_poly
         state = context.window_manager.bsm
         obj = bpy.data.objects.get(state.stack_pinned) if state.stack_pinned else context.view_layer.objects.active
         if obj is None:
@@ -267,25 +266,43 @@ class BSM_OT_stack_action(Active, bpy.types.Operator):
         mod = obj.modifiers.get(self.modifier)
         a = self.action
         override = dict(viewport_override(context), active_object=obj, object=obj)
+        if a == 'APPLY_EDIT_POLY':
+            selected = obj.modifiers.get(state.active_modifier)
+            mod = selected if edit_poly.is_layer(selected) else next(reversed(edit_poly.layers(obj)), None)
+            if mod is None:
+                self.report({'WARNING'}, _dcc_ui_text(_msg('Select an Edit Poly modifier')))
+                return {'CANCELLED'}
+            a = 'COLLAPSE_TO'
+        if a != 'COPY' and obj.type == 'MESH' and edit_poly.editing(obj.data):
+            with context.temp_override(**override):
+                message = edit_poly.leave(context, obj)
+            if message:
+                self.report({'WARNING'}, _dcc_ui_text(message))
+            state.component = 0
         if a == 'RENAME' and mod:
             mod.name = self.new_name
             state.active_modifier = mod.name
         elif a in {'DELETE', 'CUT'} and mod:
             if a == 'CUT':
                 _copy(mod)
-            obj.modifiers.remove(mod)
+            if edit_poly.is_layer(mod):
+                edit_poly.remove(obj, mod)
+            else:
+                obj.modifiers.remove(mod)
             state.active_modifier = ''
         elif a == 'COPY' and mod:
             _copy(mod)
         elif a == 'PASTE' and _clipboard:
             (kind, values) = _clipboard[0]
-            new = obj.modifiers.new(values.get('name', kind.title()), kind)
+            new = obj.modifiers.new(values.get(_msg('name'), kind.title()), kind)
             if new:
                 for (key, value) in values.items():
                     try:
                         setattr(new, key, value)
                     except (AttributeError, TypeError, ValueError):
                         pass
+                if edit_poly.is_layer(new):
+                    edit_poly.ensure_unique(obj, new)
                 state.active_modifier = new.name
         elif a == 'MAKE_UNIQUE':
             if obj.data is not None and obj.data.users > 1:
@@ -333,9 +350,9 @@ class BSM_OT_stack_action(Active, bpy.types.Operator):
     bl_translation_context = _msg('DCCWorkflowKit.Max')
 
 def _copy(mod):
-    values = {'name': mod.name}
+    values = {_msg('name'): mod.name}
     for p in mod.bl_rna.properties:
-        if p.is_readonly or p.identifier in {'name', 'rna_type'} or p.type == 'COLLECTION':
+        if p.is_readonly or p.identifier in {_msg('name'), 'rna_type'} or p.type == 'COLLECTION':
             continue
         value = getattr(mod, p.identifier, None)
         if p.type == 'POINTER' and (not isinstance(value, bpy.types.ID)):
@@ -445,7 +462,7 @@ def _m(action):
 
 def _c(level):
     return ('bsm.component', {'level': level})
-RIBBON_ITEMS = {_msg('Polygon Modeling'): ((_msg('Vertex'), _c(1)), (_msg('Edge'), _c(2)), (_msg('Border'), _c(3)), (_msg('Polygon'), _c(4)), (_msg('Element'), _c(5)), (_msg('Top Level'), _c(0)), None, (_msg('Collapse Stack'), ('bsm.stack_action', {'action': 'COLLAPSE_ALL'})), (_msg('Convert to Poly'), ('bsm.stack_action', {'action': 'CONVERT_POLY'})), (_msg('Apply Edit Poly Mod'), None), (_msg('Show End Result'), ('wm.context_toggle', {'data_path': 'window_manager.bsm.show_end_result'}))), _msg('Modify Selection'): ((_msg('Grow'), _m('GROW')), (_msg('Shrink'), _m('SHRINK')), (_msg('Loop'), _m('LOOP')), (_msg('Ring'), _m('RING')), (_msg('Similar'), ('bsm.max_command', {'command': 'SELECT_SIMILAR'})), (_msg('Fill'), None), (_msg('Step Loop'), None)), _msg('Edit'): ((_msg('Preserve UVs'), None), (_msg('Repeat'), _m('REPEAT')), (_msg('QuickSlice'), _m('SLICE')), (_msg('SwiftLoop'), _m('LOOPCUT')), ('NURMS', _m('NURMS')), (_msg('Cut'), _m('CUT')), (_msg('P Connect'), None), (_msg('Constraints'), None)), _msg('Geometry (All)'): ((_msg('Relax'), _m('RELAX')), (_msg('Create'), _m('CREATE_FACE')), (_msg('Attach'), _m('ATTACH')), (_msg('Detach'), _m('DETACH')), (_msg('Collapse'), _m('COLLAPSE')), (_msg('Cap Poly'), _m('CAP')), (_msg('Quadrify All'), _m('QUADRIFY')), (_msg('Slice Plane'), _m('SLICE'))), _msg('Loops'): ((_msg('Connect'), _m('CONNECT_EDGES')), (_msg('Insert Loop'), _m('LOOPCUT')), (_msg('Remove Loop'), _m('DISSOLVE_EDGES')), (_msg('Distance Connect'), None), (_msg('Flow Connect'), None), (_msg('Build End'), None), (_msg('Build Corner'), None)), _msg('Tris'): ((_msg('Retriangulate'), _m('RETRIANGULATE')), (_msg('Turn'), _m('TURN')), (_msg('Quadrify'), _m('QUADRIFY'))), _msg('Subdivision'): ((_msg('MeshSmooth'), _m('MSMOOTH')), (_msg('Tessellate'), _m('TESSELLATE')), (_msg('Use Displacement'), None)), _msg('Visibility'): ((_msg('Hide Selected'), _m('HIDE')), (_msg('Hide Unselected'), _m('HIDE_UNSELECTED')), (_msg('Unhide All'), _m('UNHIDE'))), _msg('Align'): ((_msg('Make Planar'), _m('PLANAR')), ('X', _m('FLATTEN_X')), ('Y', _m('FLATTEN_Y')), ('Z', _m('FLATTEN_Z')), (_msg('To View'), None), (_msg('To Grid'), None)), _msg('Properties'): ((_msg('Hard'), _m('CLEAR_SMOOTH')), (_msg('Smooth'), _m('AUTO_SMOOTH')), (_msg('Smooth 30'), _m('AUTO_SMOOTH')), (_msg('Set ID'), _m('SET_ID')), (_msg('Select ID'), _m('SELECT_ID'))), _msg('Vertices'): ((_msg('Remove'), _m('DISSOLVE_VERTS')), (_msg('Break'), _m('BREAK')), (_msg('Extrude'), _m('EXTRUDE_VERTS')), (_msg('Weld'), _m('WELD')), (_msg('Chamfer'), _m('CHAMFER_VERTS')), (_msg('Target Weld'), _m('TARGET_WELD')), (_msg('Connect'), _m('CONNECT_VERTS'))), _msg('Edges'): ((_msg('Insert Vertex'), _m('INSERT_VERTEX')), (_msg('Remove'), _m('DISSOLVE_EDGES')), (_msg('Split'), _m('SPLIT_EDGES')), (_msg('Extrude'), _m('EXTRUDE_EDGES')), (_msg('Weld'), _m('WELD')), (_msg('Chamfer'), _m('CHAMFER')), (_msg('Target Weld'), _m('TARGET_WELD')), (_msg('Bridge'), _m('BRIDGE')), (_msg('Connect'), _m('CONNECT_EDGES')), (_msg('Create Shape'), _m('CREATE_SHAPE'))), _msg('Borders'): ((_msg('Extrude'), _m('EXTRUDE_EDGES')), (_msg('Chamfer'), _m('CHAMFER')), (_msg('Cap'), _m('CAP')), (_msg('Bridge'), _m('BRIDGE')), (_msg('Connect'), _m('CONNECT_EDGES'))), _msg('Polygons'): ((_msg('Extrude'), _m('EXTRUDE')), (_msg('Outline'), _m('OUTLINE')), (_msg('Bevel'), _m('BEVEL_POLY')), (_msg('Inset'), _m('INSET')), (_msg('Bridge'), _m('BRIDGE')), (_msg('Flip'), _m('FLIP')), (_msg('Hinge'), None), (_msg('Extrude on Spline'), None)), _msg('Elements'): ((_msg('Flip'), _m('FLIP')), (_msg('Retriangulate'), _m('RETRIANGULATE'))), _msg('PolyDraw'): ((_msg('Drag'), None), (_msg('Conform'), None), (_msg('Step Build'), None), (_msg('Extend'), None), (_msg('Optimize'), None), (_msg('Strips'), None)), _msg('Paint Deform'): ((_msg('Shift'), ('bsm.sculpt', {'brush': 'GRAB'})), (_msg('Push/Pull'), ('bsm.sculpt', {'brush': 'DRAW'})), (_msg('Relax/Soften'), ('bsm.sculpt', {'brush': 'SMOOTH'})), (_msg('Smudge'), ('bsm.sculpt', {'brush': 'SMUDGE'})), (_msg('Flatten'), ('bsm.sculpt', {'brush': 'FLATTEN'})), (_msg('Pinch/Spread'), ('bsm.sculpt', {'brush': 'PINCH'}))), _msg('Defaults'): ((_msg('Freeform Defaults'), None),), _msg('Select'): ((_msg('Select All'), ('object.select_all', {'action': 'SELECT'})), (_msg('Select None'), ('object.select_all', {'action': 'DESELECT'})), (_msg('Invert'), ('object.select_all', {'action': 'INVERT'}))), _msg('Stored Selections'): ((_msg('Copy Store 1'), None), (_msg('Paste Store 1'), None), (_msg('Add'), None), (_msg('Subtract'), None), (_msg('Intersect'), None)), _msg('Sets'): ((_msg('Manage Selection Sets...'), ('bsm.manage_sets', {})),), _msg('By Random'): ((_msg('Select Random'), ('object.select_random', {})),)}
+RIBBON_ITEMS = {_msg('Polygon Modeling'): ((_msg('Vertex'), _c(1)), (_msg('Edge'), _c(2)), (_msg('Border'), _c(3)), (_msg('Polygon'), _c(4)), (_msg('Element'), _c(5)), (_msg('Top Level'), _c(0)), None, (_msg('Collapse Stack'), ('bsm.stack_action', {'action': 'COLLAPSE_ALL'})), (_msg('Convert to Poly'), ('bsm.stack_action', {'action': 'CONVERT_POLY'})), (_msg('Apply Edit Poly Mod'), ('bsm.stack_action', {'action': 'APPLY_EDIT_POLY'})), (_msg('Show End Result'), ('wm.context_toggle', {'data_path': 'window_manager.bsm.show_end_result'}))), _msg('Modify Selection'): ((_msg('Grow'), _m('GROW')), (_msg('Shrink'), _m('SHRINK')), (_msg('Loop'), _m('LOOP')), (_msg('Ring'), _m('RING')), (_msg('Similar'), ('bsm.max_command', {'command': 'SELECT_SIMILAR'})), (_msg('Fill'), None), (_msg('Step Loop'), None)), _msg('Edit'): ((_msg('Preserve UVs'), None), (_msg('Repeat'), _m('REPEAT')), (_msg('QuickSlice'), _m('SLICE')), (_msg('SwiftLoop'), _m('LOOPCUT')), ('NURMS', _m('NURMS')), (_msg('Cut'), _m('CUT')), (_msg('P Connect'), None), (_msg('Constraints'), None)), _msg('Geometry (All)'): ((_msg('Relax'), _m('RELAX')), (_msg('Create'), _m('CREATE_FACE')), (_msg('Attach'), _m('ATTACH')), (_msg('Detach'), _m('DETACH')), (_msg('Collapse'), _m('COLLAPSE')), (_msg('Cap Poly'), _m('CAP')), (_msg('Quadrify All'), _m('QUADRIFY')), (_msg('Slice Plane'), _m('SLICE'))), _msg('Loops'): ((_msg('Connect'), _m('CONNECT_EDGES')), (_msg('Insert Loop'), _m('LOOPCUT')), (_msg('Remove Loop'), _m('DISSOLVE_EDGES')), (_msg('Distance Connect'), None), (_msg('Flow Connect'), None), (_msg('Build End'), None), (_msg('Build Corner'), None)), _msg('Tris'): ((_msg('Retriangulate'), _m('RETRIANGULATE')), (_msg('Turn'), _m('TURN')), (_msg('Quadrify'), _m('QUADRIFY'))), _msg('Subdivision'): ((_msg('MeshSmooth'), _m('MSMOOTH')), (_msg('Tessellate'), _m('TESSELLATE')), (_msg('Use Displacement'), None)), _msg('Visibility'): ((_msg('Hide Selected'), _m('HIDE')), (_msg('Hide Unselected'), _m('HIDE_UNSELECTED')), (_msg('Unhide All'), _m('UNHIDE'))), _msg('Align'): ((_msg('Make Planar'), _m('PLANAR')), ('X', _m('FLATTEN_X')), ('Y', _m('FLATTEN_Y')), ('Z', _m('FLATTEN_Z')), (_msg('To View'), None), (_msg('To Grid'), None)), _msg('Properties'): ((_msg('Hard'), _m('CLEAR_SMOOTH')), (_msg('Smooth'), _m('AUTO_SMOOTH')), (_msg('Smooth 30'), _m('AUTO_SMOOTH')), (_msg('Set ID'), _m('SET_ID')), (_msg('Select ID'), _m('SELECT_ID'))), _msg('Vertices'): ((_msg('Remove'), _m('DISSOLVE_VERTS')), (_msg('Break'), _m('BREAK')), (_msg('Extrude'), _m('EXTRUDE_VERTS')), (_msg('Weld'), _m('WELD')), (_msg('Chamfer'), _m('CHAMFER_VERTS')), (_msg('Target Weld'), _m('TARGET_WELD')), (_msg('Connect'), _m('CONNECT_VERTS'))), _msg('Edges'): ((_msg('Insert Vertex'), _m('INSERT_VERTEX')), (_msg('Remove'), _m('DISSOLVE_EDGES')), (_msg('Split'), _m('SPLIT_EDGES')), (_msg('Extrude'), _m('EXTRUDE_EDGES')), (_msg('Weld'), _m('WELD')), (_msg('Chamfer'), _m('CHAMFER')), (_msg('Target Weld'), _m('TARGET_WELD')), (_msg('Bridge'), _m('BRIDGE')), (_msg('Connect'), _m('CONNECT_EDGES')), (_msg('Create Shape'), _m('CREATE_SHAPE'))), _msg('Borders'): ((_msg('Extrude'), _m('EXTRUDE_EDGES')), (_msg('Chamfer'), _m('CHAMFER')), (_msg('Cap'), _m('CAP')), (_msg('Bridge'), _m('BRIDGE')), (_msg('Connect'), _m('CONNECT_EDGES'))), _msg('Polygons'): ((_msg('Extrude'), _m('EXTRUDE')), (_msg('Outline'), _m('OUTLINE')), (_msg('Bevel'), _m('BEVEL_POLY')), (_msg('Inset'), _m('INSET')), (_msg('Bridge'), _m('BRIDGE')), (_msg('Flip'), _m('FLIP')), (_msg('Hinge'), None), (_msg('Extrude on Spline'), None)), _msg('Elements'): ((_msg('Flip'), _m('FLIP')), (_msg('Retriangulate'), _m('RETRIANGULATE'))), _msg('PolyDraw'): ((_msg('Drag'), None), (_msg('Conform'), None), (_msg('Step Build'), None), (_msg('Extend'), None), (_msg('Optimize'), None), (_msg('Strips'), None)), _msg('Paint Deform'): ((_msg('Shift'), ('bsm.sculpt', {'brush': 'GRAB'})), (_msg('Push/Pull'), ('bsm.sculpt', {'brush': 'DRAW'})), (_msg('Relax/Soften'), ('bsm.sculpt', {'brush': 'SMOOTH'})), (_msg('Smudge'), ('bsm.sculpt', {'brush': 'SMUDGE'})), (_msg('Flatten'), ('bsm.sculpt', {'brush': 'FLATTEN'})), (_msg('Pinch/Spread'), ('bsm.sculpt', {'brush': 'PINCH'}))), _msg('Defaults'): ((_msg('Freeform Defaults'), None),), _msg('Select'): ((_msg('Select All'), ('object.select_all', {'action': 'SELECT'})), (_msg('Select None'), ('object.select_all', {'action': 'DESELECT'})), (_msg('Invert'), ('object.select_all', {'action': 'INVERT'}))), _msg('Stored Selections'): ((_msg('Copy Store 1'), None), (_msg('Paste Store 1'), None), (_msg('Add'), None), (_msg('Subtract'), None), (_msg('Intersect'), None)), _msg('Sets'): ((_msg('Manage Selection Sets...'), ('bsm.manage_sets', {})),), _msg('By Random'): ((_msg('Select Random'), ('object.select_random', {})),)}
 
 def _ribbon_class(title):
     from .surfaces import ribbon_menu
@@ -461,7 +478,7 @@ def _ribbon_class(title):
                 _item(self.layout, label)
             else:
                 _item(self.layout, label, target[0], **target[1])
-    return type(ribbon_menu(title), (bpy.types.Menu,), {'bl_idname': ribbon_menu(title), 'bl_label': title, 'draw': draw, 'bl_translation_context': 'DCCWorkflowKit.Max'})
+    return type(ribbon_menu(title), (bpy.types.Menu,), {'bl_idname': ribbon_menu(title), 'bl_label': title, 'draw': draw})
 
 def _ribbon_classes():
     from .surfaces import RIBBON_PANELS, LEVEL_PANELS

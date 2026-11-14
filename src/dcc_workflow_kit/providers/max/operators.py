@@ -1,11 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Adapted for DCC Workflow Kit.
-from .i18n import msg as _msg, display as _dcc_ui_text, format_message as _dcc_format, error_text as _dcc_ui_error
+from .i18n import msg as _msg, display as _dcc_ui_text, format_message as _dcc_format
 import math
 import bpy
 from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty, StringProperty
 from mathutils import Matrix, Quaternion, Vector
 from . import runtime
+from .compat import SELECT_LOOP, SELECT_RING
 
 class Active:
 
@@ -43,8 +44,8 @@ def viewport_override(context):
 class BSM_OT_environment(bpy.types.Operator):
     bl_idname = 'bsm.environment'
     bl_label = _msg('Switch Environment')
-    bl_description = _msg('Switch between the original Blender workspace and Blender Max')
-    mode: EnumProperty(items=(('BLENDER', _msg('Blender'), ''), ('STUDIO', _msg('Blender Max'), '')), translation_context=_msg('DCCWorkflowKit.Max'))
+    bl_description = _msg('Switch between the original Blender workspace and MaxFlow')
+    mode: EnumProperty(items=(('BLENDER', _msg('Blender'), ''), ('STUDIO', _msg('MaxFlow'), '')), translation_context=_msg('DCCWorkflowKit.Max'))
 
     def execute(self, context):
         if self.mode == 'STUDIO' and runtime.is_active():
@@ -57,18 +58,32 @@ class BSM_OT_environment(bpy.types.Operator):
     bl_translation_context = _msg('DCCWorkflowKit.Max')
 REGION_TOOLS = {'RECT': 'builtin.select_box', 'CIRCLE': 'builtin.select_circle', 'FENCE': 'builtin.select_lasso', 'LASSO': 'builtin.select_lasso', 'PAINT': 'builtin.select_circle'}
 
+def tool_kind(context):
+    """SELECT, MOVE, ROTATE or SCALE: the Main Toolbar tool active in the current mode."""
+    tool = context.workspace.tools.from_space_view3d_mode(context.mode, create=False) if context.workspace else None
+    idname = tool.idname if tool else ''
+    if idname.startswith('builtin.select'):
+        return 'SELECT'
+    return {'bsm.max_move': 'MOVE', 'builtin.move': 'MOVE', 'bsm.max_rotate': 'ROTATE', 'builtin.rotate': 'ROTATE', 'bsm.max_scale': 'SCALE', 'builtin.scale': 'SCALE'}.get(idname)
+
+def set_tool(context, kind):
+    """Activate a Main Toolbar tool in the current mode. Objects and an Editable Poly's
+    sub-object levels use the 3ds Max gizmo tools; other modes keep Blender's."""
+    state = context.window_manager.bsm
+    max_tools = context.mode in {'OBJECT', 'EDIT_MESH'}
+    tools = {'SELECT': REGION_TOOLS.get(state.region_type, 'builtin.select_box'), 'MOVE': 'bsm.max_move' if max_tools else 'builtin.move', 'ROTATE': 'bsm.max_rotate' if max_tools else 'builtin.rotate', 'SCALE': 'bsm.max_scale' if max_tools else 'builtin.scale'}
+    with context.temp_override(**viewport_override(context)):
+        bpy.ops.wm.tool_set_by_id(name=tools[kind])
+
 class BSM_OT_tool(Active, bpy.types.Operator):
     bl_idname = 'bsm.tool'
     bl_label = _msg('Select Transform Tool')
     tool: EnumProperty(items=tuple(((x, x.title(), '') for x in ('SELECT', 'MOVE', 'ROTATE', 'SCALE'))), translation_context=_msg('DCCWorkflowKit.Max'))
 
     def execute(self, context):
-        state = context.window_manager.bsm
-        state.active_creation = ''
-        max_tools = context.mode == 'OBJECT'
-        tools = {'SELECT': REGION_TOOLS.get(state.region_type, 'builtin.select_box'), 'MOVE': 'bsm.max_move' if max_tools else 'builtin.move', 'ROTATE': 'bsm.max_rotate' if max_tools else 'builtin.rotate', 'SCALE': 'bsm.max_scale' if max_tools else 'builtin.scale'}
+        context.window_manager.bsm.active_creation = ''
+        set_tool(context, self.tool)
         with context.temp_override(**viewport_override(context)):
-            bpy.ops.wm.tool_set_by_id(name=tools[self.tool])
             context.space_data.show_gizmo = True
             context.space_data.show_gizmo_tool = True
         runtime.redraw()
@@ -322,27 +337,51 @@ class BSM_OT_component(Active, bpy.types.Operator):
         return runtime.is_active() and obj is not None and (obj.type == 'MESH')
 
     def execute(self, context):
+        from . import edit_poly
         wm = context.window_manager
         obj = context.view_layer.objects.active
+        layer = obj.modifiers.get(wm.bsm.active_modifier)
+        layer = layer if edit_poly.is_layer(layer) else None
         prim = getattr(obj, 'bsm_prim', None)
-        if self.level and prim is not None and prim.kind:
+        if self.level and layer is None and (prim is not None) and prim.kind:
             from . import params
             self.report({'INFO'}, _dcc_ui_text(_dcc_format('{0} has no sub-object levels: Convert to Editable Poly first', params.NAMES.get(prim.kind, 'Primitive'))))
             return {'CANCELLED'}
+        kind = tool_kind(context)
+        open_layer = edit_poly.editing_layer(obj)
         with context.temp_override(**viewport_override(context)):
-            if self.level == 0 or (obj.mode == 'EDIT' and wm.bsm.component == self.level):
+            if self.level == 0 or (obj.mode == 'EDIT' and wm.bsm.component == self.level and (open_layer == layer)):
                 if obj.mode != 'OBJECT':
-                    bpy.ops.object.mode_set(mode='OBJECT')
+                    self._message(edit_poly.leave(context, obj))
+                    if kind:
+                        set_tool(context, kind)
                 wm.bsm.component = 0
                 runtime.redraw()
                 return {'FINISHED'}
+            if open_layer != layer or (layer is None and edit_poly.editing(obj.data)):
+                if obj.mode != 'OBJECT':
+                    self._message(edit_poly.leave(context, obj))
+                if layer is not None:
+                    error = edit_poly.enter(context, obj, layer)
+                    if error:
+                        wm.bsm.component = 0
+                        self.report({'WARNING'}, _dcc_ui_text(error))
+                        runtime.redraw()
+                        return {'CANCELLED'}
             if obj.mode != 'EDIT':
                 bpy.ops.object.mode_set(mode='EDIT')
+                if kind:
+                    set_tool(context, kind)
             bpy.ops.mesh.select_mode(type={1: 'VERT', 2: 'EDGE', 3: 'EDGE', 4: 'FACE', 5: 'FACE'}[self.level])
             wm.bsm.component = self.level
-            wm.bsm.active_modifier = ''
+            if layer is None:
+                wm.bsm.active_modifier = ''
         runtime.redraw()
         return {'FINISHED'}
+
+    def _message(self, message):
+        if message:
+            self.report({'WARNING'}, _dcc_ui_text(message))
     bl_translation_context = _msg('DCCWorkflowKit.Max')
 CREATE_KINDS = (('BOX', _msg('Box')), ('CONE', _msg('Cone')), ('SPHERE', _msg('Sphere')), ('GEOSPHERE', _msg('GeoSphere')), ('CYLINDER', _msg('Cylinder')), ('TUBE', _msg('Tube')), ('TORUS', _msg('Torus')), ('PYRAMID', _msg('Pyramid')), ('TEAPOT', _msg('Teapot')), ('PLANE', _msg('Plane')), ('TEXTPLUS', _msg('TextPlus')), ('CHAMFER_BOX', _msg('ChamferBox')), ('CHAMFER_CYL', _msg('ChamferCyl')), ('CAPSULE', _msg('Capsule')), ('BOOLEAN', _msg('Boolean')), ('LINE', _msg('Line')), ('RECTANGLE', _msg('Rectangle')), ('CIRCLE', _msg('Circle')), ('ELLIPSE', _msg('Ellipse')), ('ARC', _msg('Arc')), ('DONUT', _msg('Donut')), ('NGON', _msg('NGon')), ('STAR', _msg('Star')), ('TEXT', _msg('Text')), ('HELIX', _msg('Helix')), ('OMNI', _msg('Omni')), ('TARGET_SPOT', _msg('Target Spot')), ('FREE_SPOT', _msg('Free Spot')), ('TARGET_DIRECT', _msg('Target Direct')), ('FREE_DIRECT', _msg('Free Direct')), ('SKYLIGHT', _msg('Skylight')), ('TARGET_LIGHT', _msg('Target Light')), ('FREE_LIGHT', _msg('Free Light')), ('SUN_POSITIONER', _msg('Sun Positioner')), ('AREA', _msg('Arnold Light')), ('FREE_CAMERA', _msg('Free Camera')), ('TARGET_CAMERA', _msg('Target Camera')), ('PHYSICAL_CAMERA', _msg('Physical Camera')), ('DUMMY', _msg('Dummy')), ('POINT', _msg('Point')), ('GRID', _msg('Grid')), ('ARROW', _msg('Arrow')), ('TAPE', _msg('Tape')), ('PROTRACTOR', _msg('Protractor')), ('COMPASS', _msg('Compass')), ('WIND', _msg('Wind')), ('VORTEX', _msg('Vortex')), ('DRAG', _msg('Drag')), ('PUSH', _msg('Push')), ('MOTOR', _msg('Motor')), ('PATH_FOLLOW', _msg('Path Follow')), ('DISPLACE_WARP', _msg('Displace')), ('GRAVITY', _msg('Gravity')), ('TURBULENCE', _msg('Turbulence')), ('BONES', _msg('Bones')), ('CV_SURFACE', _msg('CV Surf')), ('POINT_SURFACE', _msg('Point Surf')), ('CV_CURVE', _msg('CV Curve')), ('POINT_CURVE', _msg('Point Curve')))
 LEGACY = {'EMPTY': 'POINT', 'CAMERA': 'FREE_CAMERA', 'SUN': 'FREE_DIRECT', 'SPOT': 'FREE_SPOT', 'BONE': 'BONES', 'FORCE': 'PUSH'}
@@ -555,7 +594,7 @@ class BSM_OT_create(Active, bpy.types.Operator):
         try:
             obj = create_object(context, self.kind, Matrix.Translation(context.scene.cursor.location))
         except RuntimeError as error:
-            self.report({'WARNING'}, _dcc_ui_error(error))
+            self.report({'WARNING'}, _dcc_ui_text(str(error)))
             return {'CANCELLED'}
         if state.next_name and obj.name != state.next_name:
             obj.name = state.next_name
@@ -584,7 +623,7 @@ class BSM_OT_modifier(Active, bpy.types.Operator):
         try:
             mod = obj.modifiers.new(dict(((a, b) for (a, b, _) in MODIFIERS))[self.kind], self.kind)
         except RuntimeError as error:
-            self.report({'WARNING'}, _dcc_ui_error(error))
+            self.report({'WARNING'}, _dcc_ui_text(str(error)))
             return {'CANCELLED'}
         if self.kind == 'SIMPLE_DEFORM':
             mod.deform_method = 'BEND'
@@ -612,7 +651,7 @@ class BSM_OT_modifier_action(Active, bpy.types.Operator):
         try:
             getattr(bpy.ops.object, op)(modifier=self.modifier)
         except RuntimeError as error:
-            self.report({'WARNING'}, _dcc_ui_error(error))
+            self.report({'WARNING'}, _dcc_ui_text(str(error)))
             return {'CANCELLED'}
         return {'FINISHED'}
     bl_translation_context = _msg('DCCWorkflowKit.Max')
@@ -643,7 +682,7 @@ class BSM_OT_clone(Active, bpy.types.Operator):
         column = row.box().column()
         column.label(text=_dcc_ui_text(_msg('Controller')))
         column.prop(self, 'controller', expand=True)
-        self.layout.prop(self, 'name')
+        self.layout.prop(self, _msg('name'))
 
     def execute(self, context):
         if context.mode != 'OBJECT' or not context.selected_objects:
@@ -723,7 +762,7 @@ class BSM_OT_compact_material(Active, bpy.types.Operator):
 
 class BSM_OT_shortcuts(bpy.types.Operator):
     bl_idname = 'bsm.shortcuts'
-    bl_label = _msg('Blender Max Shortcut Reference')
+    bl_label = _msg('MaxFlow Shortcut Reference')
 
     def invoke(self, context, event):
         return context.window_manager.invoke_popup(self, width=520)
@@ -801,7 +840,7 @@ def _auto_smooth(context):
 
 def _attach(context):
     return bpy.ops.bsm.pick_object('INVOKE_DEFAULT', purpose='ATTACH')
-MESH_COMMANDS = {'EXTRUDE': ('mesh.extrude_region_move', {}), 'EXTRUDE_VERTS': ('mesh.extrude_vertices_move', {}), 'EXTRUDE_EDGES': ('mesh.extrude_edges_move', {}), 'BEVEL': ('mesh.bevel', {'affect': 'EDGES'}), 'CHAMFER': ('mesh.bevel', {'affect': 'EDGES'}), 'CHAMFER_VERTS': ('mesh.bevel', {'affect': 'VERTICES'}), 'BEVEL_POLY': ('mesh.inset', {'depth': 0.0}), 'OUTLINE': ('transform.resize', {}), 'INSET': ('mesh.inset', {}), 'BRIDGE': ('mesh.bridge_edge_loops', {}), 'CONNECT': ('mesh.subdivide', {}), 'CONNECT_EDGES': ('mesh.subdivide_edgering', {'number_cuts': 1}), 'CONNECT_VERTS': ('mesh.vert_connect_path', {}), 'WELD': ('mesh.remove_doubles', {'threshold': 0.001}), 'TARGET_WELD': ('mesh.merge', {'type': 'LAST'}), 'COLLAPSE': ('mesh.merge', {'type': 'CENTER'}), 'DISSOLVE_VERTS': ('mesh.dissolve_verts', {}), 'DISSOLVE_EDGES': ('mesh.dissolve_edges', {}), 'DISSOLVE': ('mesh.dissolve_mode', {}), 'BREAK': ('mesh.edge_split', {'type': 'VERT'}), 'SPLIT_EDGES': ('mesh.edge_split', {'type': 'EDGE'}), 'INSERT_VERTEX': ('mesh.subdivide', {'number_cuts': 1}), 'POKE': ('mesh.poke', {}), 'CREATE_SHAPE': _create_shape, 'TURN': ('mesh.edge_rotate', {'use_ccw': False}), 'CAP': ('mesh.edge_face_add', {}), 'FLIP': ('mesh.flip_normals', {}), 'RETRIANGULATE': ('mesh.beautify_fill', {}), 'QUADRIFY': ('mesh.tris_convert_to_quads', {}), 'REPEAT': ('screen.repeat_last', {}), 'CREATE_FACE': ('mesh.edge_face_add', {}), 'ATTACH': _attach, 'DETACH': ('mesh.separate', {'type': 'SELECTED'}), 'SLICE': ('mesh.bisect', {}), 'CUT': ('mesh.knife_tool', {}), 'LOOPCUT': ('mesh.loopcut_slide', {}), 'MSMOOTH': ('mesh.subdivide', {'smoothness': 1.0}), 'TESSELLATE': ('mesh.subdivide', {'number_cuts': 1}), 'PLANAR': ('transform.resize', {'value': (1, 1, 0), 'orient_type': 'NORMAL', 'constraint_axis': (False, False, True)}), 'FLATTEN_X': lambda c: _flatten(c, 0), 'FLATTEN_Y': lambda c: _flatten(c, 1), 'FLATTEN_Z': lambda c: _flatten(c, 2), 'RELAX': ('mesh.vertices_smooth', {'factor': 0.5}), 'HIDE': ('mesh.hide', {'unselected': False}), 'UNHIDE': ('mesh.reveal', {}), 'HIDE_UNSELECTED': ('mesh.hide', {'unselected': True}), 'DELETE_LOOSE': ('mesh.delete_loose', {}), 'SET_ID': lambda c: _material_id(c, False), 'SELECT_ID': lambda c: _material_id(c, True), 'AUTO_SMOOTH': _auto_smooth, 'CLEAR_SMOOTH': ('mesh.faces_shade_flat', {}), 'NURMS': _nurms, 'SHRINK': ('mesh.select_less', {}), 'GROW': ('mesh.select_more', {}), 'RING': ('mesh.loop_multi_select', {'ring': True}), 'LOOP': ('mesh.loop_multi_select', {'ring': False}), 'NORMALS': ('mesh.normals_make_consistent', {}), 'UV': ('uv.unwrap', {})}
+MESH_COMMANDS = {'EXTRUDE': ('mesh.extrude_region_move', {}), 'EXTRUDE_VERTS': ('mesh.extrude_vertices_move', {}), 'EXTRUDE_EDGES': ('mesh.extrude_edges_move', {}), 'BEVEL': ('mesh.bevel', {'affect': 'EDGES'}), 'CHAMFER': ('mesh.bevel', {'affect': 'EDGES'}), 'CHAMFER_VERTS': ('mesh.bevel', {'affect': 'VERTICES'}), 'BEVEL_POLY': ('mesh.inset', {'depth': 0.0}), 'OUTLINE': ('transform.resize', {}), 'INSET': ('mesh.inset', {}), 'BRIDGE': ('mesh.bridge_edge_loops', {}), 'CONNECT': ('mesh.subdivide', {}), 'CONNECT_EDGES': ('mesh.subdivide_edgering', {'number_cuts': 1}), 'CONNECT_VERTS': ('mesh.vert_connect_path', {}), 'WELD': ('mesh.remove_doubles', {'threshold': 0.001}), 'TARGET_WELD': ('mesh.merge', {'type': 'LAST'}), 'COLLAPSE': ('mesh.merge', {'type': 'CENTER'}), 'DISSOLVE_VERTS': ('mesh.dissolve_verts', {}), 'DISSOLVE_EDGES': ('mesh.dissolve_edges', {}), 'DISSOLVE': ('mesh.dissolve_mode', {}), 'BREAK': ('mesh.edge_split', {'type': 'VERT'}), 'SPLIT_EDGES': ('mesh.edge_split', {'type': 'EDGE'}), 'INSERT_VERTEX': ('mesh.subdivide', {'number_cuts': 1}), 'POKE': ('mesh.poke', {}), 'CREATE_SHAPE': _create_shape, 'TURN': ('mesh.edge_rotate', {'use_ccw': False}), 'CAP': ('mesh.edge_face_add', {}), 'FLIP': ('mesh.flip_normals', {}), 'RETRIANGULATE': ('mesh.beautify_fill', {}), 'QUADRIFY': ('mesh.tris_convert_to_quads', {}), 'REPEAT': ('screen.repeat_last', {}), 'CREATE_FACE': ('mesh.edge_face_add', {}), 'ATTACH': _attach, 'DETACH': ('mesh.separate', {'type': 'SELECTED'}), 'SLICE': ('mesh.bisect', {}), 'CUT': ('mesh.knife_tool', {}), 'LOOPCUT': ('mesh.loopcut_slide', {}), 'MSMOOTH': ('mesh.subdivide', {'smoothness': 1.0}), 'TESSELLATE': ('mesh.subdivide', {'number_cuts': 1}), 'PLANAR': ('transform.resize', {'value': (1, 1, 0), 'orient_type': 'NORMAL', 'constraint_axis': (False, False, True)}), 'FLATTEN_X': lambda c: _flatten(c, 0), 'FLATTEN_Y': lambda c: _flatten(c, 1), 'FLATTEN_Z': lambda c: _flatten(c, 2), 'RELAX': ('mesh.vertices_smooth', {'factor': 0.5}), 'HIDE': ('mesh.hide', {'unselected': False}), 'UNHIDE': ('mesh.reveal', {}), 'HIDE_UNSELECTED': ('mesh.hide', {'unselected': True}), 'DELETE_LOOSE': ('mesh.delete_loose', {}), 'SET_ID': lambda c: _material_id(c, False), 'SELECT_ID': lambda c: _material_id(c, True), 'AUTO_SMOOTH': _auto_smooth, 'CLEAR_SMOOTH': ('mesh.faces_shade_flat', {}), 'NURMS': _nurms, 'SHRINK': ('mesh.select_less', {}), 'GROW': ('mesh.select_more', {}), 'RING': SELECT_RING, 'LOOP': SELECT_LOOP, 'NORMALS': ('mesh.normals_make_consistent', {}), 'UV': ('uv.unwrap', {})}
 OBJECT_LEVEL = {'NURMS', 'ATTACH', 'REPEAT'}
 INTERACTIVE = {'EXTRUDE', 'EXTRUDE_VERTS', 'EXTRUDE_EDGES', 'BEVEL', 'CHAMFER', 'CHAMFER_VERTS', 'BEVEL_POLY', 'OUTLINE', 'INSET', 'SLICE', 'CUT', 'LOOPCUT', 'RELAX'}
 RELEASE_CONFIRM = {'mesh.extrude_region_move': _msg('TRANSFORM_OT_translate'), 'mesh.extrude_vertices_move': _msg('TRANSFORM_OT_translate'), 'mesh.extrude_edges_move': _msg('TRANSFORM_OT_translate'), 'mesh.loopcut_slide': _msg('TRANSFORM_OT_edge_slide'), 'mesh.bevel': None, 'mesh.inset': None, 'transform.resize': None}
@@ -836,6 +875,10 @@ class BSM_OT_mesh_action(Active, bpy.types.Operator):
         if self.action not in OBJECT_LEVEL and context.mode != 'EDIT_MESH':
             self.report({'WARNING'}, _dcc_ui_text(_msg('Choose a sub-object level first (1-5)')))
             return {'CANCELLED'}
+        from . import edit_poly
+        if self.action not in edit_poly.KEEPS_VERTICES and edit_poly.editing(context.view_layer.objects.active.data):
+            self.report({'WARNING'}, _dcc_ui_text(edit_poly.LAYER_ONLY_TIP))
+            return {'CANCELLED'}
         command = MESH_COMMANDS[self.action]
         with context.temp_override(**viewport_override(context)):
             try:
@@ -849,7 +892,7 @@ class BSM_OT_mesh_action(Active, bpy.types.Operator):
                     else:
                         getattr(getattr(bpy.ops, group), method)('EXEC_DEFAULT', **values)
             except RuntimeError as error:
-                self.report({'WARNING'}, _dcc_ui_error(error).split('\n')[0])
+                self.report({'WARNING'}, _dcc_ui_text(str(error).split('\n')[0]))
                 return {'CANCELLED'}
         runtime.redraw()
         return {'FINISHED'}

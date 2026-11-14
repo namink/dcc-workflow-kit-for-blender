@@ -264,7 +264,7 @@ def current_tangent(context):
 class BSM_OT_default_tangent(Active, bpy.types.Operator):
     bl_idname = 'bsm.default_tangent'
     bl_label = _msg('Default In/Out Tangents for New Keys')
-    bl_description = "Sets Blender's interpolation and handle type for new keys (Preferences > Animation)"
+    bl_description = _msg("Sets Blender's interpolation and handle type for new keys (Preferences > Animation)")
     tangent: EnumProperty(items=tuple(((t[0], t[1], '') for t in TANGENTS)), translation_context=_msg('DCCWorkflowKit.Max'))
 
     def execute(self, context):
@@ -416,7 +416,7 @@ def _flyout(name, label, items):
             button = self.layout.operator(operator, text=_dcc_ui_text(text))
             for (key, value) in props.items():
                 setattr(button, key, value)
-    return type(name, (bpy.types.Menu,), {'bl_label': label, 'draw': draw, 'bl_translation_context': 'DCCWorkflowKit.Max'})
+    return type(name, (bpy.types.Menu,), {'bl_label': label, 'draw': draw})
 BSM_MT_extents_flyout = _flyout(_msg('BSM_MT_extents_flyout'), _msg('Zoom Extents'), ((_msg('Zoom Extents Selected'), 'bsm.frame_selected', {}), (_msg('Zoom Extents'), 'bsm.view_navigation', {'kind': 'EXTENTS'})))
 BSM_MT_extents_all_flyout = _flyout(_msg('BSM_MT_extents_all_flyout'), _msg('Zoom Extents All'), ((_msg('Zoom Extents All Selected'), 'bsm.view_navigation', {'kind': 'EXTENTS_ALL_SELECTED'}), (_msg('Zoom Extents All'), 'bsm.navigation', {'kind': 'EXTENTS_ALL'})))
 BSM_MT_fov_flyout = _flyout(_msg('BSM_MT_fov_flyout'), _msg('Field-of-View'), ((_msg('Field-of-View'), 'bsm.view_navigation', {'kind': 'FOV'}), (_msg('Zoom Region'), 'bsm.navigation', {'kind': 'REGION'})))
@@ -430,7 +430,7 @@ def safe_scene(context):
 class BSM_OT_safe_scene(Active, bpy.types.Operator):
     bl_idname = 'bsm.safe_scene'
     bl_label = _msg('Safe Scene Script Execution')
-    bl_description = "Blender's protection against Python scripts embedded in scene files (Preferences > Save & Load)"
+    bl_description = _msg("Blender's protection against Python scripts embedded in scene files (Preferences > Save & Load)")
 
     def execute(self, context):
         if bpy.app.autoexec_fail:

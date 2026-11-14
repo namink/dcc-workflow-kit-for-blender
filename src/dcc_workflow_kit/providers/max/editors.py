@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Adapted for DCC Workflow Kit.
-from .i18n import msg as _msg, display as _dcc_ui_text, format_message as _dcc_format, error_text as _dcc_ui_error
+from .i18n import msg as _msg, display as _dcc_ui_text, format_message as _dcc_format
 "Material and animation workflows implemented with Blender's native data.\n\nThese controls edit Blender shaders and action slots. They do not emulate or\nimport proprietary material types, animation controllers, or renderer plugins.\n"
 import bpy
 from bpy.props import BoolProperty, EnumProperty, StringProperty
@@ -10,7 +10,7 @@ def _editable_objects(context):
     return [obj for obj in context.selected_objects if obj.is_editable]
 
 def _material_objects(context):
-    return [obj for obj in _editable_objects(context) if getattr(obj, 'data', None) is not None and hasattr(obj.data, 'materials') and obj.data.is_editable]
+    return [obj for obj in _editable_objects(context) if getattr(obj, 'data', None) is not None and hasattr(obj.data, _msg('materials')) and obj.data.is_editable]
 
 def _assign_material(obj, material):
     index = next((i for (i, slot) in enumerate(obj.material_slots) if slot.material == material), -1)
@@ -152,10 +152,10 @@ class BSM_OT_keyframe(_ActiveOperator, bpy.types.Operator):
                     if self.delete:
                         ok = target.keyframe_delete(data_path=path, frame=context.scene.frame_current)
                     else:
-                        ok = target.keyframe_insert(data_path=path, frame=context.scene.frame_current, group=getattr(target, 'name', _msg('Transforms')))
+                        ok = target.keyframe_insert(data_path=path, frame=context.scene.frame_current, group=getattr(target, _msg('name'), _msg('Transforms')))
                     count += bool(ok)
                 except (RuntimeError, TypeError) as error:
-                    self.report({'WARNING'}, _dcc_ui_error(error))
+                    self.report({'WARNING'}, _dcc_ui_text(str(error)))
         if not count:
             self.report({'WARNING'}, _dcc_ui_text(_msg('No matching keys removed') if self.delete else _msg('No keys inserted')))
             return {'CANCELLED'}
@@ -220,7 +220,7 @@ def draw_materials(layout, context):
     row.operator('bsm.editor', text=_dcc_ui_text(_msg('Compact')), icon='MATERIAL').kind = 'COMPACT'
     layout.label(text=_dcc_ui_text(_msg('Blender Principled materials')), icon='INFO')
     obj = context.view_layer.objects.active
-    if not obj or not getattr(obj, 'data', None) or (not hasattr(obj.data, 'materials')):
+    if not obj or not getattr(obj, 'data', None) or (not hasattr(obj.data, _msg('materials'))):
         layout.label(text=_dcc_ui_text(_msg('Select an object with material support.')))
         return
     row = layout.row()
@@ -237,11 +237,11 @@ def draw_materials(layout, context):
     row = layout.row(align=True)
     row.operator('bsm.material_assign', text=_dcc_ui_text(_msg('Assign to Selection')), icon='CHECKMARK')
     row.operator('bsm.material_duplicate', text=_dcc_ui_text(''), icon='DUPLICATE')
-    layout.prop(material, 'name', text=_dcc_ui_text(_msg('Name')))
+    layout.prop(material, _msg('name'), text=_dcc_ui_text(_msg('Name')))
     if material.use_nodes and material.node_tree:
         shader = next((node for node in material.node_tree.nodes if node.type == 'BSDF_PRINCIPLED'), None)
         if shader:
-            for name in (_msg('Base Color'), _msg('Metallic'), _msg('Roughness'), 'IOR', _msg('Alpha')):
+            for name in (_msg('Base Color'), _msg('Metallic'), _msg('Roughness'), _msg('IOR'), _msg('Alpha')):
                 socket = shader.inputs.get(name)
                 if socket and (not socket.is_linked):
                     layout.prop(socket, 'default_value', text=_dcc_ui_text(name))

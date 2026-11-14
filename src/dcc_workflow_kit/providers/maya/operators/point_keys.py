@@ -1,0 +1,295 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Set Key on components: S with points selected keys their positions, like Maya.
+
+Maya keys the shape's point channels of the selected components (a mesh vertex's X / Y / Z tweak, a curve /
+surface / lattice CV's X / Y / Z); edges and faces key the vertices they use. Blender keeps these on the object
+data:
+
+* mesh vertex  -> ``vertices[i].co`` (X / Y / Z) on the Mesh,
+* NURBS / poly CV -> ``splines[s].points[p].co`` indices 0 / 1 / 2 (not the weight),
+* Bezier point -> ``splines[s].bezier_points[p].co`` plus both handles (a selected handle alone keys that handle),
+* lattice point -> ``points[i].co_deform``.
+
+Curves and lattices edit their data in place, so their keys play in edit mode too. A mesh in edit mode works on a
+separate edit copy: before keying it is written back to the mesh (``update_from_editmode``), and on a frame change
+the keyed vertices of edit-mode meshes take their animated positions (``frame_change_post``), so the points move
+with time in component mode like Maya.
+"""
+
+import re
+
+import bmesh
+import bpy
+from bpy.app.handlers import persistent
+
+from . import playback_maya
+
+COMPONENT_MODES = {'EDIT_MESH', 'EDIT_CURVE', 'EDIT_SURFACE', 'EDIT_LATTICE'}
+TYPES = {'MESH', 'CURVE', 'SURFACE', 'LATTICE'}
+_VERT_PATH = re.compile(r"^vertices\[(\d+)\]\.co$")
+
+
+def applies(context):
+    """S keys points: the lead is a mesh / curve / surface / lattice in edit mode (Maya component mode)."""
+    return context.mode in COMPONENT_MODES
+
+
+def component_objects(context):
+    """Every object in the current edit mode that has keyable points."""
+    obs = list(getattr(context, "objects_in_mode", None) or [])
+    if not obs:
+        ob = context.active_object
+        obs = [ob] if ob is not None and ob.mode == 'EDIT' else []
+    return [ob for ob in obs if ob.type in TYPES]
+
+
+def point_paths(ob):
+    """[(data path, array index)] of ``ob``'s selected points (index -1 = every component)."""
+    data = ob.data
+    out = []
+    if ob.type == 'MESH':
+        bm = bmesh.from_edit_mesh(data) if ob.mode == 'EDIT' else None
+        if bm is not None:
+            sel = [v.index for v in bm.verts if v.select]
+        else:
+            sel = [v.index for v in data.vertices if v.select]
+        out = [(f"vertices[{i}].co", -1) for i in sel]
+    elif ob.type in {'CURVE', 'SURFACE'}:
+        for s, spline in enumerate(data.splines):
+            for p, pt in enumerate(spline.points):
+                if pt.select:
+                    out += [(f"splines[{s}].points[{p}].co", i) for i in range(3)]
+            for p, bp in enumerate(spline.bezier_points):
+                base = f"splines[{s}].bezier_points[{p}]."
+                if bp.select_control_point:
+                    out += [(base + n, -1) for n in ("co", "handle_left", "handle_right")]
+                    continue
+                if bp.select_left_handle:
+                    out.append((base + "handle_left", -1))
+                if bp.select_right_handle:
+                    out.append((base + "handle_right", -1))
+    elif ob.type == 'LATTICE':
+        out = [(f"points[{i}].co_deform", -1) for i, p in enumerate(data.points) if p.select]
+    return out
+
+
+def selected_point_curves(ob):
+    """F-curves of ``ob``'s selected points (edit mode): the keys the Time Slider shows for selected components."""
+    if ob is None or ob.type not in TYPES or ob.mode != 'EDIT':
+        return []
+    from .. import compat
+    curves = compat.id_fcurves(ob.data)
+    if not curves:
+        return []           # nothing keyed: the selection isn't read (the Time Slider asks on every redraw)
+    paths = point_paths(ob)
+    if not paths:
+        return []
+    want = {(p, i) for p, i in paths}
+    whole = {p for p, i in paths if i < 0}
+    return [fc for fc in curves if fc.data_path in whole or (fc.data_path, fc.array_index) in want]
+
+
+def key_points(context, keytype='KEYFRAME'):
+    """Key the selected points of every component-mode object at the current frame. Count of curves keyed."""
+    from . import graph_key_menu
+    frame = context.scene.frame_current
+    count = 0
+    for ob in component_objects(context):
+        paths = point_paths(ob)
+        if not paths:
+            continue
+        if ob.type == 'MESH':
+            ob.update_from_editmode()       # the edit copy -> the mesh, so the keys read the shown positions
+        data = ob.data
+        for path, index in paths:
+            try:
+                ok = data.keyframe_insert(path, index=index, frame=frame, keytype=keytype)
+            except (TypeError, RuntimeError):
+                ok = False
+            if ok:
+                graph_key_menu.after_insert(data, path, index, frame)
+                count += 3 if index < 0 else 1
+    return count
+
+
+# --- point curves: values, Auto Key, Channel Box states -----------------------------------------------------------
+
+_POINT_PATH = re.compile(r"^(vertices\[\d+\]\.co|points\[\d+\]\.co_deform|"
+                         r"splines\[\d+\]\.(points\[\d+\]\.co|bezier_points\[\d+\]\.(co|handle_left|handle_right)))$")
+
+
+def is_point_path(path):
+    return bool(_POINT_PATH.match(path))
+
+
+def point_curves(data):
+    """The point F-curves of an object's data (mute, locked and empty curves left out)."""
+    from .. import compat
+    if data is None or data.animation_data is None or data.animation_data.action is None:
+        return []
+    return [fc for fc in compat.id_fcurves(data)
+            if is_point_path(fc.data_path) and not fc.mute and not fc.lock and len(fc.keyframe_points)]
+
+
+def point_value(ob, path, index, bm=None):
+    """The shown value of one point channel: a mesh in edit mode reads its edit copy (``bm``)."""
+    if ob.type == 'MESH' and bm is not None:
+        m = _VERT_PATH.match(path)
+        if m is None:
+            return None
+        i = int(m.group(1))
+        if i >= len(bm.verts):
+            return None
+        return float(bm.verts[i].co[index])
+    try:
+        v = ob.data.path_resolve(path)
+        return float(v[index])
+    except (ValueError, TypeError, IndexError):
+        return None
+
+
+def _edit_bm(ob):
+    if ob.type != 'MESH' or ob.mode != 'EDIT':
+        return None
+    try:
+        bm = bmesh.from_edit_mesh(ob.data)
+    except (ValueError, RuntimeError, ReferenceError):
+        return None
+    bm.verts.ensure_lookup_table()
+    return bm
+
+
+def keyed_point_values(ob):
+    """{(path, index): (F-curve, shown value)} of ``ob``'s keyed point channels (edit mode reads the edit copy)."""
+    curves = point_curves(ob.data)
+    if not curves:
+        return {}
+    bm = _edit_bm(ob)
+    out = {}
+    for fc in curves:
+        v = point_value(ob, fc.data_path, fc.array_index, bm)
+        if v is not None:
+            out[(fc.data_path, fc.array_index)] = (fc, v)
+    return out
+
+
+def key_changed_points(ob, frame, moved, eps=1e-5):
+    """Maya Auto Key in component mode: key the keyed point channels of ``ob`` whose shown value differs from their
+    curve at ``frame`` and ``moved(path, index, value)`` says moved. Unkeyed points and unchanged axes get no key.
+    Returns [(path, index, value)] keyed."""
+    from . import graph_key_menu
+    todo = []
+    for (path, index), (fc, v) in keyed_point_values(ob).items():
+        if abs(v - playback_maya.curve_value(fc, frame)) > eps * max(1.0, abs(v)) and moved(path, index, v):
+            todo.append((path, index, v))
+    if not todo:
+        return []
+    if ob.type == 'MESH' and ob.mode == 'EDIT':
+        ob.update_from_editmode()       # the edit copy -> the mesh, so the keys read the shown positions
+    data = ob.data
+    done = []
+    for path, index, v in todo:
+        try:
+            ok = data.keyframe_insert(path, index=index, frame=frame)
+        except (TypeError, RuntimeError):
+            ok = False
+        if ok:
+            graph_key_menu.after_insert(data, path, index, frame)
+            done.append((path, index, v))
+    return done
+
+
+def point_states(ob, paths, frame):
+    """{(path, index): 'KEYED' / 'ANIMATED' / 'MUTED'} of the given point channels that have curves (the Channel
+    Box CVs table colours its cells like channel rows)."""
+    from .. import compat
+    data = ob.data if ob is not None else None
+    if data is None or data.animation_data is None or data.animation_data.action is None:
+        return {}
+    want = set(paths)
+    out = {}
+    for fc in compat.id_fcurves(data):
+        ch = (fc.data_path, fc.array_index)
+        if ch not in want:
+            continue
+        if fc.mute:
+            out[ch] = 'MUTED'
+        elif any(abs(kp.co[0] - frame) < 0.5 for kp in fc.keyframe_points):
+            out[ch] = 'KEYED'
+        else:
+            out[ch] = 'ANIMATED'
+    return out
+
+
+# --- edit-mode meshes follow their vertex keys on a frame change ------------------------------------------------
+
+def _vertex_curves(me):
+    from .. import compat
+    out = {}
+    for fc in compat.id_fcurves(me):
+        m = _VERT_PATH.match(fc.data_path)
+        if m and not fc.mute and 0 <= fc.array_index < 3:
+            out.setdefault(int(m.group(1)), []).append(fc)
+    return out
+
+
+def apply_frame(scene):
+    """Edit-mode meshes: the keyed vertices take their positions at the current frame. Count of vertices moved."""
+    frame = scene.frame_current_final
+    moved = 0
+    seen = set()
+    for ob in scene.objects:
+        if ob.type != 'MESH' or ob.mode != 'EDIT' or ob.data in seen:
+            continue
+        me = ob.data
+        seen.add(me)
+        ad = me.animation_data
+        if ad is None or ad.action is None:
+            continue
+        curves = _vertex_curves(me)
+        if not curves:
+            continue
+        try:
+            bm = bmesh.from_edit_mesh(me)
+        except (ValueError, RuntimeError, ReferenceError):
+            continue
+        bm.verts.ensure_lookup_table()
+        n = len(bm.verts)
+        for i, fcs in curves.items():
+            if i >= n:
+                continue
+            co = bm.verts[i].co
+            for fc in fcs:
+                co[fc.array_index] = playback_maya.curve_value(fc, frame)
+            moved += 1
+        if moved:
+            bmesh.update_edit_mesh(me, loop_triangles=False, destructive=False)
+    return moved
+
+
+def _editing_meshes():
+    """Can a mesh be in Edit Mode? Blender keeps every object in Edit Mode in the active object's mode, so outside
+    mesh Edit Mode a frame change has no keyed vertices to move and skips the look through every object."""
+    mode = getattr(bpy.context, "mode", None)
+    return mode is None or mode == 'EDIT_MESH'
+
+
+@persistent
+def _on_frame(scene, _depsgraph=None):
+    from . import anim_snapshot
+    if getattr(anim_snapshot, "_busy", False) or not _editing_meshes():
+        return
+    try:
+        apply_frame(scene)
+    except ReferenceError:
+        pass
+
+
+def register_handlers():
+    if _on_frame not in bpy.app.handlers.frame_change_post:
+        bpy.app.handlers.frame_change_post.append(_on_frame)
+
+
+def unregister_handlers():
+    if _on_frame in bpy.app.handlers.frame_change_post:
+        bpy.app.handlers.frame_change_post.remove(_on_frame)

@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Adapted for DCC Workflow Kit.
 from .i18n import msg as _msg, display as _dcc_ui_text, format_message as _dcc_format
-"3ds Max transform gizmos for Select and Move, Rotate and Scale in Object mode.\n\nThe gizmos are drawn in screen space at Max's fixed on-screen size, in the reference\ncoordinate system's orientation, with DefaultUI.clrx colours: Transform Gizmo X/Y/Z,\nActive Transform Gizmo (yellow), Rotation Gizmo Contour and Screen Space Gizmo.\nHovering a handle turns it yellow; the last handle used stays yellow and is the axis\nconstraint for dragging the object itself, as in Max. Dragging a handle runs Blender's\nown Move, Rotate, Trackball or Scale with the matching axis or plane constraint.\n"
+"3ds Max transform gizmos for Select and Move, Rotate and Scale, on objects and at the\nsub-object levels of an Editable Poly (Edit Mode).\n\nThe gizmos are drawn in screen space at Max's fixed on-screen size, in the reference\ncoordinate system's orientation, with DefaultUI.clrx colours: Transform Gizmo X/Y/Z,\nActive Transform Gizmo (yellow), Rotation Gizmo Contour and Screen Space Gizmo.\nHovering a handle turns it yellow; the last handle used stays yellow and is the axis\nconstraint for dragging the object (or the picked sub-object) itself, as in Max. Dragging\na handle runs Blender's own Move, Rotate, Trackball or Scale with the matching axis or\nplane constraint, on the selected objects or the selected vertices, edges and polygons.\n"
 import math
 import blf
+import bmesh
 import bpy
 import gpu
 from bpy.props import StringProperty
@@ -50,13 +51,83 @@ _tool_registered = False
 def _ui_scale():
     from .surfaces import scale
     return scale()
+MODES = ('OBJECT', 'EDIT_MESH')
 
 def kind(context):
-    """MOVE, ROTATE or SCALE while a Max transform tool is active in Object mode."""
-    if not runtime.is_active() or context.mode != 'OBJECT' or context.workspace is None:
+    """MOVE, ROTATE or SCALE while a Max transform tool is active, in Object or Edit Mode."""
+    if not runtime.is_active() or context.mode not in MODES or context.workspace is None:
         return None
-    tool = context.workspace.tools.from_space_view3d_mode('OBJECT', create=False)
+    tool = context.workspace.tools.from_space_view3d_mode(context.mode, create=False)
     return TOOLS.get(tool.idname) if tool else None
+_stamp = [0]
+_edit_cache = {}
+
+def _depsgraph_changed(_scene, _depsgraph):
+    _stamp[0] += 1
+
+def _edit_selection(context):
+    """Selected vertices of every mesh in Edit Mode, in world space (a selected edge or
+    polygon selects its vertices), and the summed normal of the selected polygons, or of
+    the selected vertices when no polygon is selected."""
+    objects = [o for o in context.objects_in_mode_unique_data if o.type == 'MESH']
+    key = (_stamp[0], tuple(((o.as_pointer(), o.data.total_vert_sel) for o in objects)))
+    if _edit_cache.get('key') == key:
+        return _edit_cache['value']
+    (points, face_normal, vert_normal) = ([], Vector(), Vector())
+    for obj in objects:
+        if not obj.data.total_vert_sel:
+            continue
+        matrix = obj.matrix_world
+        normal_matrix = matrix.to_3x3().inverted_safe().transposed()
+        bm = bmesh.from_edit_mesh(obj.data)
+        for v in bm.verts:
+            if v.select:
+                points.append(matrix @ v.co)
+                vert_normal += normal_matrix @ v.normal
+        if obj.data.total_face_sel:
+            face_normal += normal_matrix @ sum((f.normal for f in bm.faces if f.select), Vector())
+    value = (points, face_normal if face_normal.length > 1e-09 else vert_normal)
+    _edit_cache.update(key=key, value=value)
+    return value
+
+def _edit_pivot(context):
+    """The sub-object transform centre where Blender rotates and scales: the selection's
+    median or bounding-box centre, the 3D cursor (working pivot) or the active element."""
+    points = _edit_selection(context)[0]
+    if not points:
+        return None
+    pivot = context.scene.tool_settings.transform_pivot_point
+    if pivot == 'CURSOR':
+        return context.scene.cursor.location.copy()
+    if pivot == 'ACTIVE_ELEMENT' and context.edit_object is not None:
+        element = bmesh.from_edit_mesh(context.edit_object.data).select_history.active
+        if element is not None:
+            if isinstance(element, bmesh.types.BMVert):
+                local = element.co
+            elif isinstance(element, bmesh.types.BMEdge):
+                local = (element.verts[0].co + element.verts[1].co) / 2
+            else:
+                local = element.calc_center_median()
+            return context.edit_object.matrix_world @ local
+    if pivot == 'BOUNDING_BOX_CENTER':
+        return Vector([(min((p[i] for p in points)) + max((p[i] for p in points))) / 2 for i in range(3)])
+    return sum(points, Vector()) / len(points)
+
+def _normal_basis(context):
+    """Blender's Normal orientation at a sub-object level: Z along the selection's normal,
+    X along the active object's X axis laid on the selection's plane. Passed to the transform
+    as its orientation matrix, so the drag follows exactly the axes drawn."""
+    normal = _edit_selection(context)[1]
+    obj = context.edit_object or context.view_layer.objects.active
+    rotation = obj.matrix_world.to_3x3().normalized() if obj is not None else Matrix.Identity(3)
+    if normal.length < 1e-09:
+        return rotation
+    z = normal.normalized()
+    x = next((a - z * a.dot(z) for a in (rotation.col[0], rotation.col[1]) if (a - z * a.dot(z)).length > 0.0001), None)
+    if x is None:
+        return rotation
+    x.normalize()
+    return Matrix((x, z.cross(x), z)).transposed()
 
 def _pivot(context, objects):
     pivot = context.scene.tool_settings.transform_pivot_point
@@ -76,6 +147,8 @@ def _basis(context, r3d):
     active_obj = context.view_layer.objects.active
     if slot.custom_orientation:
         return slot.custom_orientation.matrix.copy()
+    if slot.type == 'NORMAL' and context.mode == 'EDIT_MESH':
+        return _normal_basis(context)
     if slot.type in {'LOCAL', 'NORMAL', 'GIMBAL'} and active_obj is not None:
         return active_obj.matrix_world.to_quaternion().to_matrix()
     if slot.type == 'VIEW':
@@ -91,10 +164,13 @@ def frame(context, region):
     r3d = region.data
     if r3d is None:
         return None
-    objects = [o for o in context.selected_objects if o.visible_get()]
-    if not objects:
+    if context.mode == 'EDIT_MESH':
+        center = _edit_pivot(context)
+    else:
+        objects = [o for o in context.selected_objects if o.visible_get()]
+        center = _pivot(context, objects) if objects else None
+    if center is None:
         return None
-    center = _pivot(context, objects)
     p = location_3d_to_region_2d(region, r3d, center)
     if p is None:
         return None
@@ -106,7 +182,16 @@ def frame(context, region):
         to_eye = (r3d.view_matrix.inverted().translation - center).normalized()
     else:
         to_eye = r3d.view_rotation @ Vector((0, 0, 1))
-    return dict(center=center, axes=[basis.col[i].normalized() for i in range(3)], p=p, world_per_px=1 / (side - p).length, to_eye=to_eye, region=region, r3d=r3d, u=_ui_scale() * size)
+    return dict(center=center, axes=[basis.col[i].normalized() for i in range(3)], p=p, basis=basis, world_per_px=1 / (side - p).length, to_eye=to_eye, region=region, r3d=r3d, u=_ui_scale() * size)
+
+def orientation(context, f=None):
+    """Transform orientation arguments matching the axes drawn. Blender's own Normal
+    orientation at a sub-object level is replaced by the gizmo's (_normal_basis)."""
+    orient = context.scene.transform_orientation_slots[0].type
+    if orient == 'NORMAL' and context.mode == 'EDIT_MESH':
+        basis = f['basis'] if f else _normal_basis(context)
+        return dict(orient_type='NORMAL', orient_matrix=basis, orient_matrix_type='NORMAL')
+    return dict(orient_type=orient)
 
 def _proj(f, point):
     return location_3d_to_region_2d(f['region'], f['r3d'], point)
@@ -289,11 +374,15 @@ def draw_scale(f, hover):
         _lines([_proj(f, outer[i]), _proj(f, c + 0.92 * length * d)], _color(i, shown == 'XYZ'[i]), width)
         _label(LABELS[i], _proj(f, c + length * d), ACTIVE if i in lit_axes else AXIS_COLORS[i], 7.5 * u)
 
+def visible(space):
+    """Gizmos on, and Show Transform Gizmo (X) on."""
+    return getattr(space, 'show_gizmo', True) and getattr(space, 'show_gizmo_tool', True)
+
 def draw():
     context = bpy.context
     kind_ = kind(context)
     (space, region) = (context.space_data, context.region)
-    if kind_ is None or region is None or region.type != 'WINDOW' or (not getattr(space, 'show_gizmo', True)):
+    if kind_ is None or region is None or region.type != 'WINDOW' or (not visible(space)):
         return
     f = frame(context, region)
     if f is None:
@@ -364,7 +453,7 @@ def pick(context, region, x, y):
     return axis if distance <= near else None
 
 def hover(context, area, region, x, y):
-    part = pick(context, region, x, y)
+    part = pick(context, region, x, y) if visible(area.spaces.active) else None
     key = region.as_pointer()
     if _hover.get(key) != part:
         _hover[key] = part
@@ -372,19 +461,19 @@ def hover(context, area, region, x, y):
 
 def transform(context, kind_, part):
     """Blender's own transform with the handle's axis or plane constraint, following the mouse."""
-    orient = context.scene.transform_orientation_slots[0].type
+    orient = orientation(context)
     axes = AXES.get(part, ())
     constraint = tuple((i in axes for i in range(3)))
     if kind_ == 'MOVE':
         if part == 'VIEW' or part == 'XYZ' or (not axes):
             return bpy.ops.transform.translate('INVOKE_DEFAULT', release_confirm=True)
-        return bpy.ops.transform.translate('INVOKE_DEFAULT', constraint_axis=constraint, orient_type=orient, release_confirm=True)
+        return bpy.ops.transform.translate('INVOKE_DEFAULT', constraint_axis=constraint, release_confirm=True, **orient)
     if kind_ == 'ROTATE':
         if part == 'FREE':
             return bpy.ops.transform.trackball('INVOKE_DEFAULT', release_confirm=True)
         if part not in {'X', 'Y', 'Z'}:
             return bpy.ops.transform.rotate('INVOKE_DEFAULT', orient_axis='Z', orient_type='VIEW', release_confirm=True)
-        return bpy.ops.transform.rotate('INVOKE_DEFAULT', orient_axis=part, constraint_axis=constraint, orient_type=orient, release_confirm=True)
+        return bpy.ops.transform.rotate('INVOKE_DEFAULT', orient_axis=part, constraint_axis=constraint, release_confirm=True, **orient)
     return bpy.ops.bsm.max_scale('INVOKE_DEFAULT', part=part if axes else 'XYZ')
 SCALE_PER_PIXEL = 0.01
 SCALE_REFERENCE = 100.0
@@ -403,10 +492,24 @@ class BSM_OT_max_scale(bpy.types.Operator):
     def invoke(self, context, event):
         region = context.region
         f = frame(context, region) if region is not None and context.area.type == 'VIEW_3D' else None
-        objects = [o for o in context.selected_editable_objects if o.visible_get()]
-        if f is None or not objects:
+        if f is None:
             return {'CANCELLED'}
-        self.saved = [(o, o.location.copy(), o.scale.copy(), o.rotation_euler.copy(), o.rotation_quaternion.copy(), tuple(o.rotation_axis_angle)) for o in objects]
+        if context.mode == 'EDIT_MESH':
+            every = context.scene.tool_settings.use_proportional_edit
+            (self.saved, self.saved_verts) = ([], [])
+            for obj in context.objects_in_mode_unique_data:
+                if obj.type == 'MESH' and obj.data.total_vert_sel:
+                    bm = bmesh.from_edit_mesh(obj.data)
+                    self.saved_verts.append((obj.data, [(v.index, v.co.copy()) for v in bm.verts if every or v.select]))
+            if not self.saved_verts:
+                return {'CANCELLED'}
+        else:
+            objects = [o for o in context.selected_editable_objects if o.visible_get()]
+            if not objects:
+                return {'CANCELLED'}
+            self.saved = [(o, o.location.copy(), o.scale.copy(), o.rotation_euler.copy(), o.rotation_quaternion.copy(), tuple(o.rotation_axis_angle)) for o in objects]
+            self.saved_verts = []
+        self.orient = orientation(context, f)
         self.origin = (region.x, region.y)
         self.start = Vector((event.mouse_x - region.x, event.mouse_y - region.y))
         ids = AXES.get(self.part, (0, 1, 2))
@@ -451,6 +554,12 @@ class BSM_OT_max_scale(bpy.types.Operator):
         for (obj, location, scale, euler, quaternion, axis_angle) in self.saved:
             (obj.location, obj.scale) = (location, scale)
             (obj.rotation_euler, obj.rotation_quaternion, obj.rotation_axis_angle) = (euler, quaternion, axis_angle)
+        for (mesh, coords) in self.saved_verts:
+            bm = bmesh.from_edit_mesh(mesh)
+            bm.verts.ensure_lookup_table()
+            for (index, co) in coords:
+                bm.verts[index].co = co
+            bmesh.update_edit_mesh(mesh, loop_triangles=False, destructive=False)
 
     def _apply(self, context, amount):
         self._restore()
@@ -462,7 +571,7 @@ class BSM_OT_max_scale(bpy.types.Operator):
             return
         value = tuple((factor if i in self.ids else 1.0 for i in range(3)))
         constraint = tuple((i in self.ids for i in range(3)))
-        bpy.ops.transform.resize('EXEC_DEFAULT', False, value=value, constraint_axis=constraint, orient_type=context.scene.transform_orientation_slots[0].type)
+        bpy.ops.transform.resize('EXEC_DEFAULT', False, value=value, constraint_axis=constraint, **self.orient)
 
     def modal(self, context, event):
         if event.type in {'MOUSEMOVE', 'INBETWEEN_MOUSEMOVE'}:
@@ -485,13 +594,15 @@ def press(context, event, area, region, x, y):
     if kind_ is None:
         return None
     override = dict(window=context.window, area=area, region=region)
-    part = pick(context, region, x, y)
+    part = pick(context, region, x, y) if visible(area.spaces.active) else None
     if part is not None:
         if part in AXES:
             active[kind_] = part
         with context.temp_override(**override):
             transform(context, kind_, part)
         return {'RUNNING_MODAL'}
+    if context.mode == 'EDIT_MESH':
+        return _press_sub_object(context, event, override, kind_, x, y)
     from .commands import object_under_mouse
     hit = object_under_mouse(context, region, region.data, (x, y))
     obj = hit[0] if hit else None
@@ -505,6 +616,52 @@ def press(context, event, area, region, x, y):
         obj.select_set(True)
     context.view_layer.objects.active = obj
     with context.temp_override(**override):
+        transform(context, kind_, active[kind_])
+    return {'RUNNING_MODAL'}
+
+def _selected(context):
+    """{mesh: (vertex, edge, polygon indices)} selected in every mesh in Edit Mode."""
+    result = {}
+    for obj in context.objects_in_mode_unique_data:
+        if obj.type == 'MESH':
+            bm = bmesh.from_edit_mesh(obj.data)
+            result[obj.data] = tuple(({e.index for e in seq if e.select} for seq in (bm.verts, bm.edges, bm.faces)))
+    return result
+
+def _reselect(selection):
+    for (mesh, (verts, edges, faces)) in selection.items():
+        bm = bmesh.from_edit_mesh(mesh)
+        for seq in (bm.faces, bm.edges, bm.verts):
+            for e in seq:
+                e.select = False
+        for (seq, chosen) in ((bm.verts, verts), (bm.edges, edges), (bm.faces, faces)):
+            for e in seq:
+                if e.index in chosen:
+                    e.select = True
+        bmesh.update_edit_mesh(mesh, loop_triangles=False, destructive=False)
+
+def _press_sub_object(context, event, override, kind_, x, y):
+    """Max's Select and Move/Rotate/Scale at a sub-object level: a vertex, edge or polygon
+    under the mouse is picked and transformed with the active (yellow) constraint; one that
+    is already selected keeps the whole selection, so the drag moves all of it. Empty space,
+    Ctrl and Alt select with a region, as on objects."""
+    with context.temp_override(**override):
+        if event.ctrl or event.alt:
+            bpy.ops.bsm.select_region('INVOKE_DEFAULT', add=event.ctrl, subtract=event.alt)
+            return {'RUNNING_MODAL'}
+        before = _selected(context)
+        if 'FINISHED' not in bpy.ops.view3d.select('EXEC_DEFAULT', location=(int(x), int(y))):
+            bpy.ops.bsm.select_region('INVOKE_DEFAULT')
+            return {'RUNNING_MODAL'}
+        obj = context.edit_object
+        bm = bmesh.from_edit_mesh(obj.data) if obj is not None and obj.type == 'MESH' else None
+        picked = bm.select_history.active if bm is not None else None
+        kinds = (bmesh.types.BMVert, bmesh.types.BMEdge, bmesh.types.BMFace)
+        if picked is not None and obj.data in before:
+            group = next((i for (i, k) in enumerate(kinds) if isinstance(picked, k)))
+            if picked.index in before[obj.data][group]:
+                _reselect(before)
+                bm.select_history.add(picked)
         transform(context, kind_, active[kind_])
     return {'RUNNING_MODAL'}
 _select = (('view3d.select', {'type': 'LEFTMOUSE', 'value': 'PRESS'}, {'properties': [('deselect_all', True)]}),)
@@ -538,19 +695,28 @@ class BSM_WST_max_scale(bpy.types.WorkSpaceTool):
     bl_icon = 'ops.transform.resize'
     bl_keymap = _select
     bl_translation_context = _msg('DCCWorkflowKit.Max')
+
+def _sub_object_tool(tool):
+    """The same tool at an Editable Poly's sub-object levels (Edit Mode)."""
+    return type(tool.__name__ + '_edit', (tool,), {'bl_context_mode': 'EDIT_MESH'})
 WORKSPACE_TOOLS = (BSM_WST_max_move, BSM_WST_max_rotate, BSM_WST_max_scale)
+WORKSPACE_TOOLS += tuple((_sub_object_tool(tool) for tool in WORKSPACE_TOOLS))
 CLASSES = (BSM_OT_max_scale,)
 
 def register_tool():
     global _draw_handle, _tool_registered
     if not _tool_registered:
-        previous = 'builtin.move'
-        for tool in WORKSPACE_TOOLS:
-            bpy.utils.register_tool(tool, after={previous})
-            previous = tool.bl_idname
+        for mode in MODES:
+            previous = 'builtin.move'
+            for tool in WORKSPACE_TOOLS:
+                if tool.bl_context_mode == mode:
+                    bpy.utils.register_tool(tool, after={previous})
+                    previous = tool.bl_idname
         _tool_registered = True
     if _draw_handle is None:
         _draw_handle = bpy.types.SpaceView3D.draw_handler_add(draw, (), 'WINDOW', 'POST_PIXEL')
+    if _depsgraph_changed not in bpy.app.handlers.depsgraph_update_post:
+        bpy.app.handlers.depsgraph_update_post.append(_depsgraph_changed)
 
 def unregister_tool():
     """Safe to call when registration stopped part way: register() calls it on failure."""
@@ -558,6 +724,8 @@ def unregister_tool():
     if _draw_handle is not None:
         bpy.types.SpaceView3D.draw_handler_remove(_draw_handle, 'WINDOW')
         _draw_handle = None
+    if _depsgraph_changed in bpy.app.handlers.depsgraph_update_post:
+        bpy.app.handlers.depsgraph_update_post.remove(_depsgraph_changed)
     if _tool_registered:
         for tool in reversed(WORKSPACE_TOOLS):
             try:
@@ -566,14 +734,19 @@ def unregister_tool():
                 pass
         _tool_registered = False
     _hover.clear()
+    _edit_cache.clear()
 
 def restore_blender_tools(context):
-    """Leaving Max mode: Blender's own Move, Rotate and Scale replace the Max tools,
-    whose gizmos are Studio-only."""
+    """Leaving Max mode: Blender's own Move, Rotate and Scale replace the Max tools, whose
+    gizmos are drawn only in Max mode. Blender sets a tool only for the mode a window is in,
+    so the other mode's Max tool stays in that (Max) workspace until Max mode returns."""
     for window in context.window_manager.windows:
-        tool = window.workspace.tools.from_space_view3d_mode('OBJECT', create=False)
         area = next((a for a in window.screen.areas if a.type == 'VIEW_3D'), None)
-        if tool is not None and tool.idname in BLENDER_TOOLS and (area is not None):
-            region = next((r for r in area.regions if r.type == 'WINDOW'))
-            with context.temp_override(window=window, area=area, region=region):
+        if area is None:
+            continue
+        region = next((r for r in area.regions if r.type == 'WINDOW'))
+        with context.temp_override(window=window, area=area, region=region):
+            mode = bpy.context.mode
+            tool = window.workspace.tools.from_space_view3d_mode(mode, create=False) if mode in MODES else None
+            if tool is not None and tool.idname in BLENDER_TOOLS:
                 bpy.ops.wm.tool_set_by_id(name=BLENDER_TOOLS[tool.idname])

@@ -55,7 +55,7 @@ if report['checks'][-1]['ok']:
         return '3 cycles per profile; factory objects, timing, units and materials unchanged'
     check('mode_cycles_preserve_scene', modes)
     def services():
-        assert maya.operators.ik_rp._on_update in bpy.app.handlers.frame_change_post
+        assert maya.operators.ik_rp._on_frame in bpy.app.handlers.frame_change_post
         assert maya.operators.constrain_interp._on_update in bpy.app.handlers.depsgraph_update_post
         assert hasattr(bpy.types.Object, 'bsm_prim')
         assert hasattr(bpy.types.Scene, 'bsm_material_slots')
@@ -79,7 +79,7 @@ if report['checks'][-1]['ok']:
         assert not addon_utils.check('dcc_workflow_kit')[1]
         assert not hasattr(bpy.types.Object, 'bsm_prim')
         assert not lifecycle.owners(), lifecycle.owners()
-        assert maya.operators.ik_rp._on_update not in bpy.app.handlers.frame_change_post
+        assert maya.operators.ik_rp._on_frame not in bpy.app.handlers.frame_change_post
         return 'all recorded registrations removed'
     def shortcut_registration():
         from dcc_workflow_kit import ui
@@ -121,4 +121,3 @@ out.parent.mkdir(parents=True, exist_ok=True)
 out.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
 if any(not item['ok'] for item in report['checks']):
     raise SystemExit(1)
-

@@ -1,672 +1,1802 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Simplified Chinese localization by namink; additional display integration 2026-10-31.
 """Patches that turn Industry Compatible data into the "Maya" keyconfig.
 
 ``IC:<line>`` = ``$S\\presets\\keyconfig\\keymap_data\\industry_compatible_data.py``.
-Plan and rationale: docs/steps/step_2.md (1-4), docs/steps/step_3.md (5-8),
-docs/steps/step_4.md (9-13), docs/steps/step_10.md (16), docs/steps/step_11.md (17),
-docs/steps/step_16.md (18), docs/steps/step_18.md (19), docs/steps/step_20.md (20),
-docs/steps/step_22.md (21), docs/steps/step_24.md (22), docs/steps/step_27.md (23), docs/steps/step_28.md (24).
+Sections by step: 2 (1-4), 3 (5-8), 4 (9-13), 10 (16), 11 (17), 16 (18), 18 (19), 20 (20), 22 (21), 24 (22),
+27 (23), 28 (24).
 
 ``ADDED`` lists every binding this module adds; tests use it for the
-shadowing check and docs/keymap_mapping.md is cross-checked against it.
+shadowing check and the keymap mapping table is cross-checked against it.
 """
-from ..i18n import source_message as _dcc_source, display_message as _dcc_display, format_message as _dcc_format
+
 from . import patch
 from .patch import KeyconfigData, make_event
+
+# (km_name, idname, event, props, shadows) for every binding added below.
+# ``shadows``: keymaps allowed to bind the same event in the same editor
+# (intentional: e.g. paint modes keep their own X/B).
 ADDED = []
-PASS_THROUGH_FIRST = ('allset.cb_virtual_slider', 'allset.cb_hover', 'allset.weight_numbers_hover', 'allset.cb_scroll', 'allset.time_range_drag', 'allset.manip_ctrl', 'allset.manip_duplicate', 'allset.manip_press', 'allset.select_priority', 'allset.select_through', 'allset.toolbox_guard', 'allset.time_scrub', 'allset.time_slider_menu', 'allset.outliner_set_click', 'allset.outliner_set_menu', 'allset.graph_channel_click', 'allset.graph_channel_scroll', 'allset.script_run', 'allset.dock_strip_click', 'allset.hs_swatch_drag', 'allset.shelf_scroll', 'allset.select_2d_click', 'allset.select_2d_box', 'allset.graph_layer_pick', 'allset.uv_shell_pick', 'allset.uv_shell_box')
+
+
+# Operators that return PASS_THROUGH when they don't apply, so they may sit in
+# front of another item with the same event in the same keymap.
+PASS_THROUGH_FIRST = ("allset.pivot_pick", "allset.inview_drag", "allset.uv_shell_hover", "allset.emulated_tumble", "allset.cb_virtual_slider", "allset.cb_hover", "allset.pt_hover", "allset.weight_numbers_hover", "allset.cb_scroll","allset.time_range_drag", "allset.manip_ctrl", "allset.manip_duplicate", "allset.manip_release", "allset.manip_press",
+                      "allset.select_priority", "allset.type_char_pick", "allset.select_through", "allset.toolbox_guard", "allset.time_scrub",
+                      "allset.time_view_lock",
+                      "allset.time_slider_menu", "allset.time_range_all",
+                      "allset.graph_channel_click", "allset.graph_channel_scroll", "allset.script_run",
+                      "allset.dock_strip_click",
+                      "allset.hs_swatch_drag", "allset.shelf_scroll",
+                      "allset.select_2d_click", "allset.select_2d_box", "allset.graph_layer_pick",
+                      "allset.uv_shell_pick", "allset.uv_shell_box",
+                      "allset.graph_axis_drag", "allset.graph_move_snap", "allset.graph_shift_press",
+                      "allset.graph_key_drag", "allset.graph_scale_box",
+                      "allset.hg_click", "allset.hg_mmb", "allset.hg_rmb", "allset.hg_zoom",
+                      "allset.hg_frame", "allset.marking_menu",
+                      "allset.graph_handle_drag", "allset.graph_handle_box", "allset.motion_trail_key",
+                      "allset.nav_2d")
+
 
 def _add(kd, km_name, idname, event, props=None, shadows=(), first=False):
     kd.add(km_name, idname, event, props, first=first)
     ADDED.append((km_name, idname, event, dict(props or {}), tuple(shadows)))
 
+
+# --- 1. Selection modifiers ----------------------------------------------
+# Maya: Shift = toggle, Ctrl = deselect, Ctrl+Shift = add, for click and
+# marquee. Order of variants:
+# (shift, ctrl) = none, Shift, Ctrl, Ctrl+Shift.
+
 def _click(plain, toggle, deselect, add):
-    return [((False, False), plain), ((True, False), toggle), ((False, True), deselect), ((True, True), add)]
-_CLICK_EXACT = _click({'deselect_all': True}, {'toggle': True}, {'deselect': True}, {'extend': True})
-_OUTLINER_CLICK = _click({'extend': False, 'extend_range': False, 'deselect_all': True}, {'extend': False, 'extend_range': True, 'deselect_all': True}, {'extend': True, 'extend_range': False, 'deselect_all': True}, {'extend': True, 'extend_range': True, 'deselect_all': True})
-_GRAPH_CLICK = _click({'extend': False, 'deselect_all': True}, {'extend': True}, {'extend': False, 'deselect_all': True}, {'extend': True})
-_NLA_CLICK = _click({'extend': False, 'deselect_all': True}, {'extend': True}, {'extend': True}, {'extend': True})
-_DOPE_CLICK = _click({'extend': False, 'deselect_all': True}, {'extend': True}, {'extend': True}, {'extend': True})
-_BOX = _click({'mode': 'SET'}, {'mode': 'XOR'}, {'mode': 'SUB'}, {'mode': 'ADD'})
-_BOX_SET_XOR = _click({'mode': 'SET'}, {'mode': 'SET'}, {'mode': 'SUB'}, {'mode': 'ADD'})
-_BOX_NO_XOR = _click({'mode': 'SET'}, {'mode': 'ADD'}, {'mode': 'SUB'}, {'mode': 'ADD'})
-_NODE_CLICK = _click({'deselect_all': True, 'select_passthrough': True}, {'toggle': True}, {'deselect': True}, {'extend': True})
+    return [((False, False), plain), ((True, False), toggle),
+            ((False, True), deselect), ((True, True), add)]
+
+
+# Operators with a real ``deselect`` option.
+_CLICK_EXACT = _click({"deselect_all": True}, {"toggle": True},
+                      {"deselect": True}, {"extend": True})
+
+# Maya's Outliner is a Qt list — plain = replace,
+# Shift = range from the anchor, Ctrl = toggle, Ctrl+Shift = add the range. Blender's item_activate does that with
+# extend / extend_range (the anchor is Blender's active element).
+_OUTLINER_CLICK = _click({"extend": False, "extend_range": False, "deselect_all": True},
+                         {"extend": False, "extend_range": True, "deselect_all": True},
+                         {"extend": True, "extend_range": False, "deselect_all": True},
+                         {"extend": True, "extend_range": True, "deselect_all": True})
+# Graph Editor (Maya): Shift toggles; Ctrl+click acts like a plain click; Ctrl+Shift adds — the plain / Ctrl /
+# Ctrl+Shift rules that Blender's clickselect lacks are applied by allset.select_2d_click placed first (patch below);
+# these items are what runs if that operator passes through.
+_GRAPH_CLICK = _click({"extend": False, "deselect_all": True},
+                      {"extend": True}, {"extend": False, "deselect_all": True}, {"extend": True})
+# NLA (no Maya rule): every modifier toggles
+_NLA_CLICK = _click({"extend": False, "deselect_all": True}, {"extend": True}, {"extend": True}, {"extend": True})
+# Dope Sheet (Maya): Shift toggles, Ctrl deselects, Ctrl+Shift adds (select_2d_click)
+_DOPE_CLICK = _click({"extend": False, "deselect_all": True},
+                     {"extend": True}, {"extend": True}, {"extend": True})
+
+_BOX = _click({"mode": "SET"}, {"mode": "XOR"}, {"mode": "SUB"}, {"mode": "ADD"})
+# uv / graph / action select_box have no XOR: their Shift box runs as SET and allset.select_2d_box (first, PASS_THROUGH)
+# toggles what it caught against the selection before. Outliner / NLA keep Shift = add.
+_BOX_SET_XOR = _click({"mode": "SET"}, {"mode": "SET"}, {"mode": "SUB"}, {"mode": "ADD"})
+_BOX_NO_XOR = _click({"mode": "SET"}, {"mode": "ADD"}, {"mode": "SUB"}, {"mode": "ADD"})
+
+# node.select has a real deselect / toggle (4.5): Maya exactly. Node Ctrl+drag stays Blender's node.link
+# (detach links from a socket): no Ctrl marquee there.
+_NODE_CLICK = _click({"deselect_all": True, "select_passthrough": True}, {"toggle": True},
+                     {"deselect": True}, {"extend": True})
 _NODE_BOX = [v for v in _BOX_NO_XOR if v[0] != (False, True)]
-SELECT_RULES = (('view3d.select', 'CLICK', _CLICK_EXACT, ()), ('view3d.select', 'PRESS', _CLICK_EXACT, ()), ('uv.select', 'CLICK', _CLICK_EXACT, ()), ('uv.select', 'PRESS', _CLICK_EXACT, ()), ('outliner.item_activate', 'CLICK', _OUTLINER_CLICK, ()), ('graph.clickselect', 'PRESS', _GRAPH_CLICK, ('column', 'curves')), ('view3d.select_box', 'CLICK_DRAG', _BOX, ('tweak',)), ('uv.select_box', 'CLICK_DRAG', _BOX_SET_XOR, ('tweak',)), ('outliner.select_box', 'CLICK_DRAG', _BOX_NO_XOR, ('tweak',)), ('graph.select_box', 'CLICK_DRAG', _BOX_SET_XOR, ('tweak', 'axis_range')), ('action.clickselect', 'PRESS', _DOPE_CLICK, ('column', 'channel')), ('nla.click_select', 'PRESS', _NLA_CLICK, ()), ('node.select', 'PRESS', _NODE_CLICK, ()), ('action.select_box', 'CLICK_DRAG', _BOX_SET_XOR, ('tweak', 'axis_range', 'wait_for_input')), ('nla.select_box', 'CLICK_DRAG', _BOX_NO_XOR, ('tweak', 'axis_range', 'wait_for_input')), ('node.select_box', 'CLICK_DRAG', _NODE_BOX, ('tweak',)))
-SELECT_CTRL_SHIFT_REMOVED = ((_dcc_source('Dopesheet'), 'action.select_leftright'), (_dcc_source('NLA Editor'), 'nla.select_leftright'), (_dcc_source('Node Editor'), 'node.select_link_viewer'))
+
+SELECT_RULES = (
+    # idname, event value, variants, props kept from IC's plain item
+    ("view3d.select", "CLICK", _CLICK_EXACT, ()),          # IC "3D View", viewport
+    ("view3d.select", "PRESS", _CLICK_EXACT, ()),          # "3D View Tool: Tweak"
+    ("uv.select", "CLICK", _CLICK_EXACT, ()),              # "UV Editor"
+    ("uv.select", "PRESS", _CLICK_EXACT, ()),              # "Image Editor Tool: Uv, Tweak"
+    ("outliner.item_activate", "CLICK", _OUTLINER_CLICK, ()),
+    ("graph.clickselect", "PRESS", _GRAPH_CLICK, ("column", "curves")),
+    ("view3d.select_box", "CLICK_DRAG", _BOX, ("tweak",)),
+    ("uv.select_box", "CLICK_DRAG", _BOX_SET_XOR, ("tweak",)),
+    ("outliner.select_box", "CLICK_DRAG", _BOX_NO_XOR, ("tweak",)),
+    ("graph.select_box", "CLICK_DRAG", _BOX_SET_XOR, ("tweak", "axis_range")),
+    # Dope Sheet, NLA, Node Editor
+    ("action.clickselect", "PRESS", _DOPE_CLICK, ("column", "channel")),
+    ("nla.click_select", "PRESS", _NLA_CLICK, ()),
+    ("node.select", "PRESS", _NODE_CLICK, ()),
+    ("action.select_box", "CLICK_DRAG", _BOX_SET_XOR, ("tweak", "axis_range", "wait_for_input")),
+    ("nla.select_box", "CLICK_DRAG", _BOX_NO_XOR, ("tweak", "axis_range", "wait_for_input")),
+    ("node.select_box", "CLICK_DRAG", _NODE_BOX, ("tweak",)),
+)
+
+
+SELECT_CTRL_SHIFT_REMOVED = (("Dopesheet", "action.select_leftright"), ("NLA Editor", "nla.select_leftright"),
+                             ("Node Editor", "node.select_link_viewer"))
+
 
 def patch_selection(kd):
-    kd.remove(_dcc_source('Graph Editor'), 'graph.select_leftright', type='LEFTMOUSE', shift=True, ctrl=True)
-    for (km, idname) in SELECT_CTRL_SHIFT_REMOVED:
-        kd.remove(km, idname, type='LEFTMOUSE', shift=True, ctrl=True)
+    # IC:935 Ctrl+Shift+LMB = select keys left/right of the frame; Maya has no
+    # such binding and Ctrl+Shift click must add to the selection.
+    kd.remove("Graph Editor", "graph.select_leftright", type="LEFTMOUSE",
+              shift=True, ctrl=True)
+    # the same Ctrl+Shift+LMB in the Dope Sheet / NLA, and Node Editor Ctrl+Shift+click = link to viewer
+    for km, idname in SELECT_CTRL_SHIFT_REMOVED:
+        kd.remove(km, idname, type="LEFTMOUSE", shift=True, ctrl=True)
     touched = {}
-    for (idname, value, variants, keep) in SELECT_RULES:
+    for idname, value, variants, keep in SELECT_RULES:
         kms = kd.rewrite_modifier_set(idname, value, variants, keep_props=keep)
         if not kms:
-            if not patch.STRICT:
-                patch.DRIFT.append(f'selection patch: {idname} {value} not found')
+            if not patch.STRICT:   # another Blender's IC data
+                patch.DRIFT.append(f"selection patch: {idname} {value} not found")
                 continue
-            raise LookupError(f'selection patch: {idname} {value} not found in IC data')
-        touched[idname, value] = kms
+            raise LookupError(f"selection patch: {idname} {value} not found in IC data")
+        touched[(idname, value)] = kms
     patch_select_2d(kd, touched)
     return touched
-SELECT_2D_CLICKS = ((('graph.clickselect', 'PRESS'), 'GRAPH', ((False, False, 'KEEP'), (False, True, 'CTRL'), (True, True, 'ADD'))), (('action.clickselect', 'PRESS'), 'DOPE', ((False, True, 'DESELECT'), (True, True, 'ADD'))), (('outliner.item_activate', 'CLICK'), 'OUTLINER', ((False, True, 'TOGGLE'),)))
-SELECT_2D_BOXES = ((('graph.select_box', 'CLICK_DRAG'), 'GRAPH'), (('action.select_box', 'CLICK_DRAG'), 'DOPE'), (('uv.select_box', 'CLICK_DRAG'), 'UV'))
-SELECT_2D_KEYMAPS = set()
+
+
+# first-place operators that apply the Maya rule around Blender's own selection
+# (operators/select_2d.py). (keymap family key, editor, [(shift, ctrl, rule)]) for clicks; boxes: Shift = XOR.
+SELECT_2D_CLICKS = ((("graph.clickselect", "PRESS"), 'GRAPH', ((False, False, 'KEEP'), (False, True, 'CTRL'),
+                                                               (True, True, 'ADD'))),
+                    (("action.clickselect", "PRESS"), 'DOPE', ((False, True, 'DESELECT'), (True, True, 'ADD'))),
+                    (("outliner.item_activate", "CLICK"), 'OUTLINER', ((False, True, 'TOGGLE'),)))
+SELECT_2D_BOXES = ((("graph.select_box", "CLICK_DRAG"), 'GRAPH'), (("action.select_box", "CLICK_DRAG"), 'DOPE'),
+                   (("uv.select_box", "CLICK_DRAG"), 'UV'))
+
+
+SELECT_2D_KEYMAPS = set()      # keymaps that got a select_2d box item (tests: their shadowing stacks)
+
 
 def patch_select_2d(kd, touched):
-    for (key, editor, variants) in SELECT_2D_CLICKS:
+    for key, editor, variants in SELECT_2D_CLICKS:
         for km in touched.get(key, ()):
-            if km not in (_dcc_source('Graph Editor'), _dcc_source('Dopesheet'), _dcc_source('Outliner')):
+            if km not in ("Graph Editor", "Dopesheet", "Outliner"):          # tool keymaps keep Blender's items
                 continue
-            for (shift, ctrl, rule) in variants:
-                _add(kd, km, 'allset.select_2d_click', make_event('LEFTMOUSE', key[1], shift=shift, ctrl=ctrl), {'editor': editor, 'rule': rule}, shadows=(km, _dcc_source('Screen'), _dcc_source('View2D')), first=True)
-    for (key, editor) in SELECT_2D_BOXES:
+            for shift, ctrl, rule in variants:
+                _add(kd, km, "allset.select_2d_click", make_event("LEFTMOUSE", key[1], shift=shift, ctrl=ctrl),
+                     {"editor": editor, "rule": rule}, shadows=(km, "Screen", "View2D"), first=True)
+    for key, editor in SELECT_2D_BOXES:
         for km in touched.get(key, ()):
-            _add(kd, km, 'allset.select_2d_box', make_event('LEFTMOUSE', 'CLICK_DRAG', shift=True), {'editor': editor}, shadows=(km,), first=True)
+            _add(kd, km, "allset.select_2d_box", make_event("LEFTMOUSE", "CLICK_DRAG", shift=True),
+                 {"editor": editor}, shadows=(km,), first=True)
             SELECT_2D_KEYMAPS.add(km)
-DISPLAY_KEYS = (('FOUR', 'WIREFRAME'), ('FIVE', 'SHADED'), ('SIX', 'TEXTURED'), ('SEVEN', 'LIGHTS'))
+
+
+# --- 2. 4/5/6/7 display modes ---------------------------------------------
+# Maya: 4 wireframe, 5 shaded, 6 shaded+textured, 7 all lights
+# (Maya hotkeys 4..7).
+
+DISPLAY_KEYS = (("FOUR", "WIREFRAME"), ("FIVE", "SHADED"),
+                ("SIX", "TEXTURED"), ("SEVEN", "LIGHTS"))
+
 
 def patch_display(kd):
-    kd.remove(_dcc_source('Object Non-modal'), 'object.mode_set', type='FOUR')
-    kd.remove(_dcc_source('Object Non-modal'), 'wm.call_menu_pie', type='FIVE')
-    for (key, mode) in DISPLAY_KEYS:
-        _add(kd, '3D View', 'allset.display_mode', make_event(key), {'mode': mode})
-    _add(kd, _dcc_source('Object Non-modal'), 'allset.toggle_sel_mode', make_event('F8'))
+    # IC:3458-3459 "Object Non-modal": 4 = object mode, 5 = mode pie.
+    kd.remove("Object Non-modal", "object.mode_set", type="FOUR")
+    kd.remove("Object Non-modal", "wm.call_menu_pie", type="FIVE")
+    for key, mode in DISPLAY_KEYS:
+        _add(kd, "3D View", "allset.display_mode", make_event(key), {"mode": mode})
+    # Losing 4 = object mode leaves no quick way out of edit mode; Maya's F8
+    # toggles object <-> last component mode.
+    # allset.toggle_sel_mode = editmode_toggle + Maya's in-view message.
+    _add(kd, "Object Non-modal", "allset.toggle_sel_mode", make_event("F8"))
+
+
+# --- 3. Ctrl+G group --------------------------------------------------------
+# Maya Ctrl+G = group under common parent, pivot at origin.
+# IC Ctrl+G = move to collection (IC:2547; Blender 5.x: the same as a
+# wm.call_menu of OBJECT_MT_move_to_collection), so the item is removed whatever its operator.
 
 def patch_group(kd):
-    for km in (_dcc_source('Object Mode'), _dcc_source('Outliner')):
-        kd.remove(km, None, type='G', ctrl=True)
-        _add(kd, km, 'allset.group', make_event('G', ctrl=True))
+    for km in ("Object Mode", "Outliner"):
+        kd.remove(km, None, type="G", ctrl=True)
+        _add(kd, km, "allset.group", make_event("G", ctrl=True))
+    # A picked joint (pose mode, or skeleton edit mode with the Move tool): its skeleton goes under the group.
+    for km in ("Pose", "Armature"):
+        _add(kd, km, "allset.group", make_event("G", ctrl=True))
+
+
+# --- 4. Space reserved for the hotbox ---------------------------------------
+# Maya Space = hotbox (Space shows the hotbox),
+# Space does nothing in other editors.
+# Playback moves to Maya's Alt+V (PlaybackToggle) and Alt+Shift+V (GoToMinFrame).
 
 def patch_space(kd):
-    kd.remove(_dcc_source('Frames'), 'screen.animation_play', type='SPACE')
-    _add(kd, _dcc_source('Frames'), 'screen.animation_play', make_event('V', alt=True))
-    _add(kd, _dcc_source('Frames'), 'screen.frame_jump', make_event('V', alt=True, shift=True), {'end': False})
-_PAINT_MODES = (_dcc_source('Sculpt'), _dcc_source('Vertex Paint'), _dcc_source('Image Paint'), _dcc_source('Weight Paint'))
-HOLD_KEYS = (('X', _dcc_source('grid')), ('C', _dcc_source('curve')), ('V', _dcc_source('point')), ('J', _dcc_source('step')))
+    kd.remove("Frames", "screen.animation_play", type="SPACE")  # IC:2258
+    _add(kd, "Frames", "screen.animation_play", make_event("V", alt=True))
+    _add(kd, "Frames", "screen.frame_jump", make_event("V", alt=True, shift=True), {"end": False})
+
+
+# --- 5. Hold keys: X/C/V/J snapping ------------------------------------------
+# Maya: snapping only while the key is held, Shift variants identical
+# (Maya hotkeys x/X, c/C, v/V, j).
+# Paint/sculpt modes keep their own X (brush color flip): they are checked
+# before "3D View", so the hold never runs there.
+_PAINT_MODES = ("Sculpt", "Vertex Paint", "Image Paint", "Weight Paint")
+
+HOLD_KEYS = (("X", "grid"), ("C", "curve"), ("V", "point"), ("J", "step"))
+
 
 def patch_hold_snap(kd):
-    kd.remove('3D View', 'wm.context_toggle', type='X')
-    kd.remove('3D View', 'wm.call_menu_pie', type='X', shift=True)
-    kd.remove('3D View', 'wm.call_menu_pie', type='V')
-    for km in (_dcc_source('Object Mode'), _dcc_source('Mesh'), _dcc_source('Curve'), _dcc_source('Curves'), _dcc_source('Armature'), _dcc_source('Metaball')):
-        kd.remove(km, 'wm.tool_set_by_id', type='C')
-    for (key, name) in HOLD_KEYS:
+    kd.remove("3D View", "wm.context_toggle", type="X")                 # IC:780 snap toggle
+    kd.remove("3D View", "wm.call_menu_pie", type="X", shift=True)      # snap pie
+    kd.remove("3D View", "wm.call_menu_pie", type="V")                  # view pie
+    for km in ("Object Mode", "Mesh", "Curve", "Curves", "Armature", "Metaball"):
+        kd.remove(km, "wm.tool_set_by_id", type="C")                     # cursor tool
+    for key, name in HOLD_KEYS:
         for shift in (False, True):
-            _add(kd, '3D View', 'allset.hold', make_event(key, shift=shift), {'name': name}, shadows=_PAINT_MODES)
+            _add(kd, "3D View", "allset.hold", make_event(key, shift=shift), {"name": name},
+                 shadows=_PAINT_MODES)
+
+
+# --- 6. B soft select (tap toggle, hold + LMB drag radius) ------------------
 
 def patch_soft_select(kd):
-    for km in (_dcc_source('Object Mode'), _dcc_source('Mesh'), _dcc_source('Curve'), _dcc_source('Curves'), _dcc_source('Metaball'), _dcc_source('Lattice'), _dcc_source('Particle')):
-        kd.remove(km, 'wm.context_toggle', type='B')
-    _add(kd, '3D View', 'allset.tap_hold', make_event('B'), {'binding': 'soft_select'}, shadows=_PAINT_MODES)
+    for km in ("Object Mode", "Mesh", "Curve", "Curves", "Metaball", "Lattice", "Particle"):
+        kd.remove(km, "wm.context_toggle", type="B")                     # IC:2517, IC:3066
+    _add(kd, "3D View", "allset.tap_hold", make_event("B"), {"binding": "soft_select"},
+         shadows=_PAINT_MODES)
+
+
+# --- 7. A tap / hold, D hold pivot, Insert pivot toggle ---------------------
+# A: tap = FrameAll, hold = marking menu.
+# D / Insert: pivot edit while held / toggle.
 
 def patch_tap_hold_and_pivot(kd):
-    kd.remove('3D View', 'view3d.view_all', type='A')
-    _add(kd, '3D View', 'allset.tap_hold', make_event('A'), {'binding': 'select_all'}, shadows=(_dcc_source('Sculpt'),))
-    kd.remove(_dcc_source('Object Mode'), 'wm.tool_set_by_id', type='D')
-    _add(kd, _dcc_source('Object Mode'), 'allset.hold', make_event('D'), {'name': _dcc_source('pivot')})
-    _add(kd, _dcc_source('Object Mode'), 'allset.pivot_toggle', make_event('INSERT'))
-PICK_WALK_KEYS = (('UP_ARROW', 'UP'), ('DOWN_ARROW', 'DOWN'), ('LEFT_ARROW', 'LEFT'), ('RIGHT_ARROW', 'RIGHT'))
+    kd.remove("3D View", "view3d.view_all", type="A")
+    _add(kd, "3D View", "allset.tap_hold", make_event("A"), {"binding": "select_all"},
+         shadows=("Sculpt",))
+    kd.remove("Object Mode", "wm.tool_set_by_id", type="D")              # IC:121 annotate
+    _add(kd, "Object Mode", "allset.hold", make_event("D"), {"name": "pivot"})
+    _add(kd, "Object Mode", "allset.pivot_toggle", make_event("INSERT"))
+    # Pivot picking precedes normal/cursor selection only during custom pivot edit.
+    for km in ("3D View", "3D View Tool: Cursor"):
+        _add(kd, km, "allset.pivot_pick", make_event("LEFTMOUSE", any=True), first=True)
+
+
+# --- 8. Arrow-key pick-walk (object mode) -----------------------------------
+# Maya hotkeys. IC puts Left/Right frame
+# stepping into each mode keymap (IC:93-97 _template_items_animation); only
+# Object Mode's copy is replaced. Maya steps frames with Alt+,/..
+
+PICK_WALK_KEYS = (("UP_ARROW", "UP"), ("DOWN_ARROW", "DOWN"),
+                  ("LEFT_ARROW", "LEFT"), ("RIGHT_ARROW", "RIGHT"))
+
 
 def patch_pick_walk(kd):
-    kd.remove(_dcc_source('Object Mode'), 'object.select_more', type='UP_ARROW')
-    kd.remove(_dcc_source('Object Mode'), 'object.select_less', type='DOWN_ARROW')
-    kd.remove(_dcc_source('Object Mode'), 'screen.frame_offset', type='LEFT_ARROW')
-    kd.remove(_dcc_source('Object Mode'), 'screen.frame_offset', type='RIGHT_ARROW')
-    for (key, direction) in PICK_WALK_KEYS:
-        _add(kd, _dcc_source('Object Mode'), 'allset.pick_walk', make_event(key, repeat=True), {'direction': direction})
+    kd.remove("Object Mode", "object.select_more", type="UP_ARROW")
+    kd.remove("Object Mode", "object.select_less", type="DOWN_ARROW")
+    kd.remove("Object Mode", "screen.frame_offset", type="LEFT_ARROW")
+    kd.remove("Object Mode", "screen.frame_offset", type="RIGHT_ARROW")
+    for key, direction in PICK_WALK_KEYS:
+        _add(kd, "Object Mode", "allset.pick_walk", make_event(key, repeat=True),
+             {"direction": direction})
+
+
+# --- 9. Camera: ortho tumble lock, framing in all views ----------------------
+# Maya: Alt+LMB tumble, Shift+F / Shift+A framing.
 
 def patch_camera(kd):
-    kd.remove('3D View', 'view3d.rotate', type='LEFTMOUSE', alt=True)
-    _add(kd, '3D View', 'allset.tumble', make_event('LEFTMOUSE', alt=True))
-    kd.remove('3D View', 'view3d.zoom', type='RIGHTMOUSE', alt=True)
-    _add(kd, '3D View', 'allset.dolly', make_event('RIGHTMOUSE', alt=True), shadows=(_dcc_source('Image Paint'), _dcc_source('Vertex Paint'), _dcc_source('Sculpt')))
-    kd.remove(_dcc_source('Image'), 'image.view_zoom', type='RIGHTMOUSE', alt=True)
-    _add(kd, _dcc_source('Image'), 'allset.dolly_2d', make_event('RIGHTMOUSE', alt=True), shadows=(_dcc_source('View2D'),))
-    kd.remove('3D View', 'view3d.view_center_pick', type='F', shift=True)
-    _add(kd, '3D View', 'allset.frame_all_views', make_event('F', shift=True), {'selected': True})
-    kd.remove('3D View', 'view3d.view_selected', type='F')
-    _add(kd, '3D View', 'allset.frame', make_event('F'), {'selected': True})
-    _add(kd, '3D View', 'allset.frame_all_views', make_event('F', shift=True, ctrl=True), {'selected': True, 'children': True})
-    kd.remove('3D View', 'view3d.view_all', type='A', shift=True)
-    _add(kd, '3D View', 'allset.frame_all_views', make_event('A', shift=True), {'selected': False}, shadows=(_dcc_source('Sculpt'),))
+    kd.remove("3D View", "view3d.rotate", type="LEFTMOUSE", alt=True)       # IC:674
+    _add(kd, "3D View", "allset.tumble", make_event("LEFTMOUSE", alt=True))
+    # Maya's tumble never snaps. Blender's rotate snaps to the nearest axis view when Alt is pressed during the drag
+    # and then turns a perspective view orthographic; Alt is the tumble key itself, so pressing it again mid-drag
+    # locked the persp view like a top / front / side view (#288).
+    for snap in ("AXIS_SNAP_ENABLE", "AXIS_SNAP_DISABLE"):
+        kd.remove("View3D Rotate Modal", snap)
+    # Alt+LMB+MMB = dolly, whichever button comes first (#325), and letting go of one of them carries on with the
+    # button still held (#343): the kit's tumble / track / chord dolly start a watcher that starts the next navigation
+    # on each press / release of these two buttons, and the running one ends on that event. A tumble / track the
+    # watcher starts on a release ends on the release of the button still held.
+    kd.remove("3D View", "view3d.move", type="MIDDLEMOUSE", alt=True)
+    _add(kd, "3D View", "allset.track_view", make_event("MIDDLEMOUSE", alt=True))
+    for km, other, held in (("View3D Rotate Modal", "MIDDLEMOUSE", "LEFTMOUSE"),
+                            ("View3D Move Modal", "LEFTMOUSE", "MIDDLEMOUSE")):
+        kd.add(km, "CONFIRM", make_event(other, any=True))
+        kd.add(km, "CONFIRM", make_event(other, "DOUBLE_CLICK", any=True))     # a quick second press
+        kd.add(km, "CONFIRM", make_event(held, "RELEASE", any=True))
+    # through a camera the chord dolly is Blender's zoom: it ends when either button is let go
+    for button in ("LEFTMOUSE", "MIDDLEMOUSE"):
+        kd.add("View3D Zoom Modal", "CONFIRM", make_event(button, "RELEASE", any=True))
+    # Alt+RMB dolly reads the drag itself: Blender's zoom axis is a preference the kit no longer sets (#51)
+    kd.remove("3D View", "view3d.zoom", type="RIGHTMOUSE", alt=True)       # IC:433
+    _add(kd, "3D View", "allset.dolly", make_event("RIGHTMOUSE", alt=True),
+         shadows=("Image Paint", "Vertex Paint", "Sculpt"))     # their Alt+RMB stencil control stays, as before
+    # UV / Image Editor: a dolly instead of IC image.view_zoom (Zoom Axis preference): right / down = in, left / up
+    # = out. Graph Editor / Dope Sheet / NLA keep View2D view2d.zoom: it zooms each axis by its own drag (right = in;
+    # their rows never zoom), no preference involved.
+    kd.remove("Image", "image.view_zoom", type="RIGHTMOUSE", alt=True)
+    _add(kd, "Image", "allset.dolly_2d", make_event("RIGHTMOUSE", alt=True), shadows=("View2D",))  # Image runs first
+    # 2D editors: Alt+LMB+MMB zooms like Alt+RMB, whichever button comes first (#325). The kit's modal runs the whole
+    # Alt+LMB / Alt+MMB drag (it pans like the pan it sits in front of): in View2D for the Graph Editor, Dope Sheet,
+    # NLA and Node Editor, in "Image" for the UV / Image Editor. Its poll keeps the editor's own pan in every other
+    # editor, the Time Slider and the kit's rows.
+    for button in ("LEFTMOUSE", "MIDDLEMOUSE"):
+        _add(kd, "View2D", "allset.nav_2d", make_event(button, alt=True), first=True,
+             shadows=("View2D", "View2D Buttons List"))
+        _add(kd, "Image", "allset.nav_2d", make_event(button, alt=True), first=True, shadows=("Image", "View2D"))
+    # Node Editor Alt+RMB: zoom by the left / right drag only (Blender's view2d.zoom reads the Zoom Axis preference
+    # there); the item passes Alt+RMB on to view2d.zoom in the other View2D editors
+    _add(kd, "View2D", "allset.nav_2d", make_event("RIGHTMOUSE", alt=True), first=True,
+         shadows=("View2D", "View2D Buttons List"))
+    kd.remove("3D View", "view3d.view_center_pick", type="F", shift=True)
+    _add(kd, "3D View", "allset.frame_all_views", make_event("F", shift=True), {"selected": True})
+    # Maya fit (factor 0.95, sidebar excluded) for F and Ctrl+Shift+F (with children);
+    # A tap goes through taphold.SelectAllBinding.
+    kd.remove("3D View", "view3d.view_selected", type="F")                  # IC:681
+    # Mode keymaps run before the general 3D View keymap. Another addon's
+    # Object/Mesh F menu would consume the key before Frame Selection runs.
+    # Mode-local aliases also participate in the existing Maya priority watcher;
+    # the foreign bindings remain available when Maya mode is turned off.
+    frame_maps = ("3D View", "Object Mode", "Mesh")
+    for km in frame_maps:
+        _add(kd, km, "allset.frame", make_event("F"), {"selected": True}, shadows=frame_maps)
+    _add(kd, "3D View", "allset.frame_all_views", make_event("F", shift=True, ctrl=True),
+         {"selected": True, "children": True})
+    kd.remove("3D View", "view3d.view_all", type="A", shift=True)
+    _add(kd, "3D View", "allset.frame_all_views", make_event("A", shift=True), {"selected": False},
+         shadows=("Sculpt",))
+
+
+# --- 10. View-change undo: [ ] and Alt+Z / Alt+Y ----------------------------
+# Maya hotkeys. IC [ ] = select_hierarchy
+# (IC:2506-2512), replaced by the arrow pick-walk. Paint modes keep
+# [ ] for brush size.
 
 def patch_view_history(kd):
-    kd.remove(_dcc_source('Object Mode'), 'object.select_hierarchy', type='LEFT_BRACKET')
-    kd.remove(_dcc_source('Object Mode'), 'object.select_hierarchy', type='RIGHT_BRACKET')
-    for (ev, direction) in ((make_event('LEFT_BRACKET'), 'UNDO'), (make_event('RIGHT_BRACKET'), 'REDO'), (make_event('Z', alt=True), 'UNDO'), (make_event('Y', alt=True), 'REDO')):
-        _add(kd, '3D View', 'allset.view_history', ev, {'direction': direction}, shadows=_PAINT_MODES + (_dcc_source('Armature'),))
-HOTBOX_KEYMAPS = ('3D View', _dcc_source('Outliner'), _dcc_source('Graph Editor'), _dcc_source('Dopesheet'), _dcc_source('Node Editor'), _dcc_source('Image'))
+    kd.remove("Object Mode", "object.select_hierarchy", type="LEFT_BRACKET")
+    kd.remove("Object Mode", "object.select_hierarchy", type="RIGHT_BRACKET")
+    for ev, direction in ((make_event("LEFT_BRACKET"), "UNDO"), (make_event("RIGHT_BRACKET"), "REDO"),
+                          (make_event("Z", alt=True), "UNDO"), (make_event("Y", alt=True), "REDO")):
+        _add(kd, "3D View", "allset.view_history", ev, {"direction": direction},
+             shadows=_PAINT_MODES + ("Armature",))
+
+
+# --- 11. Space tap = four views, Ctrl+Space = full screen -------------------
+# Maya: Space tap = four views. Space hold = hotbox.
+
+# Space = hotbox (tap = pane toggle, Maya 2022 hotbox). Also in the editors
+# the hotbox South zone switches a pane to, so the hotbox can switch it back; Space is
+# free there since patch_space (IC used it only in "Frames"). Not in text editors.
+HOTBOX_KEYMAPS = ("3D View", "Outliner", "Graph Editor", "Dopesheet", "Node Editor", "Image")
+
 
 def patch_space_tap(kd):
     for km in HOTBOX_KEYMAPS:
-        _add(kd, km, 'allset.hotbox', make_event('SPACE'))
-    _add(kd, _dcc_source('Screen'), 'screen.screen_full_area', make_event('SPACE', ctrl=True), {'use_hide_panels': True})
-SMOOTH_KEYS = (('ONE', 1), ('TWO', 2), ('THREE', 3))
+        _add(kd, km, "allset.hotbox", make_event("SPACE"))
+    _add(kd, "Screen", "screen.screen_full_area", make_event("SPACE", ctrl=True),
+         {"use_hide_panels": True})
+
+
+# --- 12. 1/2/3 smooth mesh preview -------------------------------------------
+# Maya 1/2/3 = smooth mesh preview levels. IC 1/2/3 = component modes
+# (IC:2558-2563 Object Mode, IC:164-177 Mesh), now on F9-F11.
+
+SMOOTH_KEYS = (("ONE", 1), ("TWO", 2), ("THREE", 3))
+
 
 def patch_smooth_preview(kd):
-    for (key, level) in SMOOTH_KEYS:
-        kd.remove(_dcc_source('Object Mode'), 'object.mode_set_with_submode', type=key)
-        kd.remove(_dcc_source('Mesh'), 'mesh.select_mode', type=key)
-        for km in (_dcc_source('Object Mode'), _dcc_source('Mesh')):
-            _add(kd, km, 'allset.smooth_preview', make_event(key), {'level': level})
-COMPONENT_KEYS = (('F9', 'VERT'), ('F10', 'EDGE'), ('F11', 'FACE'), ('F7', 'MULTI'))
+    for key, level in SMOOTH_KEYS:
+        kd.remove("Object Mode", "object.mode_set_with_submode", type=key)
+        kd.remove("Mesh", "mesh.select_mode", type=key)
+        for km in ("Object Mode", "Mesh"):
+            _add(kd, km, "allset.smooth_preview", make_event(key), {"level": level})
+
+
+# --- 13. F7/F9/F10/F11 component modes ---------------------------------------
+# Maya F8 / F9-F11 component modes. F8 = editmode_toggle (patch 2).
+
+COMPONENT_KEYS = (("F9", "VERT"), ("F10", "EDGE"), ("F11", "FACE"), ("F7", "MULTI"))
+
 
 def patch_component_keys(kd):
-    for (key, comp) in COMPONENT_KEYS:
-        _add(kd, _dcc_source('Object Non-modal'), 'allset.component_mode', make_event(key), {'type': comp})
-SLIDER_TOOL_KEYMAPS = ('3D View Tool: Move', '3D View Tool: Rotate', '3D View Tool: Scale', '3D View Tool: Transform')
+    for key, comp in COMPONENT_KEYS:
+        _add(kd, "Object Non-modal", "allset.component_mode", make_event(key), {"type": comp})
+
+
+# --- 14. Channel Box MMB virtual slider ---------------------------------------
+# Maya: MMB drag in the viewport drags the picked Channel Box attribute. Tool keymaps run before "3D View" and IC
+# gives Move/Rotate/Scale/Transform an MMB drag (IC:3823-3858), so the slider
+# goes first in those; it passes through when no channel is selected.
+
+SLIDER_TOOL_KEYMAPS = ("3D View Tool: Move", "3D View Tool: Rotate", "3D View Tool: Scale",
+                       "3D View Tool: Transform")
+
 
 def patch_cb_slider(kd):
     for km in SLIDER_TOOL_KEYMAPS:
-        _add(kd, km, 'allset.cb_virtual_slider', make_event('MIDDLEMOUSE'), first=True, shadows=(km,))
-    _add(kd, _dcc_source('Object Mode'), 'allset.cb_virtual_slider', make_event('MIDDLEMOUSE'))
-    _add(kd, _dcc_source('Property Editor'), 'allset.cb_hover', make_event('MOUSEMOVE', 'ANY', any=True), first=True)
-    _add(kd, _dcc_source('Weight Paint'), 'allset.weight_numbers_hover', make_event('MOUSEMOVE', 'ANY', any=True), first=True)
-    for wheel in ('WHEELUPMOUSE', 'WHEELDOWNMOUSE'):
-        _add(kd, 'View2D Buttons List', 'allset.cb_scroll', make_event(wheel), first=True, shadows=('View2D Buttons List',))
-    _add(kd, 'View2D Buttons List', 'allset.dock_strip_click', make_event('LEFTMOUSE'), first=True, shadows=('View2D Buttons List', _dcc_source('Property Editor'), _dcc_source('Screen')))
-    _add(kd, 'View2D Buttons List', 'allset.hs_swatch_drag', make_event('MIDDLEMOUSE'), first=True, shadows=('View2D Buttons List',))
-MM_KEYMAPS = ((_dcc_source('Object Mode'), 'VIEW3D_MT_object_context_menu'), (_dcc_source('Mesh'), 'VIEW3D_MT_edit_mesh_context_menu'), (_dcc_source('Curve'), 'VIEW3D_MT_edit_curve_context_menu'))
-MM_EVENTS = (('RMB', {}), ('SHIFT_RMB', {'shift': True}), ('CTRL_RMB', {'ctrl': True}), ('TOOL_OPTIONS', {'shift': True, 'ctrl': True}))
-TOOL_KEY_KEYMAPS = (_dcc_source('Object Mode'), _dcc_source('Mesh'), _dcc_source('Curve'), _dcc_source('Armature'), _dcc_source('Pose'), _dcc_source('Metaball'), _dcc_source('Lattice'), _dcc_source('Curves'))
-TOOL_KEYS = (('Q', 'tool_select'), ('W', 'tool_move'), ('E', 'tool_rotate'), ('R', 'tool_scale'))
+        _add(kd, km, "allset.cb_virtual_slider", make_event("MIDDLEMOUSE"), first=True,
+             shadows=(km,))
+    _add(kd, "Object Mode", "allset.cb_virtual_slider", make_event("MIDDLEMOUSE"),
+         shadows=("Object Mode", "3D View"))     # the emulated Alt+LMB tumble (#242) passes through otherwise
+    # Channel Box rows: drag over names / fields selects a range (the dock is a Properties editor;
+    # ui/channel_box.ALLSET_OT_cb_hover)
+    _add(kd, "Property Editor", "allset.cb_hover", make_event("MOUSEMOVE", "ANY", any=True), first=True)
+    # right-click on the panel toolbar's camera icon = the scene's cameras (ui/panel_toolbar.ALLSET_OT_pt_hover; the
+    # 3D View tool header runs the "3D View Generic" keymap)
+    _add(kd, "3D View Generic", "allset.pt_hover", make_event("MOUSEMOVE", "ANY", any=True), first=True)
+    # Paint Skin Weights numeric labels around the brush need the pointer (ui/weight_numbers.py)
+    # (both hover items pass the move on: the tool header's camera icon watch is in 3D View Generic)
+    _add(kd, "Weight Paint", "allset.weight_numbers_hover", make_event("MOUSEMOVE", "ANY", any=True), first=True,
+         shadows=("3D View Generic",))
+    # The Channel Box part of the dock scrolls by itself, the Layer Editor below stays (Maya's fixed split,
+    # #55); passes through outside an overflowing Channel Box
+    for wheel in ("WHEELUPMOUSE", "WHEELDOWNMOUSE"):
+        # the region's "View2D Buttons List" handler runs before "Property Editor" (buttons_main_region_init adds
+        # it first) and scrolls the whole region on the wheel, so the item sits first in that keymap
+        _add(kd, "View2D Buttons List", "allset.cb_scroll", make_event(wheel), first=True,
+             shadows=("View2D Buttons List",))   # first + PASS_THROUGH over view2d.scroll_up / _down
+    # Maya's vertical tab strip on the dock's right edge (#78; ui/maya_dock.draw_strip): drawn, not buttons,
+    # so a click there reaches the keymaps; first in the region's earliest keymap (its scroller sits on that edge)
+    _add(kd, "View2D Buttons List", "allset.dock_strip_click", make_event("LEFTMOUSE"), first=True,
+         shadows=("View2D Buttons List", "Property Editor", "Screen"))   # PASS_THROUGH off the strip
+    # Hypershade Browser: MMB-drag a material swatch onto an object = assign it (ui/hs_drag.py); the region's
+    # view2d.pan / scroller_activate take MMB PRESS in this keymap, so the item goes first and passes through off a
+    # swatch
+    _add(kd, "View2D Buttons List", "allset.hs_swatch_drag", make_event("MIDDLEMOUSE"), first=True,
+         shadows=("View2D Buttons List",))
+    # Hypergraph: Hierarchy window (ui/hypergraph.py): a kit-drawn graph in a marked Properties region. The items
+    # sit first in the region's earliest keymap and poll False outside a Hypergraph region.
+    hg = ("View2D Buttons List", "Property Editor", "Screen", "Window", "Frames")
+    for button, idname in (("LEFTMOUSE", "allset.hg_click"), ("MIDDLEMOUSE", "allset.hg_mmb"),
+                           ("RIGHTMOUSE", "allset.hg_rmb")):
+        _add(kd, "View2D Buttons List", idname, make_event(button, "PRESS", any=True), first=True, shadows=hg)
+    for wheel, direction in (("WHEELUPMOUSE", "IN"), ("WHEELDOWNMOUSE", "OUT")):
+        _add(kd, "View2D Buttons List", "allset.hg_zoom", make_event(wheel), {"direction": direction},
+             first=True, shadows=hg)
+    for key, everything in (("F", False), ("A", True)):
+        _add(kd, "View2D Buttons List", "allset.hg_frame", make_event(key), {"all": everything},
+             first=True, shadows=hg)
+
+
+# --- 15. Marking menus (pies) and Q/W/E/R hold + LMB ---------------------------
+# Maya marking menus. IC's RMB context menus in these
+# modes give way to the Maya marking menus; Shift+RMB 3D cursor goes (no 3D cursor in Maya).
+
+MM_KEYMAPS = (("Object Mode", "VIEW3D_MT_object_context_menu"),
+              ("Mesh", "VIEW3D_MT_edit_mesh_context_menu"),
+              ("Curve", "VIEW3D_MT_edit_curve_context_menu"))
+MM_EVENTS = (("RMB", {}), ("SHIFT_RMB", {"shift": True}), ("CTRL_RMB", {"ctrl": True}),
+             ("TOOL_OPTIONS", {"shift": True, "ctrl": True}))
+# Modes whose IC keymap sets the Q/W/E/R tools (IC _template_items_tool_select etc.).
+TOOL_KEY_KEYMAPS = ("Object Mode", "Mesh", "Curve", "Armature", "Pose", "Metaball", "Lattice", "Curves")
+TOOL_KEYS = (("Q", "tool_select"), ("W", "tool_move"), ("E", "tool_rotate"), ("R", "tool_scale"))
+
 
 def patch_marking_menus(kd):
-    for (km, menu) in MM_KEYMAPS:
-        kd.remove(km, 'wm.call_menu', type='RIGHTMOUSE')
-        for (trigger, mods) in MM_EVENTS:
-            _add(kd, km, 'allset.marking_menu', make_event('RIGHTMOUSE', **mods), {'trigger': trigger})
-    kd.remove('3D View', 'view3d.cursor3d', type='RIGHTMOUSE', shift=True)
-    kd.remove('3D View', 'transform.translate', type='RIGHTMOUSE', value='CLICK_DRAG', shift=True)
+    for km, menu in MM_KEYMAPS:
+        kd.remove(km, "wm.call_menu", type="RIGHTMOUSE")
+        for trigger, mods in MM_EVENTS:
+            _add(kd, km, "allset.marking_menu", make_event("RIGHTMOUSE", **mods), {"trigger": trigger})
+    # Sculpt Mode: Maya sculpts with a tool and keeps its RMB marking menu over the mesh (Object Mode / Vertex / Edge /
+    # Face leave Sculpt Mode); IC's sculpt context panel goes. First, so it runs before the stencil drag on the same
+    # event, which it passes through to while the brush maps a stencil.
+    kd.remove("Sculpt", "wm.call_panel", type="RIGHTMOUSE")
+    _add(kd, "Sculpt", "allset.marking_menu", make_event("RIGHTMOUSE"), {"trigger": "RMB"}, shadows=("Sculpt",),
+         first=True)
+    kd.remove("3D View", "view3d.cursor3d", type="RIGHTMOUSE", shift=True)
+    kd.remove("3D View", "transform.translate", type="RIGHTMOUSE", value="CLICK_DRAG", shift=True)
     for km in TOOL_KEY_KEYMAPS:
-        for (key, binding) in TOOL_KEYS:
-            kd.remove(km, 'wm.tool_set_by_id', type=key)
-            _add(kd, km, 'allset.tap_hold', make_event(key), {'binding': binding})
+        for key, binding in TOOL_KEYS:
+            kd.remove(km, "wm.tool_set_by_id", type=key)
+            _add(kd, km, "allset.tap_hold", make_event(key), {"binding": binding})
+    # T: Show Manipulator Tool = the last kit operation's manipulator + In-View Editor, else the Transform tool
+    for km in ("Object Mode", "Mesh"):
+        kd.remove(km, "wm.tool_set_by_id", type="T")
+        _add(kd, km, "allset.show_manipulator", make_event("T"))
+
+
+# --- 16. Scene concepts: P / Shift+P, Shift+D, Ctrl+Shift+D, Alt+Shift+D ------------------
+# Maya hotkeys: p Parent, P Unparent, D DuplicateWithTransform,
+# Ctrl+D (capital) DuplicateSpecial, Alt+D (capital) DeleteHistory.
+# IC Object Mode P / Shift+P = object.parent_set / parent_clear.
 
 def patch_concepts(kd):
-    kd.remove(_dcc_source('Object Mode'), 'object.parent_set', type='P')
-    kd.remove(_dcc_source('Object Mode'), 'object.parent_clear', type='P', shift=True)
-    for km in (_dcc_source('Object Mode'), _dcc_source('Outliner')):
-        _add(kd, km, 'allset.parent', make_event('P'))
-        _add(kd, km, 'allset.unparent', make_event('P', shift=True))
-    kd.remove(_dcc_source('Object Mode'), 'object.duplicate_move', type='D', ctrl=True)
-    _add(kd, _dcc_source('Object Mode'), 'allset.duplicate', make_event('D', ctrl=True))
-    kd.remove(_dcc_source('Mesh'), 'mesh.duplicate_move', type='D', ctrl=True)
-    _add(kd, _dcc_source('Mesh'), 'allset.component_command', make_event('D', ctrl=True), {'item': 'Edit/Duplicate'})
-    _add(kd, _dcc_source('Object Mode'), 'allset.duplicate_with_transform', make_event('D', shift=True))
-    _add(kd, _dcc_source('Object Mode'), 'allset.duplicate_special', make_event('D', shift=True, ctrl=True))
-    _add(kd, _dcc_source('Object Mode'), 'allset.delete_history', make_event('D', shift=True, alt=True))
+    kd.remove("Object Mode", "object.parent_set", type="P")
+    kd.remove("Object Mode", "object.parent_clear", type="P", shift=True)
+    for km in ("Object Mode", "Outliner"):
+        _add(kd, km, "allset.parent", make_event("P"))
+        _add(kd, km, "allset.unparent", make_event("P", shift=True))
+    # Ctrl+D: Maya Duplicate = in place, subtree, Maya names; IC
+    # duplicate_move would name the copy pCube1.001 and start a move.
+    kd.remove("Object Mode", "object.duplicate_move", type="D", ctrl=True)
+    _add(kd, "Object Mode", "allset.duplicate", make_event("D", ctrl=True))
+    # picked joints (Pose Mode, joint Edit Mode with the Move tool): Maya Duplicate copies each picked joint with its
+    # subtree in place; IC armature.duplicate_move dropped a picked connected joint and started a move
+    kd.remove("Armature", "armature.duplicate_move", type="D", ctrl=True)
+    for km in ("Pose", "Armature"):
+        _add(kd, km, "allset.duplicate", make_event("D", ctrl=True))
+    # Component mode Ctrl+D (#17): Maya's Duplicate there copies nothing ("No object(s) to duplicate");
+    # IC mesh.duplicate_move copied the faces inside the mesh.
+    kd.remove("Mesh", "mesh.duplicate_move", type="D", ctrl=True)
+    _add(kd, "Mesh", "allset.component_command", make_event("D", ctrl=True), {"item": "Edit/Duplicate"})
+    _add(kd, "Object Mode", "allset.duplicate_with_transform", make_event("D", shift=True))
+    _add(kd, "Object Mode", "allset.duplicate_special", make_event("D", shift=True, ctrl=True))
+    # picked joints too: Duplicate with Transform repeats the change between the last copy and its joint, Duplicate
+    # Special copies with its options (IC binds neither key in these keymaps)
+    for km in ("Pose", "Armature"):
+        _add(kd, km, "allset.duplicate_with_transform", make_event("D", shift=True))
+        _add(kd, km, "allset.duplicate_special", make_event("D", shift=True, ctrl=True))
+    _add(kd, "Object Mode", "allset.delete_history", make_event("D", shift=True, alt=True))
+
+
+# --- 17. Ctrl+A Attribute Editor / Channel Box, Ctrl+Shift+A / Alt+D ------------------
+# Maya hotkeys: Ctrl+a ShowAttributeEditorOrChannelBox, Ctrl+A (capital)
+# SelectAll, Alt+d SelectNone. IC Object Mode Ctrl+A / Ctrl+Shift+A = select all / none.
 
 def patch_attribute_editor(kd):
-    kd.remove(_dcc_source('Object Mode'), 'object.select_all', type='A', ctrl=True)
-    kd.remove(_dcc_source('Object Mode'), 'object.select_all', type='A', ctrl=True, shift=True)
-    _add(kd, _dcc_source('Object Mode'), 'allset.ae_toggle', make_event('A', ctrl=True))
-    _add(kd, _dcc_source('Object Mode'), 'object.select_all', make_event('A', ctrl=True, shift=True), {'action': 'SELECT'})
-    _add(kd, _dcc_source('Object Mode'), 'allset.select_none', make_event('D', alt=True))
-    for (km, idname) in CTRL_A_MODES:
-        kd.remove(km, idname, type='A', ctrl=True)
-        _add(kd, km, 'allset.ae_toggle', make_event('A', ctrl=True))
-        if km == _dcc_source('Mesh'):
+    kd.remove("Object Mode", "object.select_all", type="A", ctrl=True)
+    kd.remove("Object Mode", "object.select_all", type="A", ctrl=True, shift=True)
+    _add(kd, "Object Mode", "allset.ae_toggle", make_event("A", ctrl=True))
+    _add(kd, "Object Mode", "object.select_all", make_event("A", ctrl=True, shift=True),
+         {"action": 'SELECT'})
+    _add(kd, "Object Mode", "allset.select_none", make_event("D", alt=True))
+    # Ctrl+a is a global Maya hotkey (no editor context binds Ctrl+a): in every component /
+    # pose mode IC's Ctrl+A select-all gives way to the AE / CB swap and Ctrl+Shift+A selects all (#65).
+    for km, idname in CTRL_A_MODES:
+        kd.remove(km, idname, type="A", ctrl=True)
+        _add(kd, km, "allset.ae_toggle", make_event("A", ctrl=True))
+        if km == "Mesh":                                         # Ctrl+Shift+A: patch_mesh_components
             continue
-        if km != _dcc_source('Paint Vertex Selection (Weight, Vertex)'):
-            kd.remove(km, idname, type='A', ctrl=True, shift=True)
-        _add(kd, km, idname, make_event('A', ctrl=True, shift=True), {'action': 'SELECT'})
-    _add(kd, _dcc_source('Pose'), 'allset.select_none', make_event('D', alt=True))
-    for km in (_dcc_source('Curve'), _dcc_source('Armature'), _dcc_source('Metaball'), _dcc_source('Lattice'), _dcc_source('Curves'), _dcc_source('Point Cloud')):
-        _add(kd, km, 'allset.select_none', make_event('D', alt=True))
-CTRL_A_MODES = ((_dcc_source('Mesh'), 'mesh.select_all'), (_dcc_source('Pose'), 'pose.select_all'), (_dcc_source('Curve'), 'curve.select_all'), (_dcc_source('Armature'), 'armature.select_all'), (_dcc_source('Metaball'), 'mball.select_all'), (_dcc_source('Lattice'), 'lattice.select_all'), (_dcc_source('Particle'), 'particle.select_all'), (_dcc_source('Curves'), 'curves.select_all'), (_dcc_source('Sculpt Curves'), 'curves.select_all'), (_dcc_source('Point Cloud'), 'pointcloud.select_all'), (_dcc_source('Paint Face Mask (Weight, Vertex, Texture)'), 'paint.face_select_all'), (_dcc_source('Paint Vertex Selection (Weight, Vertex)'), 'paint.vert_select_all'), (_dcc_source('UV Editor'), 'uv.select_all'), (_dcc_source('Graph Editor'), 'graph.select_all'), (_dcc_source('Dopesheet'), 'action.select_all'), (_dcc_source('NLA Editor'), 'nla.select_all'), (_dcc_source('Animation Channels'), 'anim.channels_select_all'))
-_Z_BORDERS = (('3D View', 'view3d.zoom_border', False), (_dcc_source('View2D'), 'view2d.zoom_border', False), (_dcc_source('Image'), 'image.view_zoom_border', False), (_dcc_source('Node Editor'), 'node.viewer_border', True))
-VISIBILITY_KEYS = (('H', {}, 'TOGGLE'), ('H', {'ctrl': True}, 'HIDE'), ('H', {'alt': True}, 'HIDE_UNSELECTED'), ('H', {'shift': True}, 'SHOW_SELECTED'), ('H', {'ctrl': True, 'shift': True}, 'SHOW_LAST'))
+        if km != "Paint Vertex Selection (Weight, Vertex)":     # IC has no Ctrl+Shift+A there
+            kd.remove(km, idname, type="A", ctrl=True, shift=True)
+        _add(kd, km, idname, make_event("A", ctrl=True, shift=True), {"action": 'SELECT'})
+    # Alt+D clears joints, latent bone selection, and the active object, releasing
+    # pose/edit mode so the next click can select any object.
+    _add(kd, "Pose", "allset.select_none", make_event("D", alt=True))
+    for km in ("Curve", "Armature", "Metaball", "Lattice", "Curves", "Point Cloud"):
+        _add(kd, km, "allset.select_none", make_event("D", alt=True))
+
+
+# Keymaps whose Ctrl+A is IC select-all (keymap/ic_5_0.py – ic_5_2.py). Text / Console / Font /
+# File Browser keep their text-style select-all; the 2D animation editors follow.
+CTRL_A_MODES = (("Mesh", "mesh.select_all"), ("Pose", "pose.select_all"), ("Curve", "curve.select_all"),
+                ("Armature", "armature.select_all"), ("Metaball", "mball.select_all"),
+                ("Lattice", "lattice.select_all"), ("Particle", "particle.select_all"),
+                ("Curves", "curves.select_all"), ("Sculpt Curves", "curves.select_all"),
+                ("Point Cloud", "pointcloud.select_all"),
+                ("Paint Face Mask (Weight, Vertex, Texture)", "paint.face_select_all"),
+                ("Paint Vertex Selection (Weight, Vertex)", "paint.vert_select_all"),
+                ("UV Editor", "uv.select_all"),
+                # #96: the 2D animation editors too — Maya's Ctrl+a is global (Graph Editor / Dope Sheet
+                # included); IC Ctrl+A there = select all keys / channels, Ctrl+Shift+A = deselect
+                ("Graph Editor", "graph.select_all"), ("Dopesheet", "action.select_all"),
+                ("NLA Editor", "nla.select_all"), ("Animation Channels", "anim.channels_select_all"))
+
+
+# --- 18. Undo / redo, visibility, isolate, invert -------------------------------
+# Maya: z / Shift+Z / Ctrl+Y; h, Ctrl+H, Alt+H,
+# Shift+H, Ctrl+Shift+H, Ctrl+Alt+H, Ctrl+1; Ctrl+Shift+I.
+
+# Editor keymaps run before "Screen": their z = zoom/viewer border would hide the undo. The Node Editor's Z item
+# exists in 5.0's Industry Compatible keymap only (keymap/ic_5_0.py; not in ic_5_1 / ic_5_2): optional.
+_Z_BORDERS = (("3D View", "view3d.zoom_border", False), ("View2D", "view2d.zoom_border", False),
+              ("Image", "image.view_zoom_border", False), ("Node Editor", "node.viewer_border", True))
+
+VISIBILITY_KEYS = (("H", {}, "TOGGLE"), ("H", {"ctrl": True}, "HIDE"),
+                   ("H", {"alt": True}, "HIDE_UNSELECTED"), ("H", {"shift": True}, "SHOW_SELECTED"),
+                   ("H", {"ctrl": True, "shift": True}, "SHOW_LAST"))
+
 
 def patch_undo_visibility(kd):
-    for (km, idname, optional) in _Z_BORDERS:
-        kd.remove(km, idname, optional=optional, type='Z')
-    _add(kd, _dcc_source('Screen'), 'ed.undo', make_event('Z'))
-    _add(kd, _dcc_source('Screen'), 'ed.redo', make_event('Z', shift=True))
-    _add(kd, _dcc_source('Screen'), 'ed.redo', make_event('Y', ctrl=True))
-    kd.remove(_dcc_source('Object Mode'), 'object.hide_view_set', type='H', ctrl=True)
-    kd.remove(_dcc_source('Object Mode'), 'object.hide_view_set', type='H', shift=True)
-    kd.remove(_dcc_source('Object Mode'), 'object.hide_view_clear', type='H', alt=True)
-    for (key, mods, action) in VISIBILITY_KEYS:
-        _add(kd, _dcc_source('Object Mode'), 'allset.visibility', make_event(key, **mods), {'action': action})
-    kd.remove(_dcc_source('Mesh'), 'mesh.hide', type='H', shift=True)
-    kd.remove(_dcc_source('Mesh'), 'mesh.reveal', type='H', alt=True)
-    _add(kd, _dcc_source('Mesh'), 'mesh.hide', make_event('H', alt=True), {'unselected': True})
-    for mods in ({'shift': True}, {'ctrl': True, 'shift': True}, {'ctrl': True, 'alt': True}):
-        _add(kd, _dcc_source('Mesh'), 'mesh.reveal', make_event('H', **mods))
-    kd.remove(_dcc_source('Mesh'), 'mesh.select_mode', type='ONE', ctrl=True)
-    _add(kd, '3D View', 'allset.isolate', make_event('ONE', ctrl=True), shadows=(_dcc_source('Sculpt'),))
-    for key in ('DEL', 'BACK_SPACE'):
-        kd.remove(_dcc_source('Object Mode'), 'object.delete', type=key)
-        _add(kd, _dcc_source('Object Mode'), 'allset.delete', make_event(key))
-        kd.remove(_dcc_source('Outliner'), 'outliner.delete', type=key)
-        _add(kd, _dcc_source('Outliner'), 'outliner.delete', make_event(key), {'hierarchy': True})
-    _add(kd, _dcc_source('Object Mode'), 'object.select_all', make_event('I', ctrl=True, shift=True), {'action': 'INVERT'})
-    _add(kd, _dcc_source('Mesh'), 'mesh.select_all', make_event('I', ctrl=True, shift=True), {'action': 'INVERT'})
-CONVERT_KEYS = (('F9', 'VERT'), ('F10', 'EDGE'), ('F11', 'FACE'))
+    for km, idname, optional in _Z_BORDERS:
+        kd.remove(km, idname, optional=optional, type="Z")
+    _add(kd, "Screen", "ed.undo", make_event("Z"))
+    _add(kd, "Screen", "ed.redo", make_event("Z", shift=True))
+    _add(kd, "Screen", "ed.redo", make_event("Y", ctrl=True))
+
+    # Object Mode: IC Ctrl+H hide, Shift+H hide unselected, Alt+H reveal (IC Object Mode).
+    kd.remove("Object Mode", "object.hide_view_set", type="H", ctrl=True)
+    kd.remove("Object Mode", "object.hide_view_set", type="H", shift=True)
+    kd.remove("Object Mode", "object.hide_view_clear", type="H", alt=True)
+    for key, mods, action in VISIBILITY_KEYS:
+        _add(kd, "Object Mode", "allset.visibility", make_event(key, **mods), {"action": action})
+    # Outliner: the same keys (Maya hides from the Outliner with them). IC Ctrl+H = outliner.hide (the view-layer
+    # flag, which Shift+H / Ctrl+Shift+H can't bring back), Alt+H = outliner.unhide_all.
+    kd.remove("Outliner", "outliner.hide", type="H", ctrl=True)
+    kd.remove("Outliner", "outliner.unhide_all", type="H", alt=True)
+    for key, mods, action in VISIBILITY_KEYS:
+        _add(kd, "Outliner", "allset.visibility", make_event(key, **mods), {"action": action})
+    # Mesh components: hidden components can't be selected in Blender, so the "show"
+    # keys reveal everything (and select it). IC Shift+H / Alt+H = hide unselected / reveal.
+    kd.remove("Mesh", "mesh.hide", type="H", shift=True)
+    kd.remove("Mesh", "mesh.reveal", type="H", alt=True)
+    _add(kd, "Mesh", "mesh.hide", make_event("H", alt=True), {"unselected": True})
+    for mods in ({"shift": True}, {"ctrl": True, "shift": True}, {"ctrl": True, "alt": True}):
+        _add(kd, "Mesh", "mesh.reveal", make_event("H", **mods))
+
+    # Ctrl+1 isolate select: local view without moving the camera; again = back.
+    kd.remove("Mesh", "mesh.select_mode", type="ONE", ctrl=True)
+    # isolating a group shows its children (Maya isolate select)
+    _add(kd, "3D View", "allset.isolate", make_event("ONE", ctrl=True), shadows=("Sculpt",))
+    # Maya Delete takes the selected hierarchy with it; Blender's leaves the children
+    for key in ("DEL", "BACK_SPACE"):
+        kd.remove("Object Mode", "object.delete", type=key)
+        _add(kd, "Object Mode", "allset.delete", make_event(key))
+        kd.remove("Outliner", "outliner.delete", type=key)
+        # with the hierarchy; the kit tree's own Delete item comes first (patch_outliner_tree)
+        _add(kd, "Outliner", "allset.outliner_delete", make_event(key), shadows=("Outliner",))
+
+    _add(kd, "Object Mode", "object.select_all", make_event("I", ctrl=True, shift=True),
+         {"action": 'INVERT'})
+    _add(kd, "Mesh", "mesh.select_all", make_event("I", ctrl=True, shift=True), {"action": 'INVERT'})
+
+
+# --- 19. Mesh component keys --------------------------------------------------
+# Maya: Ctrl+Shift+A / Alt+D, Ctrl+F9-F11 convert, > < (grow / shrink,
+# Ctrl: along loop), D component pivot; Maya hotkeys Ctrl+E extrude, Ctrl+B bevel.
+
+CONVERT_KEYS = (("F9", "VERT"), ("F10", "EDGE"), ("F11", "FACE"))
+# Maya Grow / Shrink Selection = the ">" / "<" characters. On a US keyboard they are Shift+. / Shift+,; keyboards
+# with a key of their own for < > (Blender's GRLESS) type "<" plain and ">" with Shift. Mesh components and UVs.
+GROW_KEYS = (make_event("PERIOD", shift=True, repeat=True), make_event("GRLESS", shift=True, repeat=True))
+SHRINK_KEYS = (make_event("COMMA", shift=True, repeat=True), make_event("GRLESS", repeat=True))
+GROW_SHRINK = (("Mesh", "mesh.select_more", "mesh.select_less"),
+               ("UV Editor", "uv.select_more", "uv.select_less"))
+
 
 def patch_mesh_components(kd):
-    kd.remove(_dcc_source('Mesh'), 'wm.tool_set_by_id', type='D')
-    _add(kd, _dcc_source('Mesh'), 'allset.hold', make_event('D'), {'name': 'component_pivot'})
-    _add(kd, _dcc_source('Mesh'), 'allset.pivot_toggle', make_event('INSERT'))
-    kd.remove(_dcc_source('Armature'), 'wm.tool_set_by_id', type='D')
-    _add(kd, _dcc_source('Armature'), 'allset.hold', make_event('D'), {'name': 'preserve_children'})
-    _add(kd, _dcc_source('Armature'), 'allset.pivot_toggle', make_event('INSERT'))
-    kd.remove(_dcc_source('Mesh'), 'mesh.select_all', type='A', ctrl=True, shift=True)
-    _add(kd, _dcc_source('Mesh'), 'mesh.select_all', make_event('A', ctrl=True, shift=True), {'action': 'SELECT'})
-    _add(kd, _dcc_source('Mesh'), 'allset.select_none', make_event('D', alt=True))
-    kd.remove(_dcc_source('Mesh'), 'wm.tool_set_by_id', type='E', ctrl=True)
-    _add(kd, _dcc_source('Mesh'), 'allset.extrude', make_event('E', ctrl=True))
-    kd.remove(_dcc_source('Mesh'), 'wm.tool_set_by_id', type='B', ctrl=True)
-    _add(kd, _dcc_source('Mesh'), 'allset.bevel', make_event('B', ctrl=True))
-    _add(kd, _dcc_source('Mesh'), 'mesh.select_more', make_event('PERIOD', shift=True, repeat=True))
-    _add(kd, _dcc_source('Mesh'), 'mesh.select_less', make_event('COMMA', shift=True, repeat=True))
-    _add(kd, _dcc_source('Mesh'), 'mesh.select_next_item', make_event('PERIOD', shift=True, ctrl=True, repeat=True))
-    _add(kd, _dcc_source('Mesh'), 'mesh.select_prev_item', make_event('COMMA', shift=True, ctrl=True, repeat=True))
-    for (key, comp) in CONVERT_KEYS:
-        _add(kd, _dcc_source('Mesh'), 'allset.convert_selection', make_event(key, ctrl=True), {'type': comp})
+    kd.remove("Mesh", "wm.tool_set_by_id", type="D")                       # annotate tool
+    _add(kd, "Mesh", "allset.hold", make_event("D"), {"name": "component_pivot"})
+    # Insert = the same pivot edit as a toggle
+    _add(kd, "Mesh", "allset.pivot_toggle", make_event("INSERT"))
+    # #160: D held / Insert on joints in Edit mode = Maya Preserve Children (move the joint only,
+    # like Maya's `move -pcp`)
+    kd.remove("Armature", "wm.tool_set_by_id", type="D")                   # annotate tool
+    _add(kd, "Armature", "allset.hold", make_event("D"), {"name": "preserve_children"})
+    _add(kd, "Armature", "allset.pivot_toggle", make_event("INSERT"))
+    kd.remove("Mesh", "mesh.select_all", type="A", ctrl=True, shift=True)   # IC: deselect
+    _add(kd, "Mesh", "mesh.select_all", make_event("A", ctrl=True, shift=True), {"action": 'SELECT'})
+    _add(kd, "Mesh", "allset.select_none", make_event("D", alt=True))
+    kd.remove("Mesh", "wm.tool_set_by_id", type="E", ctrl=True)            # extrude tool
+    # Maya polyExtrudeFace: zero-length extrusion + manipulator / In-View Editor; edges and
+    # vertices = polyExtrudeEdge / polyExtrudeVertex at once. Ctrl+B = polyBevel3 at once.
+    _add(kd, "Mesh", "allset.extrude", make_event("E", ctrl=True))
+    kd.remove("Mesh", "wm.tool_set_by_id", type="B", ctrl=True)            # bevel tool
+    _add(kd, "Mesh", "allset.bevel", make_event("B", ctrl=True))
+    for km, more, less in GROW_SHRINK:
+        for event in GROW_KEYS:
+            _add(kd, km, more, event)
+        for event in SHRINK_KEYS:
+            _add(kd, km, less, event)
+    _add(kd, "Mesh", "mesh.select_next_item", make_event("PERIOD", shift=True, ctrl=True, repeat=True))
+    _add(kd, "Mesh", "mesh.select_prev_item", make_event("COMMA", shift=True, ctrl=True, repeat=True))
+    for key, comp in CONVERT_KEYS:
+        _add(kd, "Mesh", "allset.convert_selection", make_event(key, ctrl=True), {"type": comp})
+    # Maya double-click = loop, Shift+double-click = the run between two picks (issue #22, operators/loop_pick.py);
+    # IC's own double-click loop picks (Shift = add the loop) give way, Ctrl (deselect the loop) stays
     for shift in (False, True):
-        kd.remove(_dcc_source('Mesh'), 'mesh.loop_select', type='LEFTMOUSE', value='DOUBLE_CLICK', shift=shift)
-        _add(kd, _dcc_source('Mesh'), 'allset.loop_pick', make_event('LEFTMOUSE', value='DOUBLE_CLICK', shift=shift), {'between': shift}, shadows=(_dcc_source('Screen'),))
+        kd.remove("Mesh", "mesh.loop_select", type="LEFTMOUSE", value="DOUBLE_CLICK", shift=shift)
+        _add(kd, "Mesh", "allset.loop_pick", make_event("LEFTMOUSE", value="DOUBLE_CLICK", shift=shift),
+             {"between": shift}, shadows=("Screen",))
+
+
+# --- 20. Key / frame stepping: . , Alt+. Alt+, --------------------------------------
+# Maya hotkeys (NextKey, PreviousKey, NextFrame, PreviousFrame).
+# "Frames" is in nearly every editor; the 3D View / Image pies on . , go (pivot and orientation stay
+# in the headers). The Outliner (show active) and Clip Editor (pivot pie) keep their own . first.
 
 def patch_key_stepping(kd):
-    kd.remove('3D View', 'wm.call_menu_pie', type='PERIOD')
-    kd.remove('3D View', 'wm.call_menu_pie', type='COMMA')
-    kd.remove(_dcc_source('Image'), 'wm.call_menu_pie', type='PERIOD')
-    keep = (_dcc_source('Outliner'), _dcc_source('Clip Editor'))
-    _add(kd, _dcc_source('Frames'), 'screen.keyframe_jump', make_event('PERIOD'), {'next': True}, shadows=keep)
-    _add(kd, _dcc_source('Frames'), 'screen.keyframe_jump', make_event('COMMA'), {'next': False}, shadows=keep)
-    _add(kd, _dcc_source('Frames'), 'screen.frame_offset', make_event('PERIOD', alt=True, repeat=True), {'delta': 1})
-    _add(kd, _dcc_source('Frames'), 'screen.frame_offset', make_event('COMMA', alt=True, repeat=True), {'delta': -1})
-GIZMO_KEYMAPS = (_dcc_source('Generic Gizmo Maybe Drag'), _dcc_source('Generic Gizmo Drag'))
+    kd.remove("3D View", "wm.call_menu_pie", type="PERIOD")      # pivot pie
+    kd.remove("3D View", "wm.call_menu_pie", type="COMMA")       # orientation pie
+    kd.remove("Image", "wm.call_menu_pie", type="PERIOD")        # UV pivot pie
+    keep = ("Outliner", "Clip Editor")
+    _add(kd, "Frames", "screen.keyframe_jump", make_event("PERIOD"), {"next": True}, shadows=keep)
+    _add(kd, "Frames", "screen.keyframe_jump", make_event("COMMA"), {"next": False}, shadows=keep)
+    _add(kd, "Frames", "screen.frame_offset", make_event("PERIOD", alt=True, repeat=True), {"delta": 1})
+    _add(kd, "Frames", "screen.frame_offset", make_event("COMMA", alt=True, repeat=True), {"delta": -1})
+    # Maya Previous / Next Blue Pencil Frame = Alt+< / Alt+> (the < > characters as for Grow / Shrink: Shift+, /
+    # Shift+. on a US keyboard, a < > key of its own types < plain and > with Shift)
+    for event, forward in ((make_event("COMMA", shift=True, alt=True), False), (make_event("GRLESS", alt=True), False),
+                           (make_event("PERIOD", shift=True, alt=True), True),
+                           (make_event("GRLESS", shift=True, alt=True), True)):
+        _add(kd, "Frames", "allset.blue_pencil_frame", event, {"next": forward})
+
+
+# --- 21. Shift+drag a manipulator = Smart Duplicate -----------------------------------
+# Maya Smart Duplicate. The C transform gizmo runs gizmogroup.gizmo_tweak
+# from these keymaps for any Shift/Ctrl (IC:3703-3721); our item goes first, duplicates the selection
+# and passes the same event on, so the gizmo moves the copies. Shift held during a transform was
+# Blender's precision (IC:3611-3612): Maya has none, so precision moves to Alt.
+
+GIZMO_KEYMAPS = ("Generic Gizmo Maybe Drag", "Generic Gizmo Drag")
+
 
 def patch_manip_duplicate(kd):
+    release_kms = GIZMO_KEYMAPS + ("3D View", "Window")
+    for km in release_kms:
+        # Where the OS can't tell whether the button is held (not Windows), a Shift press that never became a
+        # drag ends on this release (pass-through): the copy / extrusion is taken back as a Shift+click (#265).
+        _add(kd, km, "allset.manip_release", make_event("LEFTMOUSE", "RELEASE", any=True), first=True,
+             shadows=tuple(k for k in release_kms if k != km))
     for km in GIZMO_KEYMAPS:
-        _add(kd, km, 'allset.manip_duplicate', make_event('LEFTMOUSE', 'PRESS', shift=True), first=True)
-        found = kd.find(km, 'gizmogroup.gizmo_tweak', type='LEFTMOUSE', value='CLICK_DRAG')
+        _add(kd, km, "allset.manip_duplicate", make_event("LEFTMOUSE", "PRESS", shift=True),
+             first=True)
+        # #175: IC's gizmo_tweak CLICK_DRAG allows no Shift (IC:107-110, unlike
+        # blender_default.py:500-503 any_except("alt")), and a CLICK_DRAG carries the press's
+        # modifiers (wm_event_system.cc 4.5 :3644), so the real Shift+drag matched no gizmo item and
+        # the copy / extrusion was taken back. Shift "any". Ctrl "any" too: a drag started with Ctrl held
+        # moves the handle with snapping (else it fell through to box select); Alt stays as IC has it.
+        found = kd.find(km, "gizmogroup.gizmo_tweak", type="LEFTMOUSE", value="CLICK_DRAG")
         if not found:
             if not patch.STRICT:
-                patch.DRIFT.append(f'{km}: no item gizmogroup.gizmo_tweak CLICK_DRAG')
+                patch.DRIFT.append(f"{km}: no item gizmogroup.gizmo_tweak CLICK_DRAG")
                 continue
-            raise LookupError(f'{km}: no item gizmogroup.gizmo_tweak CLICK_DRAG')
+            raise LookupError(f"{km}: no item gizmogroup.gizmo_tweak CLICK_DRAG")
         for item in found:
-            item[1]['shift'] = -1
+            item[1]["shift"] = -1
+            item[1]["ctrl"] = -1
+
+
+# --- 22. Delete / Backspace on components -------------------------------------------
+# Maya deletes the selected faces / edges / vertices right away (Delete,
+# DeleteEdge, DeleteVertex); IC opens the Delete menu (IC:3061-3062). Ctrl+Delete / Ctrl+Backspace
+# keep IC's mesh.dissolve_mode = Maya DeletePolyElements (Maya hotkeys).
 
 def patch_component_delete(kd):
-    for key in ('DEL', 'BACK_SPACE'):
-        kd.remove(_dcc_source('Mesh'), 'wm.call_menu', type=key)
-        _add(kd, _dcc_source('Mesh'), 'allset.delete_components', make_event(key))
+    for key in ("DEL", "BACK_SPACE"):
+        kd.remove("Mesh", "wm.call_menu", type=key)
+        _add(kd, "Mesh", "allset.delete_components", make_event(key))
+
+
+# --- 23. Manipulator size, smoothing level, default view, wireframe on shaded -------------------
+# Maya hotkeys = Shift++ - (numpad + - too), PgUp/PgDn, 0, Home, Alt+5.
 
 def patch_view_keys(kd):
-    for (ev, factor) in ((make_event('EQUAL'), 1.25), (make_event('EQUAL', shift=True), 1.25), (make_event('MINUS'), 0.8)):
-        _add(kd, '3D View', 'allset.manip_size', ev, {'factor': factor})
-    _add(kd, '3D View', 'allset.view_home', make_event('HOME'), shadows=(_dcc_source('Font'),))
-    _add(kd, '3D View', 'wm.context_toggle', make_event('FIVE', alt=True), {'data_path': 'space_data.overlay.show_wireframes'})
-    for km in (_dcc_source('Object Mode'), _dcc_source('Mesh')):
-        _add(kd, km, 'allset.smooth_level', make_event('PAGE_UP', repeat=True), {'delta': 1})
-        _add(kd, km, 'allset.smooth_level', make_event('PAGE_DOWN', repeat=True), {'delta': -1})
-        _add(kd, km, 'allset.smooth_preview', make_event('ZERO'), {'level': 1})
-MMB_TOOLS = (('3D View Tool: Move', 'transform.translate', 'TRANSLATE'), ('3D View Tool: Rotate', 'transform.rotate', 'ROTATE'), ('3D View Tool: Scale', 'transform.resize', 'RESIZE'))
+    # A Maya keyboard's numpad + / - are the same keys (IC: numpad zoom in / out; Shift = dolly stays).
+    for key in ("NUMPAD_PLUS", "NUMPAD_MINUS"):
+        kd.remove("3D View", "view3d.zoom", type=key, repeat=True)
+    for ev, factor in ((make_event("EQUAL"), 1.25), (make_event("EQUAL", shift=True), 1.25),
+                       (make_event("MINUS"), 0.8), (make_event("NUMPAD_PLUS"), 1.25),
+                       (make_event("NUMPAD_MINUS"), 0.8)):
+        _add(kd, "3D View", "allset.manip_size", ev, {"factor": factor})
+    # Text edit mode keeps Home = line start (Font keymap runs first).
+    _add(kd, "3D View", "allset.view_home", make_event("HOME"), shadows=("Font",))
+    _add(kd, "3D View", "wm.context_toggle", make_event("FIVE", alt=True),
+         {"data_path": "space_data.overlay.show_wireframes"})
+    for km in ("Object Mode", "Mesh"):
+        _add(kd, km, "allset.smooth_level", make_event("PAGE_UP", repeat=True), {"delta": 1})
+        _add(kd, km, "allset.smooth_level", make_event("PAGE_DOWN", repeat=True), {"delta": -1})
+        _add(kd, km, "allset.smooth_preview", make_event("ZERO"), {"level": 1})
+
+
+# --- 24. MMB drag = the last picked manipulator handle -------------------------------
+# Maya manipsRememberActiveHandle. A plain LMB press on the gizmo
+# picks the handle (a click is enough; a drag remembers its transform); the tool keymaps' MMB press (IC: free
+# transform) uses it.
+# The Channel Box MMB slider (patch 14) stays in front.
+
+MMB_TOOLS = (("3D View Tool: Move", "transform.translate", 'TRANSLATE'),
+             ("3D View Tool: Rotate", "transform.rotate", 'ROTATE'),
+             ("3D View Tool: Scale", "transform.resize", 'RESIZE'))
+
 
 def patch_active_handle(kd):
     for km in GIZMO_KEYMAPS:
-        _add(kd, km, 'allset.manip_press', make_event('LEFTMOUSE', 'PRESS'), first=True)
-    for (km, idname, mode) in MMB_TOOLS:
+        _add(kd, km, "allset.manip_press", make_event("LEFTMOUSE", "PRESS"), first=True)
+    for km, idname, mode in MMB_TOOLS:
         items = kd.items(km)
-        old = kd.find(km, idname, type='MIDDLEMOUSE')
+        old = kd.find(km, idname, type="MIDDLEMOUSE")
         if not old:
             if not patch.STRICT:
-                patch.DRIFT.append(f'{km}: no MMB {idname}')
+                patch.DRIFT.append(f"{km}: no MMB {idname}")
                 continue
-            raise LookupError(f'{km}: no MMB {idname}')
-        at = next((i for (i, it) in enumerate(items) if it is old[0]))
-        kd.remove(km, idname, type='MIDDLEMOUSE')
-        item = kd.add(km, 'allset.manip_mmb', make_event('MIDDLEMOUSE'), {'mode': mode})
+            raise LookupError(f"{km}: no MMB {idname}")
+        at = next(i for i, it in enumerate(items) if it is old[0])
+        kd.remove(km, idname, type="MIDDLEMOUSE")
+        item = kd.add(km, "allset.manip_mmb", make_event("MIDDLEMOUSE"), {"mode": mode})
         items.remove(item)
-        items.insert(at, item)
-        ADDED.append((km, 'allset.manip_mmb', make_event('MIDDLEMOUSE'), {'mode': mode}, (km,)))
+        items.insert(at, item)      # same place: after the Channel Box slider
+        ADDED.append((km, "allset.manip_mmb", make_event("MIDDLEMOUSE"), {"mode": mode}, (km,)))
+
+
+# --- 25. Shift+T Assign New Material ---------------------------------------------------
+# Maya hotkey. IC binds Shift+T only in the
+# Dope Sheet.
 
 def patch_materials(kd):
-    for km in (_dcc_source('Object Mode'), _dcc_source('Mesh')):
-        _add(kd, km, 'allset.assign_new_material', make_event('T', shift=True))
-SELECT_DRAG_KEYMAPS = ('3D View Tool: Select Box', '3D View Tool: Select Box (fallback)', '3D View Tool: Select Lasso', '3D View Tool: Select Lasso (fallback)')
+    for km in ("Object Mode", "Mesh"):
+        _add(kd, km, "allset.assign_new_material", make_event("T", shift=True))
+
+
+# --- 26. Marquee selects occluded components --------------------------------------
+# Like Maya. In front of every LMB drag
+# box / lasso item of the select tools (and their fallbacks under Move/Rotate/Scale): sets the
+# view's X-ray flag for the drag, then PASS_THROUGH to view3d.select_box / select_lasso.
+SELECT_DRAG_KEYMAPS = ("3D View Tool: Select Box", "3D View Tool: Select Box (fallback)",
+                       "3D View Tool: Select Lasso", "3D View Tool: Select Lasso (fallback)",
+                       "3D View Tool: Tweak (fallback)")       # issue #205: the marquee copied there (below)
+
 
 def patch_select_through(kd):
     for km in SELECT_DRAG_KEYMAPS:
-        for (shift, ctrl) in ((False, False), (True, False), (False, True), (True, True)):
-            _add(kd, km, 'allset.select_through', make_event('LEFTMOUSE', 'CLICK_DRAG', shift=shift, ctrl=ctrl), first=True, shadows=(km,))
-UV_SHELL_CLICK_KEYMAPS = ('3D View', _dcc_source('UV Editor'))
-UV_SHELL_DRAG_KEYMAPS = SELECT_DRAG_KEYMAPS + ('Image Editor Tool: Uv, Select Box', 'Image Editor Tool: Uv, Select Box (fallback)', 'Image Editor Tool: Uv, Select Lasso', 'Image Editor Tool: Uv, Select Lasso (fallback)')
+        for shift, ctrl in ((False, False), (True, False), (False, True), (True, True)):
+            _add(kd, km, "allset.select_through",
+                 make_event("LEFTMOUSE", "CLICK_DRAG", shift=shift, ctrl=ctrl), first=True,
+                 shadows=(km,))   # in front of the select item on purpose (PASS_THROUGH)
+
+
+# Issue #205: Maya has no per-tool drag fallback — a drag off the Move / Rotate / Scale manipulator (or with any tool
+# that falls back to selection) is a marquee. Blender keeps the fallback per workspace and mode ("Drag" in the tool
+# header) and gives a tool the select group's current item, so a startup file or a session that had Tweak there
+# makes the drag move the selection. The Tweak fallback keymaps (empty in Blender's data) get the Select Box
+# fallback's marquee: add-on keymap items, gone with Maya mode, the workspace's fallback setting is never written.
+# A Lasso / Circle fallback keeps its own keymap; Maya's tweak mode is the ` hold (the Tweak tool's own keymap).
+# Runs before patch_selection so the Maya modifier rules, select-through and the UV shell box apply to the copies.
+TWEAK_FALLBACK_MARQUEE = (("3D View Tool: Tweak (fallback)", "3D View Tool: Select Box (fallback)"),
+                          ("Image Editor Tool: Uv, Tweak (fallback)", "Image Editor Tool: Uv, Select Box (fallback)"))
+
+
+def patch_tweak_fallback(kd):
+    for tweak, box in TWEAK_FALLBACK_MARQUEE:
+        for idname, event, props in list(kd.items(box)):
+            _add(kd, tweak, idname, dict(event), patch.props_dict(props), shadows=(tweak,))
+
+
+# #172: Maya UV Shell selection (operators/uv_shell_select.py) — a click picks the whole UV shell, a box /
+# lasso grows to shells; in front of the click / drag select items of the 3D View and the UV Editor, PASS_THROUGH
+# unless the UV Shell mask is on.
+UV_SHELL_CLICK_KEYMAPS = ("3D View", "UV Editor")
+UV_SHELL_DRAG_KEYMAPS = SELECT_DRAG_KEYMAPS + ("Image Editor Tool: Uv, Select Box",
+                                              "Image Editor Tool: Uv, Select Box (fallback)",
+                                              "Image Editor Tool: Uv, Select Lasso",
+                                              "Image Editor Tool: Uv, Select Lasso (fallback)",
+                                              "Image Editor Tool: Uv, Tweak (fallback)")
+
 
 def patch_uv_shell_select(kd):
     mods = ((False, False), (True, False), (False, True), (True, True))
     for km in UV_SHELL_CLICK_KEYMAPS:
-        for (shift, ctrl) in mods:
-            _add(kd, km, 'allset.uv_shell_pick', make_event('LEFTMOUSE', 'CLICK', shift=shift, ctrl=ctrl), first=True, shadows=(km,))
+        for shift, ctrl in mods:
+            _add(kd, km, "allset.uv_shell_pick", make_event("LEFTMOUSE", "CLICK", shift=shift, ctrl=ctrl),
+                 first=True, shadows=(km,))   # in front of view3d.select / uv.select on purpose (PASS_THROUGH)
     for km in UV_SHELL_DRAG_KEYMAPS:
-        for (shift, ctrl) in mods:
-            _add(kd, km, 'allset.uv_shell_box', make_event('LEFTMOUSE', 'CLICK_DRAG', shift=shift, ctrl=ctrl), first=True, shadows=(km,))
+        for shift, ctrl in mods:
+            _add(kd, km, "allset.uv_shell_box", make_event("LEFTMOUSE", "CLICK_DRAG", shift=shift, ctrl=ctrl),
+                 first=True, shadows=(km,))   # always PASS_THROUGH: Blender's box runs, the kit grows it after
 
+
+# a click under the Tool Box column's tools reaches that narrow 3D View's WINDOW region,
+# where view3d.select would deselect everything (it deselects hidden object types too). The guard
+# swallows the click there and passes it through everywhere else (ui/toolbox.py).
 def patch_toolbox_guard(kd):
-    for (shift, ctrl) in ((False, False), (True, False), (False, True), (True, True)):
-        _add(kd, '3D View', 'allset.toolbox_guard', make_event('LEFTMOUSE', 'CLICK', shift=shift, ctrl=ctrl), first=True, shadows=('3D View',))
-SELECT_PRIORITY_ITEMS = (('3D View', 'CLICK'), ('3D View Tool: Tweak', 'PRESS'))
+    for shift, ctrl in ((False, False), (True, False), (False, True), (True, True)):
+        _add(kd, "3D View", "allset.toolbox_guard", make_event("LEFTMOUSE", "CLICK", shift=shift, ctrl=ctrl),
+             first=True, shadows=("3D View",))   # in front of view3d.select on purpose (PASS_THROUGH)
+
+
+# Maya selection priority — in front of the object-mode click
+# select items ("3D View" CLICK, Tweak tool PRESS); passes through outside object mode and when no IK
+# handle / joint / curve is under the mouse (operators/select_priority.py).
+SELECT_PRIORITY_ITEMS = (("3D View", "CLICK"), ("3D View Tool: Tweak", "PRESS"))
+
 
 def patch_select_priority(kd):
-    for (km, value) in SELECT_PRIORITY_ITEMS:
-        for (shift, ctrl) in ((False, False), (True, False), (False, True), (True, True)):
-            _add(kd, km, 'allset.select_priority', make_event('LEFTMOUSE', value, shift=shift, ctrl=ctrl), first=True, shadows=(km,))
-MENU_SET_SHADOWS = (_dcc_source('Image'), _dcc_source('File Browser'))
+    for km, value in SELECT_PRIORITY_ITEMS:
+        for shift, ctrl in ((False, False), (True, False), (False, True), (True, True)):
+            _add(kd, km, "allset.select_priority", make_event("LEFTMOUSE", value, shift=shift, ctrl=ctrl),
+                 first=True, shadows=(km,))   # in front of view3d.select on purpose (PASS_THROUGH)
+
+
+# Type Manipulator: a click on a character of a type whose manipulator is on picks that character (right behind the
+# selection priority item, in front of the selection items; passes through anywhere else, operators/type_manip.py).
+def patch_type_char_pick(kd):
+    for km, value in SELECT_PRIORITY_ITEMS:
+        _add(kd, km, "allset.type_char_pick", make_event("LEFTMOUSE", value), first=True, shadows=(km,))
+
+
+# --- 27. Maya key batch --------------------------------------------------------------
+# Ctrl+Alt+LMB box zoom, Ctrl+T Universal Manipulator, Y last non-sacred
+# tool, Ctrl+Shift+X Multi-Cut / Ctrl+Shift+Q Quad Draw, F2-F6 menu sets
+# (IC's 3D View F2 right / F3 top / F4 camera / F5 orbit go, F1 and Ctrl+F1-F3 stay),
+# Return: IC's 3D View rename popover goes (Blender modal tools confirm with their own Return).
+
+# Editors whose own F2-F6 keys stay (they run before Screen): Image / UV zoom ratios, File Browser rename.
+MENU_SET_SHADOWS = ("Image", "File Browser")
+
 
 def patch_key_batch(kd):
-    _add(kd, '3D View', 'allset.box_zoom', make_event('LEFTMOUSE', ctrl=True, alt=True), shadows=(_dcc_source('Sculpt'),))
-    for km in (_dcc_source('Object Mode'), _dcc_source('Mesh')):
-        _add(kd, km, 'wm.tool_set_by_id', make_event('T', ctrl=True), {'name': 'builtin.transform'})
-        _add(kd, km, 'allset.last_tool', make_event('Y'))
-        _add(kd, km, 'allset.menu_tool', make_event('X', shift=True, ctrl=True), {'tool': 'allset.multi_cut_tool', 'edit': True})
-        _add(kd, km, 'allset.quad_draw_start', make_event('Q', shift=True, ctrl=True))
-    kd.remove('3D View', 'view3d.view_axis', type='F2')
-    kd.remove('3D View', 'view3d.view_axis', type='F3')
-    kd.remove('3D View', 'view3d.view_camera', type='F4')
-    kd.remove('3D View', 'view3d.view_orbit', type='F5')
-    kd.remove('3D View', 'wm.call_panel', type='RET')
-    for (key, set_id) in (('F2', 'modelingMenuSet'), ('F3', 'riggingMenuSet'), ('F4', 'animationMenuSet'), ('F5', 'dynamicsMenuSet'), ('F6', 'renderingMenuSet')):
-        _add(kd, _dcc_source('Screen'), 'allset.menu_set', make_event(key), {'set': set_id}, shadows=MENU_SET_SHADOWS)
-AXIS_LOCK_SHADOWS = (_dcc_source('Weight Paint'), _dcc_source('Paint Face Mask (Weight, Vertex, Texture)'), _dcc_source('Paint Vertex Selection (Weight, Vertex)'))
+    # Blender 5.x IC binds Ctrl+Alt+LMB in Sculpt mode too: there the sculpt stroke wins (Maya has no such
+    # mode).
+    _add(kd, "3D View", "allset.box_zoom", make_event("LEFTMOUSE", ctrl=True, alt=True), shadows=("Sculpt",))
+    for km in ("Object Mode", "Mesh"):
+        # Universal Manipulator: the kit's box tool, for objects and for mesh components (#318)
+        _add(kd, km, "wm.tool_set_by_id", make_event("T", ctrl=True), {"name": "allset.universal_manip"})
+        _add(kd, km, "allset.last_tool", make_event("Y"))
+        _add(kd, km, "allset.menu_tool", make_event("X", shift=True, ctrl=True),
+             {"tool": "allset.multi_cut_tool", "edit": True})     # the kit Multi-Cut tool
+        _add(kd, km, "allset.quad_draw_start", make_event("Q", shift=True, ctrl=True))   # kit Quad Draw
+    kd.remove("3D View", "view3d.view_axis", type="F2")
+    kd.remove("3D View", "view3d.view_axis", type="F3")
+    kd.remove("3D View", "view3d.view_camera", type="F4")
+    kd.remove("3D View", "view3d.view_orbit", type="F5")
+    kd.remove("3D View", "wm.call_panel", type="RET")
+    for key, set_id in (('F2', 'modelingMenuSet'), ('F3', 'riggingMenuSet'), ('F4', 'animationMenuSet'),
+                        ('F5', 'dynamicsMenuSet'), ('F6', 'renderingMenuSet')):
+        _add(kd, "Screen", "allset.menu_set", make_event(key), {"set": set_id},
+             shadows=MENU_SET_SHADOWS)
+
+
+# --- 28. Component pick-walk, Alt+Shift axis-locked navigation -------------------------
+# Arrows in edit mode walk vertices / edges / faces (Maya arrow keys, Maya pick-walk); IC's Up/Down
+# grow/shrink go (Maya: Shift+> / <). Alt+Shift+LMB / MMB = tumble / track on one axis
+# (Maya); IC's Alt+Shift+LMB click-select toggle goes (a PRESS item would hide it anyway).
+
+AXIS_LOCK_SHADOWS = ("Weight Paint", "Paint Face Mask (Weight, Vertex, Texture)",
+                     "Paint Vertex Selection (Weight, Vertex)")
+
 
 def patch_component_pick_walk(kd):
-    kd.remove(_dcc_source('Mesh'), 'mesh.select_more', type='UP_ARROW')
-    kd.remove(_dcc_source('Mesh'), 'mesh.select_less', type='DOWN_ARROW')
-    for (key, direction) in PICK_WALK_KEYS:
-        _add(kd, _dcc_source('Mesh'), 'allset.pick_walk_component', make_event(key, repeat=True), {'direction': direction})
-    kd.remove('3D View', 'view3d.select', type='LEFTMOUSE', value='CLICK', shift=True, alt=True)
-    _add(kd, '3D View', 'allset.view_axis_lock', make_event('LEFTMOUSE', shift=True, alt=True), {'mode': 'TUMBLE'}, shadows=AXIS_LOCK_SHADOWS)
-    _add(kd, '3D View', 'allset.view_axis_lock', make_event('MIDDLEMOUSE', shift=True, alt=True), {'mode': 'TRACK'})
+    kd.remove("Mesh", "mesh.select_more", type="UP_ARROW")
+    kd.remove("Mesh", "mesh.select_less", type="DOWN_ARROW")
+    for key, direction in PICK_WALK_KEYS:
+        _add(kd, "Mesh", "allset.pick_walk_component", make_event(key, repeat=True),
+             {"direction": direction})
+    kd.remove("3D View", "view3d.select", type="LEFTMOUSE", value="CLICK", shift=True, alt=True)
+    # Paint modes keep their own Alt+Shift+LMB select (they run before 3D View).
+    _add(kd, "3D View", "allset.view_axis_lock", make_event("LEFTMOUSE", shift=True, alt=True),
+         {"mode": "TUMBLE"}, shadows=AXIS_LOCK_SHADOWS)
+    _add(kd, "3D View", "allset.view_axis_lock", make_event("MIDDLEMOUSE", shift=True, alt=True),
+         {"mode": "TRACK"})
+
+
+# --- 30. Joints = pose bones ------------------------------------------------------
+# Maya has no pose mode: picking a joint selects it. Ctrl+Tab =
+# pose mode toggle (Blender's default key for it; posemode_toggle returns PASS_THROUGH unless an
+# armature is active, so Screen's Ctrl+Tab still gets the event); the Channel Box MMB
+# slider works on joints.
 
 def patch_pose_joints(kd):
-    _add(kd, _dcc_source('Object Non-modal'), 'object.posemode_toggle', make_event('TAB', ctrl=True), shadows=(_dcc_source('Screen'),))
-    _add(kd, _dcc_source('Pose'), 'allset.cb_virtual_slider', make_event('MIDDLEMOUSE'))
-TIME_SLIDER_SHADOWS = (_dcc_source('Dopesheet'), _dcc_source('View2D'), _dcc_source('Screen'))
+    _add(kd, "Object Non-modal", "object.posemode_toggle", make_event("TAB", ctrl=True), shadows=("Screen",))
+    _add(kd, "Pose", "allset.cb_virtual_slider", make_event("MIDDLEMOUSE"),
+         shadows=("Pose", "3D View"))            # the emulated Alt+LMB tumble (#242) passes through otherwise
+
+
+# --- 31. Time Slider and keys --------------------------------------------------------
+# Maya Time Slider. The timeline is a Dope Sheet mode: the Maya Time Slider
+# mouse (LMB time, Shift+LMB range, MMB time + notice, RMB menu) goes first in "Dopesheet" and passes
+# through in the Dope Sheet. K (Time Dragger, Maya hotkey) is global ("Screen"); editor keymaps
+# run first, so their plain K goes: Mesh knife tool cycle (IC:3074; Multi-Cut = Ctrl+Shift+X) and
+# Dope Sheet select_column (IC:1435). "User Interface" / Outliner K only act over a button / row.
+# S (Maya Set Key) = every keyable channel, not IC's LocRotScale (IC:2463, :2536).
+
+TIME_SLIDER_SHADOWS = ("Dopesheet", "View2D", "Screen")   # Screen: the Range Slider click
+
 
 def patch_time_slider(kd):
     for shift in (False, True):
-        _add(kd, _dcc_source('Dopesheet'), 'allset.time_scrub', make_event('LEFTMOUSE', shift=shift), {'range': shift}, first=True, shadows=TIME_SLIDER_SHADOWS)
-    _add(kd, _dcc_source('Dopesheet'), 'allset.time_scrub', make_event('MIDDLEMOUSE'), {'notice': True}, first=True, shadows=TIME_SLIDER_SHADOWS)
-    _add(kd, _dcc_source('Dopesheet'), 'allset.time_slider_menu', make_event('RIGHTMOUSE'), first=True, shadows=TIME_SLIDER_SHADOWS)
-    for value in ('PRESS', 'DOUBLE_CLICK'):
-        under = tuple((n for n in kd.keymap_names() if n != _dcc_source('Screen') and kd.find(n, type='LEFTMOUSE', value=value)))
-        _add(kd, _dcc_source('Screen'), 'allset.range_bar_drag', make_event('LEFTMOUSE', value=value), shadows=under)
-    kd.remove(_dcc_source('Mesh'), 'wm.tool_set_by_id', type='K')
-    kd.remove(_dcc_source('Dopesheet'), 'action.select_column', type='K')
-    _add(kd, _dcc_source('Screen'), 'allset.tap_hold', make_event('K'), {'binding': 'time_drag'}, shadows=(_dcc_source('User Interface'), _dcc_source('Outliner')))
-    for km in (_dcc_source('Object Mode'), _dcc_source('Pose')):
-        kd.remove(km, 'anim.keyframe_insert_by_name', type='S')
-        _add(kd, km, 'allset.set_key', make_event('S'))
-        for (key, channels) in (('W', 'TRANSLATE'), ('E', 'ROTATE'), ('R', 'SCALE')):
-            kd.remove(km, 'anim.keyframe_insert_by_name', type=key, shift=True)
-            _add(kd, km, 'allset.set_key', make_event(key, shift=True), {'channels': channels})
+        _add(kd, "Dopesheet", "allset.time_scrub", make_event("LEFTMOUSE", shift=shift), {"range": shift},
+             first=True, shadows=TIME_SLIDER_SHADOWS)
+    _add(kd, "Dopesheet", "allset.time_scrub", make_event("MIDDLEMOUSE"), {"hold": True}, first=True,
+         shadows=TIME_SLIDER_SHADOWS)
+    _add(kd, "Dopesheet", "allset.time_slider_menu", make_event("RIGHTMOUSE"), first=True,
+         shadows=TIME_SLIDER_SHADOWS)
+    # Maya's Time Slider never zooms or scrolls (the Range Slider sets what it shows): View2D's wheel zoom /
+    # scroll and Ctrl+MMB zoom are swallowed in the Timeline, passed through in the Dope Sheet
+    # (any "Dopesheet" item runs before the region's View2D keymap, so these need not be first)
+    for wheel in ("WHEELUPMOUSE", "WHEELDOWNMOUSE"):
+        for mods in ({}, {"ctrl": True}, {"shift": True}):
+            _add(kd, "Dopesheet", "allset.time_view_lock", make_event(wheel, **mods), shadows=TIME_SLIDER_SHADOWS)
+    _add(kd, "Dopesheet", "allset.time_view_lock", make_event("MIDDLEMOUSE", ctrl=True), shadows=TIME_SLIDER_SHADOWS)
+    # a double-click highlights the whole visible range (Maya); Blender's double-click item here toggles the
+    # channel editability and left its redo panel over the Time Slider (#335)
+    _add(kd, "Dopesheet", "allset.time_range_all", make_event("LEFTMOUSE", value="DOUBLE_CLICK"), first=True,
+         shadows=TIME_SLIDER_SHADOWS)
+    # Range Slider bar: a click on the empty label in the timeline header reaches the window
+    # keymaps; the operator passes through anywhere but over the bar ui/range_bar.py drew.
+    # Every editor keymap that uses the click runs first (intended: only unhandled clicks get here).
+    for value in ("PRESS", "DOUBLE_CLICK"):
+        under = tuple(n for n in kd.keymap_names() if n != "Screen" and kd.find(n, type="LEFTMOUSE", value=value))
+        if value == "DOUBLE_CLICK":
+            under += ("Time Scrub",)   # its double-click item (the whole visible range) comes in patch_time_range
+        _add(kd, "Screen", "allset.range_bar_drag", make_event("LEFTMOUSE", value=value), shadows=under)
+    kd.remove("Mesh", "wm.tool_set_by_id", type="K")
+    kd.remove("Dopesheet", "action.select_column", type="K")
+    _add(kd, "Screen", "allset.tap_hold", make_event("K"), {"binding": "time_drag"},
+         shadows=("User Interface", "Outliner"))
+    for km in ("Object Mode", "Pose"):
+        kd.remove(km, "anim.keyframe_insert_by_name", type="S")
+        _add(kd, km, "allset.set_key", make_event("S"))
+        # Shift+W / E / R (#100): IC's keyframe_insert_by_name reports "Successfully added ... keying set";
+        # the kit keys the Channel Box channels silently like Maya's SetKeyTranslate / Rotate / Scale
+        # (one "Screen" item each, patch_global_set_key: they work in every editor)
+        for key in ("W", "E", "R"):
+            kd.remove(km, "anim.keyframe_insert_by_name", type=key, shift=True)
+    # Maya S in component mode keys the selected points' positions (vertices, CVs, lattice points)
+    for km in ("Mesh", "Curve", "Lattice"):
+        _add(kd, km, "allset.set_key", make_event("S"))
+
+
+# --- 32. Joints: pose-mode pick-walk, P / Shift+P -------------------------------------------
+# Maya arrows walk joints like objects (pickWalk); IC Pose
+# arrows = select_hierarchy (IC:2453-2459) and frame_offset Left/Right (frames are Alt+, / Alt+.).
+# Maya P parents joints keeping their place: IC Pose P = object.parent_set (IC:2434), Armature
+# P / Shift+P = armature.parent_set / parent_clear menus (IC:3099-3100).
 
 def patch_joints(kd):
-    kd.remove(_dcc_source('Pose'), 'pose.select_hierarchy', type='UP_ARROW')
-    kd.remove(_dcc_source('Pose'), 'pose.select_hierarchy', type='DOWN_ARROW')
-    kd.remove(_dcc_source('Pose'), 'screen.frame_offset', type='LEFT_ARROW')
-    kd.remove(_dcc_source('Pose'), 'screen.frame_offset', type='RIGHT_ARROW')
-    for (key, direction) in PICK_WALK_KEYS:
-        _add(kd, _dcc_source('Pose'), 'allset.pick_walk_joint', make_event(key, repeat=True), {'direction': direction})
-    kd.remove(_dcc_source('Pose'), 'object.parent_set', type='P')
-    kd.remove(_dcc_source('Armature'), 'armature.parent_set', type='P')
-    kd.remove(_dcc_source('Armature'), 'armature.parent_clear', type='P', shift=True)
-    for km in (_dcc_source('Pose'), _dcc_source('Armature')):
-        _add(kd, km, 'allset.parent_joint', make_event('P'))
-        _add(kd, km, 'allset.unparent_joint', make_event('P', shift=True))
-UV_KM = _dcc_source('UV Editor')
+    kd.remove("Pose", "pose.select_hierarchy", type="UP_ARROW")
+    kd.remove("Pose", "pose.select_hierarchy", type="DOWN_ARROW")
+    kd.remove("Pose", "screen.frame_offset", type="LEFT_ARROW")     # frames: Alt+, / Alt+.
+    kd.remove("Pose", "screen.frame_offset", type="RIGHT_ARROW")
+    for key, direction in PICK_WALK_KEYS:
+        _add(kd, "Pose", "allset.pick_walk_joint", make_event(key, repeat=True), {"direction": direction})
+    kd.remove("Pose", "object.parent_set", type="P")
+    kd.remove("Armature", "armature.parent_set", type="P")
+    kd.remove("Armature", "armature.parent_clear", type="P", shift=True)
+    for km in ("Pose", "Armature"):
+        _add(kd, km, "allset.parent_joint", make_event("P"))
+        _add(kd, km, "allset.unparent_joint", make_event("P", shift=True))
+
+
+# --- 33. Multi-Cut: a kit tool (operators/multi_cut.py, ui/mesh_tools.py) whose own tool keymap has
+# Maya's Ctrl / Shift / Backspace handling, so Blender's knife keeps its own keys (no knife patches).
+
+
+# --- 34. UV workflow ------------------------------------------------------------------
+# Maya UV Editor keys, F12 / Alt+F12. IC's UV Editor: Shift+X = snap pie (IC:613),
+# Ctrl+L = select_linked (IC:599), RMB = context menu (IC:614); Maya has no shell-select key there.
+UV_KM = "UV Editor"
+
 
 def patch_uv(kd):
-    kd.remove(UV_KM, 'wm.call_menu', type='RIGHTMOUSE')
-    for (trigger, mods) in (('RMB', {}), ('SHIFT_RMB', {'shift': True})):
-        _add(kd, UV_KM, 'allset.marking_menu', make_event('RIGHTMOUSE', **mods), {'trigger': trigger})
-    kd.remove(UV_KM, 'wm.call_menu_pie', type='X', shift=True)
-    kd.remove(UV_KM, 'uv.select_linked', type='L', ctrl=True)
-    _add(kd, UV_KM, 'allset.uv_cut', make_event('X', shift=True))
-    _add(kd, UV_KM, 'allset.uv_sew', make_event('S', shift=True))
-    _add(kd, UV_KM, 'allset.uv_unfold', make_event('U', ctrl=True))
-    _add(kd, UV_KM, 'allset.uv_layout', make_event('L', ctrl=True))
-    for km in (_dcc_source('Object Mode'), _dcc_source('Mesh')):
-        _add(kd, km, 'allset.uv_component', make_event('F12'), {'mode': 'UV'}, shadows=(_dcc_source('Screen'),))
-        _add(kd, km, 'allset.uv_component', make_event('F12', alt=True), {'mode': 'SHELL'})
-SCENE_KEYS = (('wm.open_mainfile', 'allset.open_scene', {'ctrl': True}, 'O'), ('wm.save_mainfile', 'allset.save_scene', {'ctrl': True}, 'S'), ('wm.save_as_mainfile', 'allset.save_scene_as', {'ctrl': True, 'shift': True}, 'S'), ('wm.save_mainfile', 'allset.increment_save', {'ctrl': True, 'alt': True}, 'S'))
+    kd.remove(UV_KM, "wm.call_menu", type="RIGHTMOUSE")
+    for trigger, mods in (("RMB", {}), ("SHIFT_RMB", {"shift": True})):
+        _add(kd, UV_KM, "allset.marking_menu", make_event("RIGHTMOUSE", **mods), {"trigger": trigger})
+    kd.remove(UV_KM, "wm.call_menu_pie", type="X", shift=True)
+    kd.remove(UV_KM, "uv.select_linked", type="L", ctrl=True)
+    _add(kd, UV_KM, "allset.uv_cut", make_event("X", shift=True))
+    _add(kd, UV_KM, "allset.uv_sew", make_event("S", shift=True))
+    _add(kd, UV_KM, "allset.uv_unfold", make_event("U", ctrl=True))
+    _add(kd, UV_KM, "allset.uv_layout", make_event("L", ctrl=True))
+    # double-click = UV edge loop (Ctrl: edge ring), on a UV / UV face its shell; Shift adds (operators/uv_loop_pick.py).
+    # IC's own double-click loop picks give way
+    for shift in (False, True):
+        kd.remove(UV_KM, "uv.select_loop", type="LEFTMOUSE", value="DOUBLE_CLICK", shift=shift)
+        for ctrl in (False, True):
+            _add(kd, UV_KM, "allset.uv_loop_pick", make_event("LEFTMOUSE", value="DOUBLE_CLICK", shift=shift, ctrl=ctrl),
+                 {"extend": shift, "ring": ctrl}, shadows=("Screen",))
+    # Ctrl+Up / Ctrl+Down = checker density up / down (whole steps, at least 1)
+    _add(kd, UV_KM, "allset.checker_density", make_event("UP_ARROW", ctrl=True), {"step": 1})
+    _add(kd, UV_KM, "allset.checker_density", make_event("DOWN_ARROW", ctrl=True), {"step": -1})
+    for km in ("Object Mode", "Mesh"):
+        _add(kd, km, "allset.uv_component", make_event("F12"), {"mode": 'UV'},
+             shadows=("Screen",))      # Screen F12 = Blender render, Maya's F12 wins in the 3D View
+        _add(kd, km, "allset.uv_component", make_event("F12", alt=True), {"mode": 'SHELL'})
+
+
+# --- 36. Scene files -------------------------------------------------------------------------
+# Maya hotkeys Ctrl+O / Ctrl+S / Ctrl+Shift+S / Ctrl+Alt+S / Ctrl+R. IC binds the first four in "Window"
+# (IC:194-199): replaced in place by the kit's (file dialogs start in the project's scenes folder; Ctrl+Alt+S =
+# Maya's Increment and Save rule shot_v001 -> shot_v001.0001, not Blender's shot_v002). Ctrl+R = Create Reference;
+# editor keymaps that bind Ctrl+R themselves keep it there (they run first).
+
+SCENE_KEYS = (
+    ("wm.open_mainfile", "allset.open_scene", {"ctrl": True}, "O"),
+    ("wm.save_mainfile", "allset.save_scene", {"ctrl": True}, "S"),
+    ("wm.save_as_mainfile", "allset.save_scene_as", {"ctrl": True, "shift": True}, "S"),
+    ("wm.save_mainfile", "allset.increment_save", {"ctrl": True, "alt": True}, "S"),
+)
+
 
 def patch_scene_files(kd):
-    for (ic, kit, mods, key) in SCENE_KEYS:
-        kd.remove(_dcc_source('Window'), ic, type=key, **mods)
-        _add(kd, _dcc_source('Window'), kit, make_event(key, **mods))
-    kd.remove(_dcc_source('Window'), 'wm.read_homefile', type='N', ctrl=True)
-    _add(kd, _dcc_source('Window'), 'allset.new_maya_scene', make_event('N', ctrl=True), shadows=(_dcc_source('Text'),))
-    _add(kd, _dcc_source('Window'), 'allset.create_reference', make_event('R', ctrl=True), shadows=(_dcc_source('Image Generic'), _dcc_source('File Browser'), _dcc_source('File Browser Main'), _dcc_source('Sequencer')))
+    for ic, kit, mods, key in SCENE_KEYS:
+        kd.remove("Window", ic, type=key, **mods)
+        _add(kd, "Window", kit, make_event(key, **mods))
+    # Ctrl+N = Maya New Scene (Maya hotkey NewScene): IC's wm.read_homefile opens Blender's default file (there is no
+    # app template copy); the kit's new_maya_scene reads the Maya layout file like File > New Scene (#44).
+    kd.remove("Window", "wm.read_homefile", type="N", ctrl=True)
+    _add(kd, "Window", "allset.new_maya_scene", make_event("N", ctrl=True), shadows=("Text",))  # Text: new text
+    # Ctrl+R stays refresh / reload where an editor binds it (they run before Window items).
+    _add(kd, "Window", "allset.create_reference", make_event("R", ctrl=True),
+         shadows=("Image Generic", "File Browser", "File Browser Main", "Sequencer"))
+
+
+# --- 37. Graph Editor keys, Shift+S tangent marking menu ---------------------------------------
+# Maya hotkeys: Graph Editor G = FramePlaybackRange, D = TangentAuto, Shift+S hold =
+# KeyframeTangentMarkingMenu. G / D go in "Graph Editor" (it runs before Screen's G = repeat_last);
+# Shift+S replaces IC's keyframe_insert menu in Object Mode / Pose (IC:2462, 2535) and is added to the Graph Editor
+# and Dope Sheet. Mesh / UV Shift+S (UV Sew) stay.
 
 def patch_graph_keys(kd):
-    _add(kd, _dcc_source('Graph Editor'), 'anim.scene_range_frame', make_event('G'), shadows=(_dcc_source('Screen'),))
-    _add(kd, _dcc_source('Graph Editor'), 'allset.set_tangent', make_event('D'), {'kind': 'AUTO'})
-    for km in (_dcc_source('Object Mode'), _dcc_source('Pose')):
-        kd.remove(km, 'anim.keyframe_insert', type='S', shift=True)
-    for km in (_dcc_source('Object Mode'), _dcc_source('Pose'), _dcc_source('Graph Editor'), _dcc_source('Dopesheet')):
-        _add(kd, km, 'allset.tap_hold', make_event('S', shift=True), {'binding': 'key_tangent'})
-SELECT_MM_KEYMAPS = (_dcc_source('Object Mode'), _dcc_source('Mesh'))
-REPEAT_SHADOWS = (_dcc_source('Armature'), _dcc_source('Metaball'), _dcc_source('Grease Pencil Selection'))
-SELECT_MM_KEYS = (({'shift': True}, 'select_component'), ({'alt': True}, 'select_polygon'))
-GRAPH_VIEW_KEYS = (('ONE', 'ABSOLUTE'), ('TWO', 'STACKED'), ('THREE', 'NORMALIZED'))
+    _add(kd, "Graph Editor", "anim.scene_range_frame", make_event("G"), shadows=("Screen",))   # over repeat_last
+    _add(kd, "Graph Editor", "allset.set_tangent", make_event("D"), {"kind": "AUTO"})
+    for km in ("Object Mode", "Pose"):
+        kd.remove(km, "anim.keyframe_insert", type="S", shift=True)
+    for km in ("Object Mode", "Pose", "Graph Editor", "Dopesheet"):
+        _add(kd, km, "allset.tap_hold", make_event("S", shift=True), {"binding": "key_tangent"})
+
+
+# --- 38. Key batch 2 --------------------------------------------------------------------------
+# Graph Editor 1/2/3, Shift+Q / Alt+Q select tool marking menus, Ctrl+Alt+Left/Right
+# Spin Edge, Shift+G repeat at the mouse, Ctrl+Shift+C camera from view (Maya hotkeys).
+# IC has none of these events in these keymaps; same-event IC items elsewhere stay (editor keymaps run first):
+# Shift+Q in Grease Pencil modes, Shift+G select similar / grouped in Armature, Metaball, Grease Pencil.
+SELECT_MM_KEYMAPS = ("Object Mode", "Mesh")
+REPEAT_SHADOWS = ("Armature", "Metaball", "Grease Pencil Selection")
+SELECT_MM_KEYS = (({"shift": True}, "select_component"), ({"alt": True}, "select_polygon"))   # marking.SELECT_BINDINGS
+GRAPH_VIEW_KEYS = (("ONE", "ABSOLUTE"), ("TWO", "STACKED"), ("THREE", "NORMALIZED"))
+
 
 def patch_key_batch_2(kd):
-    for (key, mode) in GRAPH_VIEW_KEYS:
-        _add(kd, _dcc_source('Graph Editor'), 'allset.graph_view_mode', make_event(key), {'mode': mode})
+    for key, mode in GRAPH_VIEW_KEYS:
+        _add(kd, "Graph Editor", "allset.graph_view_mode", make_event(key), {"mode": mode})
     for km in SELECT_MM_KEYMAPS:
-        for (mods, binding) in SELECT_MM_KEYS:
-            _add(kd, km, 'allset.tap_hold', make_event('Q', **mods), {'binding': binding})
-    _add(kd, _dcc_source('Mesh'), 'mesh.edge_rotate', make_event('LEFT_ARROW', ctrl=True, alt=True), {'use_ccw': True})
-    _add(kd, _dcc_source('Mesh'), 'mesh.edge_rotate', make_event('RIGHT_ARROW', ctrl=True, alt=True), {'use_ccw': False})
-    _add(kd, '3D View', 'allset.repeat_at_mouse', make_event('G', shift=True), shadows=REPEAT_SHADOWS)
-    _add(kd, _dcc_source('Object Mode'), 'allset.camera_from_view', make_event('C', shift=True, ctrl=True))
+        for mods, binding in SELECT_MM_KEYS:
+            _add(kd, km, "allset.tap_hold", make_event("Q", **mods), {"binding": binding})
+    _add(kd, "Mesh", "mesh.edge_rotate", make_event("LEFT_ARROW", ctrl=True, alt=True), {"use_ccw": True})
+    _add(kd, "Mesh", "mesh.edge_rotate", make_event("RIGHT_ARROW", ctrl=True, alt=True), {"use_ccw": False})
+    _add(kd, "3D View", "allset.repeat_at_mouse", make_event("G", shift=True), shadows=REPEAT_SHADOWS)
+    _add(kd, "Object Mode", "allset.camera_from_view", make_event("C", shift=True, ctrl=True))
+
+
+# --- 38. Outliner MMB drag ---------------------------------------------------------------
+# Maya parents / reorders / unparents with an MMB drag in the Outliner; Blender's Outliner has
+# no MMB item (IC "Outliner"), only View2D's MMB scroller_activate (IC:323), which passes through off the scroll
+# bars and runs first. Alt+MMB pans (IC View2D, = Maya). "View2D Buttons List" (MMB pan) belongs to button-list
+# regions (header / sidebar), not the Outliner tree. LMB drag stays Blender's (operators/outliner_drag.py redoes its
+# drop the Maya way).
 
 def patch_outliner_drag(kd):
-    _add(kd, _dcc_source('Outliner'), 'allset.outliner_drag', make_event('MIDDLEMOUSE'), shadows=(_dcc_source('View2D'), 'View2D Buttons List'))
-INSERT_KEY_KEYS = (('I', {'alt': True}, {'channels': 'ALL'}), ('W', {'ctrl': True, 'shift': True}, {'channels': 'TRANSLATE'}), ('E', {'ctrl': True, 'shift': True}, {'channels': 'ROTATE'}), ('R', {'ctrl': True, 'shift': True}, {'channels': 'SCALE'}))
-KEY_STEP_SHADOWS = (_dcc_source('User Interface'), _dcc_source('Mask Editing'), _dcc_source('Weight Paint'), _dcc_source('Grease Pencil Paint Mode'), _dcc_source('Grease Pencil Edit Mode'), _dcc_source('Grease Pencil Sculpt Mode'), _dcc_source('Grease Pencil Weight Paint'), _dcc_source('Grease Pencil Vertex Paint'), _dcc_source('Animation Channels'), _dcc_source('Text'), _dcc_source('Grease Pencil Draw Mode'), _dcc_source('Sequencer'))
+    _add(kd, "Outliner", "allset.outliner_drag", make_event("MIDDLEMOUSE"), shadows=("View2D", "View2D Buttons List"))
+
+
+# --- 39. Insert / nudge / select keys ---------------------------------------------------------
+# Maya global keys (Maya hotkeys). "Screen" so they work over the 3D View, Graph Editor,
+# Dope Sheet and Time Slider; the operators read the editor under the mouse. Editor / mode keymaps with the same
+# event run first and keep it (Weight Paint / Grease Pencil / Mask Alt+I, Animation Channels Ctrl+Shift+W, Text
+# Ctrl+Shift+E, the UI colour-ramp eyedropper Alt+I).
+INSERT_KEY_KEYS = (("I", {"alt": True}, {"channels": "ALL"}),
+                   ("W", {"ctrl": True, "shift": True}, {"channels": "TRANSLATE"}),
+                   ("E", {"ctrl": True, "shift": True}, {"channels": "ROTATE"}),
+                   ("R", {"ctrl": True, "shift": True}, {"channels": "SCALE"}))
+KEY_STEP_SHADOWS = ("User Interface", "Mask Editing", "Weight Paint", "Grease Pencil Paint Mode",
+                    "Grease Pencil Edit Mode", "Grease Pencil Sculpt Mode", "Grease Pencil Weight Paint",
+                    "Grease Pencil Vertex Paint", "Animation Channels", "Text",
+                    # Blender 5.x IC only: Draw Mode Alt+I / Ctrl+Shift+E, Sequencer Ctrl+Shift+R
+                    "Grease Pencil Draw Mode", "Sequencer")
+
 
 def patch_key_insert(kd):
-    for (key, mods, props) in INSERT_KEY_KEYS:
-        _add(kd, _dcc_source('Screen'), 'allset.insert_key', make_event(key, **mods), props, shadows=KEY_STEP_SHADOWS)
-    for (key, delta) in (('NINE', -1), ('ZERO', 1)):
-        _add(kd, _dcc_source('Screen'), 'allset.nudge_keys', make_event(key, shift=True, repeat=True), {'delta': delta}, shadows=KEY_STEP_SHADOWS)
-    for (key, direction) in (('COMMA', 'PREVIOUS'), ('PERIOD', 'NEXT')):
-        _add(kd, _dcc_source('Screen'), 'allset.select_key', make_event(key, ctrl=True, alt=True), {'direction': direction}, shadows=KEY_STEP_SHADOWS)
-TIME_SCRUB_KM = (_dcc_source('Time Scrub'), {'space_type': 'EMPTY', 'region_type': 'WINDOW'})
+    for key, mods, props in INSERT_KEY_KEYS:
+        _add(kd, "Screen", "allset.insert_key", make_event(key, **mods), props, shadows=KEY_STEP_SHADOWS)
+    for key, delta in (("NINE", -1), ("ZERO", 1)):
+        _add(kd, "Screen", "allset.nudge_keys", make_event(key, shift=True, repeat=True), {"delta": delta},
+             shadows=KEY_STEP_SHADOWS)
+    for key, direction in (("COMMA", "PREVIOUS"), ("PERIOD", "NEXT")):
+        _add(kd, "Screen", "allset.select_key", make_event(key, ctrl=True, alt=True), {"direction": direction},
+             shadows=KEY_STEP_SHADOWS)
+
+
+# --- 40. Time Slider range drag ------------------------------------------------------------------
+# A press on the highlighted range moves / scales its keys; anywhere else it passes through to time_scrub,
+# so it goes in front of it (added after patch_time_slider: ``first`` puts the latest item first).
+# The Maya Workflow Kit Time Slider row (29 px at 1.25) is all Blender's scrub strip, whose "Time Scrub" keymap (LMB =
+# anim.change_frame, blender_default.py:1171-1183) runs before "Dopesheet"; IC has no "Time Scrub", so Blender used
+# its default one (seen with --debug-handlers). The Maya keyconfig gets its own: change_frame kept, the range
+# drag and the kit's time_scrub (a click drops the range) in front; both pass through outside the Time Slider.
+TIME_SCRUB_KM = ("Time Scrub", {"space_type": 'EMPTY', "region_type": 'WINDOW'})
+
 
 def patch_time_range(kd):
-    _add(kd, _dcc_source('Dopesheet'), 'allset.time_range_drag', make_event('LEFTMOUSE'), first=True, shadows=TIME_SLIDER_SHADOWS)
-    kd.ensure(*TIME_SCRUB_KM, [('anim.change_frame', make_event('LEFTMOUSE'), None)])
-    shadows = (*TIME_SLIDER_SHADOWS, _dcc_source('Time Scrub'))
-    _add(kd, _dcc_source('Time Scrub'), 'allset.time_scrub', make_event('LEFTMOUSE'), first=True, shadows=shadows)
-    _add(kd, _dcc_source('Time Scrub'), 'allset.time_range_drag', make_event('LEFTMOUSE'), first=True, shadows=shadows)
+    _add(kd, "Dopesheet", "allset.time_range_drag", make_event("LEFTMOUSE"), first=True, shadows=TIME_SLIDER_SHADOWS)
+    kd.ensure(*TIME_SCRUB_KM, [("anim.change_frame", make_event("LEFTMOUSE"), None)])
+    shadows = (*TIME_SLIDER_SHADOWS, "Time Scrub")
+    _add(kd, "Time Scrub", "allset.time_scrub", make_event("LEFTMOUSE"), first=True, shadows=shadows)
+    _add(kd, "Time Scrub", "allset.time_range_drag", make_event("LEFTMOUSE"), first=True, shadows=shadows)
+    _add(kd, "Time Scrub", "allset.time_range_all", make_event("LEFTMOUSE", value="DOUBLE_CLICK"), first=True,
+         shadows=shadows)
+
+
+# --- 41. Manipulator Ctrl+LMB, Shift+MMB = closest axis ---------------------------------------------
+# Ctrl+LMB sits first in the gizmo keymaps (only over a highlighted kit manipulator handle): Move handles pass the
+# press on to their own snapped drag (the centre also frees the active handle), a Scale axis scales the other two. Shift+MMB goes in the Move / Scale tool keymaps (3D View has no Shift+MMB item; IC
+# pans with Alt+MMB): a short modal reads the first movement, picks the axis and starts the transform (a CLICK_DRAG
+# item never got the simulated MMB drag).
 
 def patch_manip_ctrl(kd):
     for km in GIZMO_KEYMAPS:
-        _add(kd, km, 'allset.manip_ctrl', make_event('LEFTMOUSE', 'PRESS', ctrl=True), first=True)
-    for (km, _idname, mode) in MMB_TOOLS:
+        _add(kd, km, "allset.manip_ctrl", make_event("LEFTMOUSE", "PRESS", ctrl=True), first=True)
+    for km, _idname, mode in MMB_TOOLS:
         if mode == 'ROTATE':
             continue
-        _add(kd, km, 'allset.manip_mmb_auto', make_event('MIDDLEMOUSE', 'PRESS', shift=True), {'mode': mode}, shadows=(km,))
-VIEW3_SHADOWS = (_dcc_source('Sculpt'), _dcc_source('Font'), _dcc_source('Text'), _dcc_source('File Browser'), _dcc_source('Sequencer'), _dcc_source('Clip'), _dcc_source('Node Editor'), _dcc_source('Grease Pencil Selection'))
-PIXEL_MOVE_KEYS = (('UP_ARROW', 0, 1), ('DOWN_ARROW', 0, -1), ('LEFT_ARROW', -1, 0), ('RIGHT_ARROW', 1, 0))
+        _add(kd, km, "allset.manip_mmb_auto", make_event("MIDDLEMOUSE", "PRESS", shift=True), {"mode": mode},
+             shadows=(km,))
+
+
+# --- 42. View keys 3 -----------------------------------------------------------------------------
+# Maya hotkeys Alt+p, Alt+a, Alt+arrows, `, backslash. All in "3D View" (Maya's model
+# panel); the same events elsewhere belong to other editors / modes, whose keymaps run first.
+VIEW3_SHADOWS = ("Sculpt", "Font", "Text", "File Browser", "Sequencer", "Clip", "Node Editor", "Grease Pencil Selection")
+PIXEL_MOVE_KEYS = (("UP_ARROW", 0, 1), ("DOWN_ARROW", 0, -1), ("LEFT_ARROW", -1, 0), ("RIGHT_ARROW", 1, 0))
+
 
 def patch_view_keys_3(kd):
-    _add(kd, '3D View', 'allset.cycle_display', make_event('A', alt=True), shadows=VIEW3_SHADOWS)
-    _add(kd, '3D View', 'allset.camera_mode_toggle', make_event('P', alt=True), shadows=VIEW3_SHADOWS)
-    for (key, dx, dy) in PIXEL_MOVE_KEYS:
-        _add(kd, '3D View', 'allset.pixel_move', make_event(key, alt=True, repeat=True), {'dx': dx, 'dy': dy}, shadows=VIEW3_SHADOWS)
-    kd.remove(_dcc_source('Object Non-modal'), 'object.transfer_mode', type='ACCENT_GRAVE')
-    _add(kd, '3D View', 'allset.tweak_hold', make_event('ACCENT_GRAVE'), shadows=VIEW3_SHADOWS)
-    _add(kd, '3D View', 'allset.pan_zoom_hold', make_event('BACK_SLASH'), shadows=VIEW3_SHADOWS)
-CUT_SHADOWS = (_dcc_source('Text'), _dcc_source('Console'), _dcc_source('Font'), _dcc_source('Grease Pencil Edit Mode'))
-SHOW_KEYS = (('ONE', 'CURVES'), ('TWO', 'POLYGONS'), ('FOUR', 'IMAGE_PLANES'))
+    _add(kd, "3D View", "allset.cycle_display", make_event("A", alt=True), shadows=VIEW3_SHADOWS)
+    _add(kd, "3D View", "allset.camera_mode_toggle", make_event("P", alt=True), shadows=VIEW3_SHADOWS)
+    for key, dx, dy in PIXEL_MOVE_KEYS:
+        _add(kd, "3D View", "allset.pixel_move", make_event(key, alt=True, repeat=True), {"dx": dx, "dy": dy},
+             shadows=VIEW3_SHADOWS)
+    kd.remove("Object Non-modal", "object.transfer_mode", type="ACCENT_GRAVE")
+    _add(kd, "3D View", "allset.tweak_hold", make_event("ACCENT_GRAVE"), shadows=VIEW3_SHADOWS)
+    _add(kd, "3D View", "allset.pan_zoom_hold", make_event("BACK_SLASH"), shadows=VIEW3_SHADOWS)
+
+
+# --- 43. Global key batch 4 -------------------------------------------------------------------
+# Maya hotkeys Ctrl+x, Alt+x, Alt+backslash, Alt+1/2/4, Ctrl+` / Shift+~ /
+# Ctrl+Shift+~). Ctrl+X exists only in other editors / modes (Text, Console, Font, Grease Pencil edit); Alt+X was IC's
+# X-ray toggle; the rest were free. Plain ` stays the tweak hold.
+CUT_SHADOWS = ("Text", "Console", "Font", "Grease Pencil Edit Mode")
+SHOW_KEYS = (("ONE", "CURVES"), ("TWO", "POLYGONS"), ("FOUR", "IMAGE_PLANES"))
+
 
 def patch_global_keys_4(kd):
-    for km in (_dcc_source('Object Mode'), _dcc_source('Outliner')):
-        _add(kd, km, 'allset.cut', make_event('X', ctrl=True), shadows=CUT_SHADOWS)
-    _add(kd, _dcc_source('Object Mode'), 'allset.paste', make_event('V', ctrl=True), shadows=('3D View',))
-    kd.remove('3D View', 'view3d.toggle_xray', type='X', alt=True)
-    _add(kd, '3D View', 'view3d.walk', make_event('X', alt=True), shadows=VIEW3_SHADOWS)
-    _add(kd, _dcc_source('Screen'), 'allset.playback_range_anim', make_event('BACK_SLASH', alt=True))
-    for (key, kind) in SHOW_KEYS:
-        _add(kd, '3D View', 'allset.toggle_show', make_event(key, alt=True), {'kind': kind}, shadows=VIEW3_SHADOWS)
-    for km in (_dcc_source('Object Mode'), _dcc_source('Mesh')):
-        _add(kd, km, 'allset.smooth_proxy', make_event('ACCENT_GRAVE', ctrl=True), {'action': 'TOGGLE'})
-        _add(kd, km, 'allset.smooth_proxy', make_event('ACCENT_GRAVE', shift=True), {'action': 'BOTH'})
-    _add(kd, _dcc_source('Object Mode'), 'allset.smooth_proxy', make_event('ACCENT_GRAVE', ctrl=True, shift=True), {'action': 'CREATE'})
+    for km in ("Object Mode", "Outliner"):
+        _add(kd, km, "allset.cut", make_event("X", ctrl=True), shadows=CUT_SHADOWS)
+    # Blender's paste leaves no active object after a cut: the kit paste makes the first pasted node the lead.
+    _add(kd, "Object Mode", "allset.paste", make_event("V", ctrl=True), shadows=("3D View",))
+    kd.remove("3D View", "view3d.toggle_xray", type="X", alt=True)
+    _add(kd, "3D View", "view3d.walk", make_event("X", alt=True), shadows=VIEW3_SHADOWS)
+    _add(kd, "Screen", "allset.playback_range_anim", make_event("BACK_SLASH", alt=True))
+    for key, kind in SHOW_KEYS:
+        _add(kd, "3D View", "allset.toggle_show", make_event(key, alt=True), {"kind": kind}, shadows=VIEW3_SHADOWS)
+    for km in ("Object Mode", "Mesh"):
+        _add(kd, km, "allset.smooth_proxy", make_event("ACCENT_GRAVE", ctrl=True), {"action": "TOGGLE"})
+        _add(kd, km, "allset.smooth_proxy", make_event("ACCENT_GRAVE", shift=True), {"action": "BOTH"})
+    _add(kd, "Object Mode", "allset.smooth_proxy", make_event("ACCENT_GRAVE", ctrl=True, shift=True),
+         {"action": "CREATE"})
+
+
+
+# --- 44. Graph Editor key batch ---------------------------------------------------------------
+# Maya hotkeys t = GraphEditorFrameCenterView, Alt+/ = SnapTimeToSelection toggle, i hold =
+# Insert Key tool; Maya binds it globally, it only means something in the Graph Editor.
+# None of these events is bound in the Graph Editor keymaps.
 
 def patch_graph_keys_2(kd):
-    _add(kd, _dcc_source('Graph Editor'), 'allset.graph_center_time', make_event('T'))
-    _add(kd, _dcc_source('Graph Editor'), 'allset.snap_time_toggle', make_event('SLASH', alt=True))
-    _add(kd, _dcc_source('Graph Editor'), 'allset.insert_key_tool', make_event('I'))
+    _add(kd, "Graph Editor", "allset.graph_center_time", make_event("T"))
+    _add(kd, "Graph Editor", "allset.snap_time_toggle", make_event("SLASH", alt=True))
+    _add(kd, "Graph Editor", "allset.insert_key_tool", make_event("I"))
+    # #192: Maya F / A frame Maya's rectangle (selected keys with both segments / every curve shown,
+    # 10 % time and 25 % value margins) instead of Blender's View Selected / View All
+    kd.remove("Graph Editor", "graph.view_selected", type="F")
+    kd.remove("Graph Editor", "graph.view_all", type="A")
+    _add(kd, "Graph Editor", "allset.graph_frame", make_event("F"), {"mode": 'SELECTED'})
+    _add(kd, "Graph Editor", "allset.graph_frame", make_event("A"), {"mode": 'ALL'})
+    # Maya S over the Graph Editor / Dope Sheet = Set Key on the selected objects' keyable channels (a fresh object's
+    # 10 channels appear), not Blender's key on the curves the editor already shows
+    for km, op in (("Graph Editor", "graph.keyframe_insert"), ("Dopesheet", "action.keyframe_insert")):
+        kd.remove(km, op, type="S")
+        _add(kd, km, "allset.set_key", make_event("S"))
+    # #192: Maya Shift+MMB anywhere / Shift+LMB drag on a selected key = move along time or value only
+    # (the first 3 px pick the axis); Blender binds no Shift+MMB here and its Shift+LMB drag is the marquee, which
+    # still runs off the selected keys (the operator passes through)
+    _add(kd, "Graph Editor", "allset.graph_axis_drag", make_event("MIDDLEMOUSE", shift=True), {"button": 'MIDDLE'})
+    _add(kd, "Graph Editor", "allset.graph_axis_drag", make_event("LEFTMOUSE", "CLICK_DRAG", shift=True),
+         {"button": 'LEFT'}, first=True, shadows=("Graph Editor",))
+    # Maya time snap: Blender's MMB / LMB key moves land on whole frames (the operator only watches, PASS_THROUGH)
+    for button in ("MIDDLEMOUSE", "LEFTMOUSE"):
+        _add(kd, "Graph Editor", "allset.graph_move_snap", make_event(button, "CLICK_DRAG"), first=True,
+             shadows=("Graph Editor",))
+    # Scale Keys box, Shift on a corner: scale in time or value only (a Shift press off the corners / sides passes
+    # through); added before the Shift press watcher below, which therefore still runs first
+    _add(kd, "Graph Editor", "allset.graph_scale_box", make_event("LEFTMOUSE", shift=True), first=True,
+         shadows=("Graph Editor", "Screen", "View2D"))
+    # Blender's Shift+click toggles a selected key off on the press: remember the selection so a Shift+drag from it
+    # still moves the keys (PASS_THROUGH, the toggle runs)
+    _add(kd, "Graph Editor", "allset.graph_shift_press", make_event("LEFTMOUSE", shift=True), first=True,
+         shadows=("Graph Editor",))
+    # Maya middle drag = the current key tool (move / turn tangents / scale) counted from the press; Blender's own
+    # drag starts a few px later. Passes through when no key is selected.
+    _add(kd, "Graph Editor", "allset.graph_key_drag", make_event("MIDDLEMOUSE"), first=True,
+         shadows=("Graph Editor", "View2D"))
+    # Maya w / e / r over the Graph Editor pick the key tool instead of starting a move / rotate / scale at once
+    for key, tool in (("W", 'MOVE'), ("E", 'ROTATE'), ("R", 'SCALE')):
+        kd.remove("Graph Editor", GRAPH_WER[key], type=key)
+        _add(kd, "Graph Editor", "allset.graph_key_tool", make_event(key), {"tool": tool})
+    # Maya l = value lines
+    _add(kd, "Graph Editor", "allset.graph_value_lines", make_event("L"))
+    # Scale Keys tool (r): a left press on a side / corner of the box around the selected keys scales them; anywhere
+    # else it passes through to Blender's click select
+    _add(kd, "Graph Editor", "allset.graph_scale_box", make_event("LEFTMOUSE"), first=True,
+         shadows=("Graph Editor", "Screen", "View2D"))
 
-def patch_outliner_sets(kd):
-    _add(kd, _dcc_source('Outliner'), 'allset.outliner_set_click', make_event('LEFTMOUSE', 'CLICK', any=True), first=True, shadows=(_dcc_source('Outliner'),))
-    _add(kd, _dcc_source('Outliner'), 'allset.outliner_set_menu', make_event('RIGHTMOUSE'), first=True, shadows=(_dcc_source('Outliner'),))
+
+GRAPH_WER = {"W": "transform.translate", "E": "transform.rotate", "R": "transform.resize"}
+
+# --- 45b. Maya Outliner tree (#348) -------------------------------------------------------------------------
+# A Maya Outliner shows the kit's own rows (ui/outliner_tree.py: joints as rows under their parent joint) with
+# Blender's rows hidden, so Blender's Outliner items (item_activate / item_rename / show_active / select_walk /
+# delete / context menus / scroll) would act on nothing there. The kit's items go first and pass through in every
+# other Outliner. Maya's Outliner keys: Enter = rename, f = Reveal Selected, the arrows = pick walk (Up = parent,
+# Down = child, Left / Right = siblings). A fast second press arrives as DOUBLE_CLICK (rename).
+# allset.outliner_delete (below, Blender-row Outliners) runs after the tree's Delete item.
+
+OUTLINER_TREE_ITEMS = ("allset.outliner_tree_click", "allset.outliner_tree_menu", "allset.outliner_tree_rename",
+                       "allset.outliner_tree_reveal", "allset.outliner_tree_walk", "allset.outliner_tree_delete",
+                       "allset.outliner_tree_scroll", "allset.outliner_tree_hover")
+
+
+def patch_outliner_tree(kd):
+    sh = ("Outliner",)
+    # the row under the mouse lights up (always passes through: Blender's own highlight_update follows)
+    _add(kd, "Outliner", "allset.outliner_tree_hover", make_event("MOUSEMOVE", "ANY", any=True), first=True,
+         shadows=sh)
+    # (the Hypergraph's items in "View2D Buttons List" poll False outside its window; F2 stays Maya's menu set key)
+    for value in ("PRESS", "DOUBLE_CLICK"):
+        _add(kd, "Outliner", "allset.outliner_tree_click", make_event("LEFTMOUSE", value, any=True), first=True,
+             shadows=sh + ("View2D Buttons List",))
+    _add(kd, "Outliner", "allset.outliner_tree_menu", make_event("RIGHTMOUSE"), first=True, shadows=sh)
+    _add(kd, "Outliner", "allset.outliner_tree_rename", make_event("RET"), first=True, shadows=sh + ("Screen",))
+    for key in ("F", "PERIOD"):
+        _add(kd, "Outliner", "allset.outliner_tree_reveal", make_event(key), first=True,
+             shadows=sh + ("View2D Buttons List",))
+    for key, direction in PICK_WALK_KEYS:
+        _add(kd, "Outliner", "allset.outliner_tree_walk", make_event(key, repeat=True), {"direction": direction},
+             first=True, shadows=sh)
+    for key in ("DEL", "BACK_SPACE"):
+        _add(kd, "Outliner", "allset.outliner_tree_delete", make_event(key), first=True, shadows=sh)
+    for key, page in (("PAGE_DOWN", 1), ("PAGE_UP", -1)):
+        _add(kd, "Outliner", "allset.outliner_tree_scroll", make_event(key, repeat=True), {"page": page},
+             first=True, shadows=sh + ("View2D Buttons List",))
+    # the wheel over the Outliner's rows goes to "View2D" (like the Graph Editor's channel region)
+    for wheel, rows in (("WHEELUPMOUSE", -3), ("WHEELDOWNMOUSE", 3)):
+        _add(kd, "View2D", "allset.outliner_tree_scroll", make_event(wheel), {"rows": rows}, first=True,
+             shadows=("View2D", "View2D Buttons List"))
+
+
+# --- 46. Render slots ----------------------------------------------------------------------------------
+# Keep Image = a Blender render slot (ui/render_view.py), compared with J / Alt+J like Blender
+# ($S\presets\keyconfig\keymap_data\blender_default.py:2009-2011); IC's Image keymap has no J, so the kit's tip
+# had no key behind it.
 
 def patch_render_slots(kd):
-    _add(kd, _dcc_source('Image'), 'image.cycle_render_slot', make_event('J'))
-    _add(kd, _dcc_source('Image'), 'image.cycle_render_slot', make_event('J', alt=True), {'reverse': True})
+    _add(kd, "Image", "image.cycle_render_slot", make_event("J"))
+    _add(kd, "Image", "image.cycle_render_slot", make_event("J", alt=True), {"reverse": True})
+
+
+# --- 47. Graph Editor outliner rows ------------------------------------------------------------------
+# The kit draws Maya's outliner pane (object + "Translate X" rows) over the Graph Editor's channel region
+# (ui/editor_chrome.py); presses on it go first in "Animation Channels" (Blender's channels_click is a PRESS item, a
+# handled press sends no CLICK) and pass through over Blender's search field.
 
 def patch_graph_outliner(kd):
-    _add(kd, _dcc_source('Animation Channels'), 'allset.graph_channel_click', make_event('LEFTMOUSE', any=True), first=True, shadows=(_dcc_source('Animation Channels'),))
-    for (wheel, delta) in (('WHEELUPMOUSE', -3), ('WHEELDOWNMOUSE', 3)):
-        _add(kd, _dcc_source('View2D'), 'allset.graph_channel_scroll', make_event(wheel), {'delta': delta}, first=True, shadows=(_dcc_source('View2D'), 'View2D Buttons List'))
-    _add(kd, _dcc_source('Graph Editor'), 'allset.graph_layer_pick', make_event('LEFTMOUSE'), first=True, shadows=(_dcc_source('Graph Editor'), _dcc_source('Screen'), _dcc_source('View2D')))
+    _add(kd, "Animation Channels", "allset.graph_channel_click", make_event("LEFTMOUSE", any=True),
+         first=True, shadows=("Animation Channels", "View2D Buttons List"))   # Hypergraph items poll False here
+    # #96: the wheel scrolls the kit's rows (ui/editor_chrome.py keeps the offset). In the channel region
+    # the wheel goes to "View2D" and never reaches "Animation Channels" (--debug-handlers), so the items
+    # sit first in View2D; the operator passes through anywhere but a kit Graph Editor's outliner pane.
+    for wheel, delta in (("WHEELUPMOUSE", -3), ("WHEELDOWNMOUSE", 3)):
+        _add(kd, "View2D", "allset.graph_channel_scroll", make_event(wheel), {"delta": delta}, first=True,
+             shadows=("View2D", "View2D Buttons List"))
+    # a click on a curve the kit draws for another selected animation layer (ui/graph_layers.py) makes that
+    # layer the editable one (Maya edits every selected layer's curves; Blender one action per object); it passes
+    # through when no such curve is under the mouse
+    _add(kd, "Graph Editor", "allset.graph_layer_pick", make_event("LEFTMOUSE"), first=True,
+         shadows=("Graph Editor", "Screen", "View2D"))
+
 
 def patch_shelf_scroll(kd):
-    for (wheel, delta) in (('WHEELUPMOUSE', -1), ('WHEELDOWNMOUSE', 1)):
-        _add(kd, _dcc_source('Image'), 'allset.shelf_scroll', make_event(wheel), {'delta': delta}, first=True, shadows=(_dcc_source('Image'), _dcc_source('View2D')))
+    # Maya's wheel over the shelf icons scrolls one row; the shelf
+    # row is an Image Editor, so the items sit first in "Image" and pass through in every other image editor
+    for wheel, delta in (("WHEELUPMOUSE", -1), ("WHEELDOWNMOUSE", 1)):
+        _add(kd, "Image", "allset.shelf_scroll", make_event(wheel), {"delta": delta}, first=True,
+             shadows=("Image", "View2D"))     # both pass through outside their own region
+
+
+# --- 48. Script Editor execute ------------------------------------------------------------------------
+# Maya: Ctrl+Enter executes (input kept), numpad Enter executes the whole tab and clears it. Only in the kit's Script
+# Editor window (ui/script_editor.py); elsewhere the Text Editor's own keys stay (PASS_THROUGH).
 
 def patch_script_editor(kd):
-    kd.remove(_dcc_source('Screen Editing'), 'render.render', type='RET', ctrl=True, alt=False)
+    # IC renders on Ctrl+Enter from "Screen Editing", a window keymap checked before every editor's (with
+    # --debug-handlers: the Script Editor's Ctrl+Enter rendered, "No camera found"). Maya has no Ctrl+Enter render
+    # (Render > Render Current Frame has no default hotkey; Ctrl+Alt+Enter render animation stays IC's).
+    kd.remove("Screen Editing", "render.render", type="RET", ctrl=True, alt=False)
+    # Blender 5.x IC adds Alt+F12 / Ctrl+Alt+F12 sequencer-scene renders there too (5.2 IC:299-302): they
+    # took the UV Editor's Maya Alt+F12 (UV Shell, Maya hotkey).
     for ctrl in (False, True):
-        if kd.find(_dcc_source('Screen Editing'), 'render.render', type='F12', alt=True, ctrl=ctrl):
-            kd.remove(_dcc_source('Screen Editing'), 'render.render', type='F12', alt=True, ctrl=ctrl)
-    _add(kd, _dcc_source('Text'), 'allset.script_run', make_event('RET', ctrl=True), first=True, shadows=(_dcc_source('Text'),))
-    _add(kd, _dcc_source('Text'), 'allset.script_run', make_event('NUMPAD_ENTER'), {'clear': True}, first=True, shadows=(_dcc_source('Text'), _dcc_source('Screen')))
-MODE_KEYMAPS = (_dcc_source('Object Mode'), _dcc_source('Mesh'), _dcc_source('Pose'), _dcc_source('Curve'), _dcc_source('Curves'), _dcc_source('Armature'), _dcc_source('Metaball'), _dcc_source('Lattice'), _dcc_source('Particle'), _dcc_source('Paint Face Mask (Weight, Vertex, Texture)'), _dcc_source('Paint Vertex Selection (Weight, Vertex)'))
-SCULPT_BRUSHES = (('ZERO', _dcc_source('Mask')), ('ONE', _dcc_source('Draw')), ('TWO', _dcc_source('Smooth')), ('THREE', _dcc_source('Relax Slide')), ('FOUR', _dcc_source('Grab')), ('FIVE', _dcc_source('Pinch/Magnify')), ('SIX', _dcc_source('Flatten/Contrast')), ('SEVEN', _dcc_source('Blob')), ('EIGHT', _dcc_source('Draw Sharp')), ('NINE', _dcc_source('Layer')))
-SCULPT_LIBRARY = 'brushes/essentials_brushes-mesh_sculpt.blend/Brush/'
-SEARCH_SHADOWS = (_dcc_source('Property Editor'), _dcc_source('Outliner'), _dcc_source('Graph Editor Generic'), _dcc_source('Node Editor'), _dcc_source('Dopesheet'), _dcc_source('NLA Generic'), _dcc_source('Text Generic'), _dcc_source('Animation Channels'), _dcc_source('Image Paint'), _dcc_source('Vertex Paint'), _dcc_source('Weight Paint'), _dcc_source('Sculpt'), _dcc_source('Grease Pencil Weight Paint'), _dcc_source('Preferences'), _dcc_source('Preferences_nav'))
-BOOKMARK_KEYS = (('T', {'alt': True}, 'allset.bookmark_create', {}), ('T', {'alt': True, 'shift': True}, 'allset.bookmark_create', {'quick': True}), ('QUOTE', {}, 'screen.marker_jump', {'next': True}), ('SEMI_COLON', {}, 'screen.marker_jump', {'next': False}), ('BACK_SLASH', {'shift': True}, 'allset.bookmark_frame', {'which': 'CURRENT'}), ('QUOTE', {'shift': True}, 'allset.bookmark_frame', {'which': 'NEXT'}), ('SEMI_COLON', {'shift': True}, 'allset.bookmark_frame', {'which': 'PREVIOUS'}))
+        if kd.find("Screen Editing", "render.render", type="F12", alt=True, ctrl=ctrl):
+            kd.remove("Screen Editing", "render.render", type="F12", alt=True, ctrl=ctrl)
+    _add(kd, "Text", "allset.script_run", make_event("RET", ctrl=True), first=True, shadows=("Text",))
+    # Screen's numpad Enter = file.execute (file browsers only): the Text item runs first in a Text Editor anyway
+    _add(kd, "Text", "allset.script_run", make_event("NUMPAD_ENTER"), {"clear": True}, first=True,
+         shadows=("Text", "Screen"))
+
+
+
+# --- 49. Key batch 3: wrong daily keys, missing keys ----------------------------------------------------
+# Maya hotkeys: Alt+r ToggleReflection, Ctrl+i, F1 Help, Alt+c ToggleColorFeedback,
+# m ModifyDisplacement, Ctrl+PgUp / PgDn PickWalkIn / Out, Ctrl+, PrevSkinPaintMode,
+# Ctrl+m / Shift+M / Ctrl+Shift+M menu bars, Alt+b, paint u / n / Alt+f / Ctrl+Alt+c / v,
+# sculpt Ctrl+0-9, f, b, m, Shift+U, Ctrl+Shift+I, Graph Editor h / j, Time Slider
+# bookmarks, Ctrl+f, Ctrl+Shift+% Use Default Material, UV Editor 7 / 5.
+
+MODE_KEYMAPS = ("Object Mode", "Mesh", "Pose", "Curve", "Curves", "Armature", "Metaball", "Lattice", "Particle",
+                "Paint Face Mask (Weight, Vertex, Texture)", "Paint Vertex Selection (Weight, Vertex)")
+SCULPT_BRUSHES = (("ZERO", "Mask"), ("ONE", "Draw"), ("TWO", "Smooth"), ("THREE", "Relax Slide"), ("FOUR", "Grab"),
+                  ("FIVE", "Pinch/Magnify"), ("SIX", "Flatten/Contrast"), ("SEVEN", "Blob"), ("EIGHT", "Draw Sharp"),
+                  ("NINE", "Layer"))
+SCULPT_LIBRARY = "brushes/essentials_brushes-mesh_sculpt.blend/Brush/"
+SEARCH_SHADOWS = ("Property Editor", "Outliner", "Graph Editor Generic", "Node Editor", "Dopesheet", "NLA Generic",
+                  "Text Generic", "Animation Channels", "Image Paint", "Vertex Paint", "Weight Paint", "Sculpt",
+                  "Grease Pencil Weight Paint",
+                  "Preferences", "Preferences_nav")   # Blender 5.x: Ctrl+F filter in Preferences
+BOOKMARK_KEYS = (("T", {"alt": True}, "allset.bookmark_create", {}),
+                 ("T", {"alt": True, "shift": True}, "allset.bookmark_create", {"quick": True}),
+                 ("QUOTE", {}, "screen.marker_jump", {"next": True}),
+                 ("SEMI_COLON", {}, "screen.marker_jump", {"next": False}),
+                 ("BACK_SLASH", {"shift": True}, "allset.bookmark_frame", {"which": "CURRENT"}),
+                 ("QUOTE", {"shift": True}, "allset.bookmark_frame", {"which": "NEXT"}),
+                 ("SEMI_COLON", {"shift": True}, "allset.bookmark_frame", {"which": "PREVIOUS"}))
+
 
 def _props_of(kd, km, idname, **ev):
     """Properties of the first matching item (to copy IC's radial-control settings onto a Maya key)."""
     found = kd.find(km, idname, **ev)
     return patch.props_dict(found[0][2]) if found else {}
 
+
 def _remove_where(kd, km, predicate, **ev):
     if km not in kd.keymap_names():
         return []
     items = kd.items(km)
     found = [it for it in kd.find(km, **ev) if predicate(it)]
-    items[:] = [it for it in items if not any((it is f for f in found))]
+    items[:] = [it for it in items if not any(it is f for f in found)]
     return found
 
+
 def patch_key_batch_3(kd):
-    kd.remove(_dcc_source('Object Mode'), 'object.scale_clear', type='R', alt=True)
-    kd.remove(_dcc_source('Pose'), 'pose.scale_clear', type='R', alt=True)
-    _add(kd, '3D View', 'allset.symmetry', make_event('R', alt=True), {'mode': 'TOGGLE'}, shadows=(*VIEW3_SHADOWS, _dcc_source('Weight Paint')))
+    # Alt+R: IC clear scale -> Maya reflection (symmetry) toggle
+    kd.remove("Object Mode", "object.scale_clear", type="R", alt=True)
+    kd.remove("Pose", "pose.scale_clear", type="R", alt=True)
+    # (weight paint has its own Alt+R = Maya's paint Reflection toggle)
+    _add(kd, "3D View", "allset.symmetry", make_event("R", alt=True), {"mode": "TOGGLE"},
+         shadows=(*VIEW3_SHADOWS, "Weight Paint"))
+    # Ctrl+I: IC invert in the 3D modes (Maya Ctrl+I = next intermediate object; Ctrl+Shift+I still inverts)
     for km in MODE_KEYMAPS:
-        _remove_where(kd, km, lambda it: it[0].endswith('select_all'), type='I', ctrl=True)
-    kd.remove('3D View', 'view3d.view_axis', type='F1')
-    kd.remove(_dcc_source('Image'), 'image.view_zoom_ratio', type='F1')
-    _add(kd, _dcc_source('Window'), 'wm.doc_view_manual_ui_context', make_event('F1'))
-    kd.remove(_dcc_source('Mesh'), 'wm.tool_set_by_id', type='C', alt=True)
-    _add(kd, _dcc_source('Weight Paint'), 'allset.color_feedback', make_event('C', alt=True))
+        _remove_where(kd, km, lambda it: it[0].endswith("select_all"), type="I", ctrl=True)
+    # F1: Maya Help = Blender's manual for the button under the mouse
+    kd.remove("3D View", "view3d.view_axis", type="F1")
+    kd.remove("Image", "image.view_zoom_ratio", type="F1")
+    _add(kd, "Window", "wm.doc_view_manual_ui_context", make_event("F1"))
+    # Alt+C: IC loop cut tool -> Maya colour feedback while painting skin weights
+    kd.remove("Mesh", "wm.tool_set_by_id", type="C", alt=True)
+    _add(kd, "Weight Paint", "allset.color_feedback", make_event("C", alt=True))
+    # m: IC Measure tool in every 3D mode -> Maya displacement / strength drag (sculpt)
     for km in MODE_KEYMAPS:
-        _remove_where(kd, km, lambda it: it[0] == 'wm.tool_set_by_id' and patch.props_dict(it[2]).get('name') == 'builtin.measure', type='M')
-    kd.remove(_dcc_source('Screen'), 'screen.workspace_cycle', type='PAGE_UP', ctrl=True)
-    kd.remove(_dcc_source('Screen'), 'screen.workspace_cycle', type='PAGE_DOWN', ctrl=True)
-    for (km, op) in ((_dcc_source('Object Mode'), 'object.select_hierarchy'), (_dcc_source('Pose'), 'pose.select_hierarchy')):
-        _add(kd, km, op, make_event('PAGE_UP', ctrl=True), {'direction': 'CHILD', 'extend': False})
-        _add(kd, km, op, make_event('PAGE_DOWN', ctrl=True), {'direction': 'PARENT', 'extend': False})
-    kd.remove(_dcc_source('Screen'), 'screen.userpref_show', type='COMMA', ctrl=True)
-    _add(kd, _dcc_source('Screen'), 'allset.main_menubar_toggle', make_event('M', ctrl=True), shadows=(_dcc_source('Grease Pencil Edit Mode'),))
-    _add(kd, _dcc_source('Screen'), 'wm.context_toggle', make_event('M', shift=True), {'data_path': 'area.show_menus'}, shadows=(_dcc_source('Sequencer'),))
-    _add(kd, '3D View', 'wm.context_toggle', make_event('M', ctrl=True, shift=True), {'data_path': 'space_data.show_region_header'}, shadows=VIEW3_SHADOWS)
-    _add(kd, '3D View', 'allset.cycle_background', make_event('B', alt=True), shadows=VIEW3_SHADOWS)
-    _add(kd, '3D View', 'allset.panel_set', make_event('FIVE', ctrl=True, shift=True), {'key': 'DEFAULT_MATERIAL'}, shadows=VIEW3_SHADOWS)
-    _add(kd, _dcc_source('Screen'), 'wm.search_menu', make_event('F', ctrl=True), shadows=SEARCH_SHADOWS)
-    size = _props_of(kd, _dcc_source('Weight Paint'), 'wm.radial_control', type='S')
-    weight = _props_of(kd, _dcc_source('Weight Paint'), 'wm.radial_control', type='F', ctrl=True)
-    kd.remove(_dcc_source('Weight Paint'), 'wm.radial_control', type='U')
-    kd.remove(_dcc_source('Weight Paint'), 'wm.call_asset_shelf_popover', type='B')
-    _add(kd, _dcc_source('Weight Paint'), 'wm.call_menu', make_event('U'), {'name': 'ALLSET_MT_paint_operation'})
-    _add(kd, _dcc_source('Weight Paint'), 'wm.radial_control', make_event('N'), weight)
-    _add(kd, _dcc_source('Weight Paint'), 'wm.radial_control', make_event('B'), size, shadows=('3D View',))
-    _add(kd, _dcc_source('Weight Paint'), 'allset.flood_weights', make_event('F', alt=True))
-    _add(kd, _dcc_source('Weight Paint'), 'allset.paint_copy_vertex_weights', make_event('C', ctrl=True, alt=True))
-    _add(kd, _dcc_source('Weight Paint'), 'allset.paint_paste_vertex_weights', make_event('V', ctrl=True, alt=True))
-    _add(kd, _dcc_source('Weight Paint'), 'allset.skin_paint_mode', make_event('PERIOD', ctrl=True), {_dcc_source('step'): 1})
-    _add(kd, _dcc_source('Weight Paint'), 'allset.skin_paint_mode', make_event('COMMA', ctrl=True), {_dcc_source('step'): -1})
-    _add(kd, _dcc_source('Weight Paint'), 'allset.paint_reflection', make_event('R', alt=True), shadows=('3D View',))
-    _add(kd, _dcc_source('Mesh'), 'allset.copy_vertex_weights', make_event('C', ctrl=True, alt=True))
-    _add(kd, _dcc_source('Mesh'), 'allset.paste_vertex_weights', make_event('V', ctrl=True, alt=True))
-    size = _props_of(kd, _dcc_source('Sculpt'), 'wm.radial_control', type='S')
-    strength = _props_of(kd, _dcc_source('Sculpt'), 'wm.radial_control', type='U')
+        _remove_where(kd, km, lambda it: it[0] == "wm.tool_set_by_id"
+                      and patch.props_dict(it[2]).get("name") == "builtin.measure", type="M")
+    # Ctrl+PgUp / PgDn: IC workspace cycle -> Maya pick-walk in / out (down / up the hierarchy)
+    kd.remove("Screen", "screen.workspace_cycle", type="PAGE_UP", ctrl=True)
+    kd.remove("Screen", "screen.workspace_cycle", type="PAGE_DOWN", ctrl=True)
+    for km, op in (("Object Mode", "object.select_hierarchy"), ("Pose", "pose.select_hierarchy")):
+        _add(kd, km, op, make_event("PAGE_UP", ctrl=True), {"direction": "CHILD", "extend": False})
+        _add(kd, km, op, make_event("PAGE_DOWN", ctrl=True), {"direction": "PARENT", "extend": False})
+    # Ctrl+,: IC Preferences (Maya on Windows opens them from Windows > Settings/Preferences only)
+    kd.remove("Screen", "screen.userpref_show", type="COMMA", ctrl=True)
+
+    # menu bars and background
+    _add(kd, "Screen", "allset.main_menubar_toggle", make_event("M", ctrl=True), shadows=("Grease Pencil Edit Mode",))
+    _add(kd, "Screen", "wm.context_toggle", make_event("M", shift=True), {"data_path": "area.show_menus"},
+         shadows=("Sequencer",))
+    _add(kd, "3D View", "wm.context_toggle", make_event("M", ctrl=True, shift=True),
+         {"data_path": "space_data.show_region_header"}, shadows=VIEW3_SHADOWS)
+    _add(kd, "3D View", "allset.cycle_background", make_event("B", alt=True), shadows=VIEW3_SHADOWS)
+    _add(kd, "3D View", "allset.panel_set", make_event("FIVE", ctrl=True, shift=True), {"key": "DEFAULT_MATERIAL"},
+         shadows=VIEW3_SHADOWS)
+    # editors with their own Ctrl+F (find / filter, paint radial controls) keep it
+    _add(kd, "Screen", "wm.search_menu", make_event("F", ctrl=True), shadows=SEARCH_SHADOWS)
+
+    # skin weight painting
+    size = _props_of(kd, "Weight Paint", "wm.radial_control", type="S")
+    weight = _props_of(kd, "Weight Paint", "wm.radial_control", type="F", ctrl=True)
+    kd.remove("Weight Paint", "wm.radial_control", type="U")
+    kd.remove("Weight Paint", "wm.call_asset_shelf_popover", type="B")
+    _add(kd, "Weight Paint", "wm.call_menu", make_event("U"), {"name": "ALLSET_MT_paint_operation"})
+    _add(kd, "Weight Paint", "wm.radial_control", make_event("N"), weight)
+    _add(kd, "Weight Paint", "wm.radial_control", make_event("B"), size, shadows=("3D View",))
+    # Alt+F = Maya Flood, Ctrl+Alt+C / V = copy /
+    # paste vertex weights, Ctrl+. / Ctrl+, = next / previous Skin Paint Mode, Alt+R = reflection (X mirror)
+    _add(kd, "Weight Paint", "allset.flood_weights", make_event("F", alt=True))
+    _add(kd, "Weight Paint", "allset.paint_copy_vertex_weights", make_event("C", ctrl=True, alt=True))
+    _add(kd, "Weight Paint", "allset.paint_paste_vertex_weights", make_event("V", ctrl=True, alt=True))
+    _add(kd, "Weight Paint", "allset.skin_paint_mode", make_event("PERIOD", ctrl=True), {"step": 1})
+    _add(kd, "Weight Paint", "allset.skin_paint_mode", make_event("COMMA", ctrl=True), {"step": -1})
+    _add(kd, "Weight Paint", "allset.paint_reflection", make_event("R", alt=True), shadows=("3D View",))
+    _add(kd, "Mesh", "allset.copy_vertex_weights", make_event("C", ctrl=True, alt=True))
+    _add(kd, "Mesh", "allset.paste_vertex_weights", make_event("V", ctrl=True, alt=True))
+
+    # sculpting
+    size = _props_of(kd, "Sculpt", "wm.radial_control", type="S")
+    strength = _props_of(kd, "Sculpt", "wm.radial_control", type="U")
     for n in range(6):
-        kd.remove(_dcc_source('Sculpt'), 'object.subdivision_set', type=('ZERO', 'ONE', 'TWO', 'THREE', 'FOUR', 'FIVE')[n], ctrl=True)
-    for (key, brush) in SCULPT_BRUSHES:
-        _add(kd, _dcc_source('Sculpt'), 'brush.asset_activate', make_event(key, ctrl=True), {'asset_library_type': 'ESSENTIALS', 'relative_asset_identifier': SCULPT_LIBRARY + brush}, shadows=('3D View',))
-    kd.remove(_dcc_source('Sculpt'), 'wm.call_asset_shelf_popover', type='B')
-    _add(kd, _dcc_source('Sculpt'), 'wm.radial_control', make_event('B'), size, shadows=('3D View',))
-    _add(kd, _dcc_source('Sculpt'), 'wm.radial_control', make_event('M'), strength)
-    _add(kd, _dcc_source('Sculpt'), 'paint.mask_flood_fill', make_event('U', shift=True), {'mode': 'VALUE', 'value': 0.0})
-    _add(kd, _dcc_source('Sculpt'), 'paint.mask_flood_fill', make_event('I', ctrl=True, shift=True), {'mode': 'INVERT'})
-    _add(kd, _dcc_source('Graph Editor'), 'anim.channels_setting_enable', make_event('H'), {'type': 'PROTECT'})
-    _add(kd, _dcc_source('Graph Editor'), 'anim.channels_setting_disable', make_event('J'), {'type': 'PROTECT'})
-    for (key, action) in (('G', 'RANGE'), ('T', 'CENTER'), ('H', 'LOCK'), ('J', 'UNLOCK')):
-        _add(kd, _dcc_source('Dopesheet'), 'allset.dope_sheet_key', make_event(key), {'action': action}, shadows=(_dcc_source('Screen'),) if key == 'G' else ())
-    for (key, mods, op, props) in BOOKMARK_KEYS:
-        _add(kd, _dcc_source('Screen'), op, make_event(key, **mods), props, shadows=(_dcc_source('Clip Editor'), _dcc_source('Clip Graph Editor'), _dcc_source('Curve')))
-    _add(kd, _dcc_source('UV Editor'), 'wm.context_toggle', make_event('SEVEN'), {'data_path': 'space_data.uv_editor.show_stretch'})
-    if kd.find(_dcc_source('UV Editor'), 'uv.select_mode', type='FOUR'):
-        kd.remove(_dcc_source('UV Editor'), 'uv.select_mode', type='FOUR')
-    else:
-        kd.remove(_dcc_source('UV Editor'), 'wm.context_toggle', type='FOUR')
-    kd.remove(_dcc_source('UV Editor'), 'mesh.select_mode', type='ONE', ctrl=True)
-    for (key, mode) in (('FOUR', 'WIREFRAME'), ('FIVE', 'SHADED'), ('SIX', 'IMAGE'), ('EIGHT', 'SHELL_BORDERS'), ('NINE', 'TEXTURE_BORDERS')):
-        _add(kd, _dcc_source('UV Editor'), 'allset.uv_display', make_event(key), {'mode': mode})
-    _add(kd, _dcc_source('UV Editor'), 'allset.uv_isolate', make_event('ONE', ctrl=True))
-    _add(kd, _dcc_source('UV Editor'), 'allset.uv_delete', make_event('DEL'))
-    _add(kd, _dcc_source('UV Editor'), 'allset.uv_create_shell', make_event('X', ctrl=True, shift=True))
+        kd.remove("Sculpt", "object.subdivision_set", type=("ZERO", "ONE", "TWO", "THREE", "FOUR", "FIVE")[n],
+                  ctrl=True)
+    for key, brush in SCULPT_BRUSHES:
+        _add(kd, "Sculpt", "brush.asset_activate", make_event(key, ctrl=True),
+             {"asset_library_type": "ESSENTIALS", "relative_asset_identifier": SCULPT_LIBRARY + brush},
+             shadows=("3D View",))
+    kd.remove("Sculpt", "wm.call_asset_shelf_popover", type="B")
+    _add(kd, "Sculpt", "wm.radial_control", make_event("B"), size, shadows=("3D View",))
+    _add(kd, "Sculpt", "wm.radial_control", make_event("M"), strength)
+    _add(kd, "Sculpt", "paint.mask_flood_fill", make_event("U", shift=True), {"mode": "VALUE", "value": 0.0})
+    _add(kd, "Sculpt", "paint.mask_flood_fill", make_event("I", ctrl=True, shift=True), {"mode": "INVERT"})
+
+    # Graph Editor lock / unlock channel
+    _add(kd, "Graph Editor", "anim.channels_setting_enable", make_event("H"), {"type": "PROTECT"})
+    _add(kd, "Graph Editor", "anim.channels_setting_disable", make_event("J"), {"type": "PROTECT"})
+
+    # Maya 2026 Dope Sheet keys (g / t / h / j, like the Graph Editor's); a / f are IC's
+    # action.view_all / view_selected. allset.dope_sheet_key fails its poll in the Timeline, so the Time Slider keeps
+    # the window keys (g = Repeat Last)
+    for key, action in (("G", 'RANGE'), ("T", 'CENTER'), ("H", 'LOCK'), ("J", 'UNLOCK')):
+        _add(kd, "Dopesheet", "allset.dope_sheet_key", make_event(key), {"action": action},
+             shadows=("Screen",) if key == "G" else ())
+
+    # Time Slider bookmarks = timeline markers (operators/bookmarks.py)
+    for key, mods, op, props in BOOKMARK_KEYS:
+        _add(kd, "Screen", op, make_event(key, **mods), props, shadows=("Clip Editor", "Clip Graph Editor", "Curve"))
+
+    # UV Editor display toggles
+    _add(kd, "UV Editor", "wm.context_toggle", make_event("SEVEN"), {"data_path": "space_data.uv_editor.show_stretch"})
+    # Maya UV Editor keys (ui/uv_display.py, operators/uv_shells.py). IC's UV Editor 4 (island select
+    # mode) and Ctrl+1 (vertex select mode) go: Maya's UV component keys are F9-F12 (Maya hotkeys).
+    if kd.find("UV Editor", "uv.select_mode", type="FOUR"):
+        kd.remove("UV Editor", "uv.select_mode", type="FOUR")
+    else:       # 5.x IC: island picking is a toggle of tool_settings.use_uv_select_island on the same key
+        kd.remove("UV Editor", "wm.context_toggle", type="FOUR")
+    kd.remove("UV Editor", "mesh.select_mode", type="ONE", ctrl=True)
+    for key, mode in (("FOUR", 'WIREFRAME'), ("FIVE", 'SHADED'), ("SIX", 'IMAGE'), ("EIGHT", 'SHELL_BORDERS'),
+                      ("NINE", 'TEXTURE_BORDERS')):
+        _add(kd, "UV Editor", "allset.uv_display", make_event(key), {"mode": mode})
+    _add(kd, "UV Editor", "allset.uv_isolate", make_event("ONE", ctrl=True))
+    _add(kd, "UV Editor", "allset.uv_delete", make_event("DEL"))
+    _add(kd, "UV Editor", "allset.uv_create_shell", make_event("X", ctrl=True, shift=True))
+
+
+# --- 50. Menu shortcuts -----------------------------------------------------------------------------
+# Blender prints the keymap shortcut of a menu's ``wm.call_menu`` beside the item that opens it: File > Recent Files
+# showed IC's "Shift Ctrl O" (a C menu, so no kit subclass can hide it). Maya has no Ctrl+Shift+O;
+# the recent files stay in File > Recent Files.
 
 def patch_menu_shortcuts(kd):
-    kd.remove(_dcc_source('Window'), 'wm.call_menu', type='O', ctrl=True, shift=True)
+    kd.remove("Window", "wm.call_menu", type="O", ctrl=True, shift=True)
+
 
 def patch_repeat(kd):
-    """Step 175: G = Maya repeat last, menu / shelf / marking commands too (operators/repeat_maya.py); Blender's
-    screen.repeat_last only knows registered operators. Graph Editor G stays anim.scene_range_frame (step 70)."""
-    kd.remove(_dcc_source('Screen'), 'screen.repeat_last', type='G')
-    _add(kd, _dcc_source('Screen'), 'allset.repeat_last', make_event('G'), shadows=(_dcc_source('Graph Editor'), _dcc_source('Dopesheet'), _dcc_source('Grease Pencil Edit Mode')))
+    """G = Maya repeat last, menu / shelf / marking commands too (operators/repeat_maya.py); Blender's
+    screen.repeat_last only knows registered operators. Graph Editor G stays anim.scene_range_frame."""
+    kd.remove("Screen", "screen.repeat_last", type="G")
+    repeat_maps = ("Screen", "3D View", "Object Mode", "Mesh")
+    _add(kd, "Screen", "allset.repeat_last", make_event("G"),
+         shadows=repeat_maps + ("Graph Editor", "Dopesheet", "Grease Pencil Edit Mode"))  # their own G wins
+    # there; the Dope Sheet's g steps aside in the Timeline, so the Time Slider still repeats
+    # A mode-specific add-on G menu runs ahead of Screen's binding. Own the same
+    # viewport maps so the normal priority watcher can keep Maya Repeat first.
+    for km in repeat_maps[1:]:
+        _add(kd, km, "allset.repeat_last", make_event("G"), shadows=repeat_maps)
+
+
+# --- 51. Blender's render keys ---------------------------------------------------------------------------------------
+# F12 / Ctrl+F12 = Blender's Render Image / Render Animation. Their default-keyconfig items in "Screen" are switched
+# off in Maya mode (Screen is a patched keymap), so the same render.render items go there as kit items. The 3D View's
+# Object Mode / Mesh F12 (Maya's SelectUVMask, patch_uv) runs first there, and the UV Editor gets the same Maya F12
+# (its keymap runs before Screen): F12 renders everywhere else. IC's Ctrl+Alt+Enter Render Animation stays.
 
 def patch_blender_render(kd):
-    _add(kd, _dcc_source('Screen'), 'allset.render_blender', make_event('F12'), {'use_viewport': True}, first=True, shadows=(_dcc_source('Object Mode'), _dcc_source('Mesh'), UV_KM))
-    _add(kd, UV_KM, 'allset.uv_component', make_event('F12'), {'mode': 'UV'}, shadows=(_dcc_source('Screen'),))
-    _add(kd, _dcc_source('Screen'), 'allset.render_blender', make_event('F12', ctrl=True), {'animation': True, 'use_viewport': True}, first=True)
-    if kd.remove(_dcc_source('Screen Editing'), 'render.render', type='RET', ctrl=True, alt=True):
-        _add(kd, _dcc_source('Screen Editing'), 'allset.render_blender', make_event('RET', ctrl=True, alt=True), {'animation': True, 'use_viewport': True}, first=True)
-PATCHES = (patch_selection, patch_display, patch_group, patch_space, patch_hold_snap, patch_soft_select, patch_tap_hold_and_pivot, patch_pick_walk, patch_camera, patch_view_history, patch_space_tap, patch_smooth_preview, patch_component_keys, patch_cb_slider, patch_marking_menus, patch_concepts, patch_attribute_editor, patch_undo_visibility, patch_mesh_components, patch_key_stepping, patch_manip_duplicate, patch_component_delete, patch_view_keys, patch_active_handle, patch_materials, patch_uv_shell_select, patch_select_through, patch_key_batch, patch_component_pick_walk, patch_toolbox_guard, patch_select_priority, patch_pose_joints, patch_time_slider, patch_joints, patch_uv, patch_scene_files, patch_graph_keys, patch_key_batch_2, patch_outliner_drag, patch_key_insert, patch_time_range, patch_manip_ctrl, patch_view_keys_3, patch_global_keys_4, patch_graph_keys_2, patch_outliner_sets, patch_render_slots, patch_graph_outliner, patch_shelf_scroll, patch_script_editor, patch_key_batch_3, patch_menu_shortcuts, patch_repeat, patch_blender_render)
+    _add(kd, "Screen", "render.render", make_event("F12"), {"use_viewport": True},
+         shadows=("Object Mode", "Mesh", UV_KM))   # Maya's F12 UV mask wins in the 3D View / UV Editor
+    _add(kd, UV_KM, "allset.uv_component", make_event("F12"), {"mode": 'UV'}, shadows=("Screen",))
+    _add(kd, "Screen", "render.render", make_event("F12", ctrl=True), {"animation": True, "use_viewport": True})
+
+
+# Maya editable motion trail: a left press on a key marker of a motion path picks the key and a drag moves it
+# (operators/motion_trail_edit.py); plain = set, Shift = toggle, Ctrl = remove, Ctrl+Shift = add. In front of the
+# 3D View's and the Tweak tool's press items; passes through anywhere else. With the Move tool and picked keys a
+# press on the kit's trail key manipulator drags its handle.
+# the paint / sculpt / edit mode keymaps keep their own presses (the trail keys are for Object and Pose Mode only);
+# the Screen's Range Slider bar click only acts over the bar
+TRAIL_KEY_SHADOWS = ("Screen", "Image Paint", "Vertex Paint", "Weight Paint", "Sculpt", "Particle", "Curve", "Mesh",
+                     "Armature")
+
+
+def patch_motion_trail_keys(kd):
+    for km in ("3D View", "3D View Tool: Tweak"):
+        for shift, ctrl, mode in ((False, False, 'SET'), (True, False, 'TOGGLE'), (False, True, 'SUB'),
+                                  (True, True, 'ADD')):
+            _add(kd, km, "allset.motion_trail_key", make_event("LEFTMOUSE", shift=shift, ctrl=ctrl), {"mode": mode},
+                 first=True, shadows=(km,) + TRAIL_KEY_SHADOWS)
+
+
+def patch_motion_trail_mmb(kd):
+    """Move tool: a middle drag anywhere moves the picked trail keys along the last used handle (passes through when
+    no trail key is picked, so the Move tool's own middle drag runs). Applied before the Channel Box virtual slider
+    patch, so the slider (highlighted channels) stays in front, like Maya."""
+    _add(kd, "3D View Tool: Move", "allset.motion_trail_key", make_event("MIDDLEMOUSE"), {"button": 'MIDDLE'},
+         first=True, shadows=("3D View Tool: Move",))
+
+
+def patch_in_view_mmb(kd):
+    """Maya: while the In-View Editor shows, a plain middle drag anywhere in the view changes its selected attribute
+    (ui/in_view.py, row -1). With a Move / Rotate / Scale / Transform tool and in object mode the Channel Box virtual
+    slider item (first there) starts it when no channel is picked; with the other tools of edit mode this item does.
+    It passes the event on where no In-View Editor shows and for the emulated Alt drag (3D View, #242)."""
+    _add(kd, "Mesh", "allset.inview_drag", make_event("MIDDLEMOUSE"), {"row": -1}, shadows=("3D View",))
+
+
+PATCHES = (patch_tweak_fallback, patch_selection, patch_display, patch_group, patch_space,
+           patch_hold_snap, patch_soft_select, patch_tap_hold_and_pivot, patch_pick_walk,
+           patch_camera, patch_view_history, patch_space_tap, patch_smooth_preview,
+           patch_component_keys, patch_motion_trail_mmb, patch_in_view_mmb, patch_cb_slider, patch_marking_menus,
+           patch_concepts,
+           patch_attribute_editor, patch_undo_visibility,
+           patch_mesh_components, patch_key_stepping, patch_manip_duplicate,
+           patch_component_delete, patch_view_keys, patch_active_handle, patch_materials,
+           patch_uv_shell_select, patch_select_through, patch_key_batch, patch_component_pick_walk,
+           patch_toolbox_guard, patch_type_char_pick, patch_select_priority, patch_motion_trail_keys, patch_pose_joints, patch_time_slider, patch_joints, patch_uv,
+           patch_scene_files, patch_graph_keys, patch_key_batch_2, patch_outliner_drag,
+           patch_key_insert, patch_time_range, patch_manip_ctrl, patch_view_keys_3,
+           patch_global_keys_4, patch_graph_keys_2, patch_outliner_tree, patch_render_slots,
+           patch_graph_outliner, patch_shelf_scroll, patch_script_editor, patch_key_batch_3,
+           patch_menu_shortcuts, patch_repeat, patch_blender_render)
+
 
 def patch_weight_paint_exit(kd):
     """Maya's Q/W/E/R change the global tool, leaving weight painting."""
-    for (key, tool) in (('Q', 'builtin.select_box'), ('W', 'builtin.move'), ('E', 'builtin.rotate'), ('R', 'builtin.scale')):
-        _remove_where(kd, _dcc_source('Weight Paint'), lambda it: it[0] == 'wm.tool_set_by_id', type=key)
-        _add(kd, _dcc_source('Weight Paint'), 'allset.weight_paint_exit', make_event(key), {'tool': tool}, first=True, shadows=('3D View',))
-PATCHES += (patch_weight_paint_exit,)
+    for key, tool in (('Q', 'builtin.select_box'), ('W', 'builtin.move'),
+                      ('E', 'builtin.rotate'), ('R', 'builtin.scale')):
+        _remove_where(kd, 'Weight Paint', lambda it: it[0] == 'wm.tool_set_by_id', type=key)
+        _add(kd, 'Weight Paint', 'allset.weight_paint_exit', make_event(key),
+             {'tool': tool}, first=True, shadows=('3D View',))
+
+
+# --- Shift+W / E / R everywhere (Maya global hotkeys) ---------------------------------------------------------
+# Maya's SetKeyTranslate / Rotate / Scale work in any editor (Graph Editor, Dope Sheet, Outliner, Channel Box /
+# Attribute Editor, Time Slider): one item each in "Screen" ({"global_key": True}: passes through outside object /
+# pose mode, so edit modes keep their own keys). IC's Animation Channels Shift+W (protect toggle) is removed; every
+# other same-event item runs first on purpose (Object Mode / Pose kit items, edit-mode, sculpt and file keys).
+# Maya's S (Set Key) too: over the Channel Box right after a typed value, the Outliner, the shelf ... it keys what S
+# over the viewport keys (also in component mode: the selected points). The editors' own S items run first (the kit's
+# 3D View / Graph Editor / Dope Sheet S, Node / Image / UV Editor scale, text typing), so they keep their meaning.
+
+def patch_global_set_key(kd):
+    kd.remove("Animation Channels", "anim.channels_setting_toggle", type="W", shift=True)
+    for key, channels in (("W", "TRANSLATE"), ("E", "ROTATE"), ("R", "SCALE")):
+        under = tuple(n for n in kd.keymap_names() if n != "Screen" and kd.find(n, type=key, shift=True))
+        _add(kd, "Screen", "allset.set_key", make_event(key, shift=True), {"channels": channels, "global_key": True},
+             shadows=under)
+    ev = make_event("S")
+    under = tuple(n for n in kd.keymap_names() if n != "Screen" and kd.find(n, type="S"))
+    for i, (km, idname, e, props, shadows) in enumerate(ADDED):
+        if km != "Screen" and patch.event_key(e) == patch.event_key(ev) and "Screen" not in shadows:
+            ADDED[i] = (km, idname, e, props, shadows + ("Screen",))
+    _add(kd, "Screen", "allset.set_key", ev, {"global_key": True}, shadows=under)
+
+
+# --- Alt+LMB tumble under Emulate 3 Button Mouse (#242) ------------------------------------------------------
+# Blender turns Alt+LMB into a plain middle drag before any key map sees it. While the Alt key is still held that
+# drag tumbles (a real middle drag passes through). It goes first wherever the kit's middle drag items run before
+# "3D View" (tool keymaps: Maya's middle drag on the manipulator; Object Mode / Pose: the Channel Box slider), so
+# this patch runs last.
+
+EMULATED_TUMBLE_KEYMAPS = SLIDER_TOOL_KEYMAPS + ("Object Mode", "Pose", "3D View")
+
+
+def patch_emulated_tumble(kd):
+    for km in EMULATED_TUMBLE_KEYMAPS:
+        _add(kd, km, "allset.emulated_tumble", make_event("MIDDLEMOUSE"), first=True,
+             shadows=("Image Paint", "Object Mode", "Pose", "Mesh") if km == "3D View" else (km, "3D View"))
+
+
+# --- w / e / r over the whole Graph Editor ------------------------------------------------------------------------
+# The Graph Editor's own keymap covers only its curve area. Over its outliner, menu bar, toolbar row and sidebar the
+# same keys pick the key tool too: one "Screen" item each, whose poll lets the key through outside a Graph Editor.
+# Every editor / mode item with the same key runs before "Screen", so those keep their meaning.
+
+def patch_graph_key_tool_everywhere(kd):
+    for key, tool in (("W", 'MOVE'), ("E", 'ROTATE'), ("R", 'SCALE')):
+        ev = make_event(key)
+        under = tuple(n for n in kd.keymap_names() if n != "Screen" and kd.find(n, type=key))
+        for i, (km, idname, e, props, shadows) in enumerate(ADDED):
+            if km != "Screen" and patch.event_key(e) == patch.event_key(ev) and "Screen" not in shadows:
+                ADDED[i] = (km, idname, e, props, shadows + ("Screen",))
+        _add(kd, "Screen", "allset.graph_key_tool", ev, {"tool": tool}, shadows=under)
+
+
+PATCHES += (patch_weight_paint_exit, patch_global_set_key, patch_graph_key_tool_everywhere, patch_emulated_tumble)
+
+
+# --- Edge slide with the Move tool (#262) ----------------------------------------------------------------------
+# Maya: Ctrl+Shift+middle-drag with the Move tool slides the selected components along their edges (the Transform
+# Constraint setting drives the handles and the plain MMB drag). Outside mesh edit mode the operator's poll fails
+# and the event goes on.
+
+def patch_component_slide(kd):
+    _add(kd, "3D View Tool: Move", "allset.component_slide", make_event("MIDDLEMOUSE", "PRESS", shift=True, ctrl=True),
+         {"mode": 'EDGE'})
+
+
+PATCHES += (patch_component_slide,)
+
+
+# --- UV shell pre-selection (#264) ------------------------------------------------------------------------------
+# The UV Editor's mouse moves are watched (always PASS_THROUGH) so the shell under the mouse can be highlighted.
+
+def patch_uv_shell_hover(kd):
+    _add(kd, "UV Editor", "allset.uv_shell_hover", make_event("MOUSEMOVE", "ANY", any=True), first=True)
+
+
+PATCHES += (patch_uv_shell_hover,)
+
+
+# --- Numpad digits = the top row (#283) -----------------------------------------------------------------------
+# On a Maya keyboard the numpad digits are the same keys as the top row: 1 / 2 / 3 smooth preview, 4-7 display,
+# 0 rough display, and every other plain digit key. Each plain digit item the kit adds gets a numpad twin, unless
+# that key map already has an item on the numpad key (then Blender's stays). Runs after every other patch.
+
+DIGITS = ("ZERO", "ONE", "TWO", "THREE", "FOUR", "FIVE", "SIX", "SEVEN", "EIGHT", "NINE")
+NUMPAD_DIGITS = {key: f"NUMPAD_{n}" for n, key in enumerate(DIGITS)}
+
+
+def patch_numpad_digits(kd):
+    plain = (0,) * len(patch.MODS)
+    twins = []
+    for km, idname, e, props, shadows in ADDED:
+        numpad = NUMPAD_DIGITS.get(e["type"])
+        if numpad is not None and e.get("value", "PRESS") == "PRESS" and not e.get("any") and                 patch.event_key(e)[2] == plain and e.get("key_modifier", "NONE") == "NONE":
+            twins.append((km, idname, numpad, props, shadows))
+    taken = {(km, numpad) for km, _i, numpad, _p, _s in twins if kd.find(km, type=numpad)}
+    for km, idname, numpad, props, shadows in twins:
+        if (km, numpad) not in taken:
+            _add(kd, km, idname, make_event(numpad), props, shadows=shadows)
+
+
+# --- Graph Editor tangent handles (#296) -------------------------------------------------------------------------
+# While the kit draws a Graph Editor's tangent handles (ui/graph_handles.py) Blender's handle picking is off, so a
+# left press on a kit handle end selects / drags it (plain and Ctrl = select, Shift = toggle, Ctrl+Shift = add) and a
+# middle drag moves the selected handles; the marquee also picks the handle ends inside it. Added after every
+# other Graph Editor click item so they run first; each passes through anywhere else.
+
+def patch_graph_handles(kd):
+    for shift, ctrl, mode in ((False, False, 'SET'), (False, True, 'SET'), (True, False, 'TOGGLE'),
+                              (True, True, 'ADD')):
+        _add(kd, "Graph Editor", "allset.graph_handle_drag", make_event("LEFTMOUSE", shift=shift, ctrl=ctrl),
+             {"button": 'LEFT', "mode": mode}, first=True, shadows=("Graph Editor", "Screen", "View2D"))
+    _add(kd, "Graph Editor", "allset.graph_handle_drag", make_event("MIDDLEMOUSE"), {"button": 'MIDDLE'},
+         first=True, shadows=("Graph Editor", "View2D"))
+    for shift, ctrl, mode in ((False, False, 'SET'), (True, False, 'XOR'), (False, True, 'SUB'),
+                              (True, True, 'ADD')):
+        _add(kd, "Graph Editor", "allset.graph_handle_box", make_event("LEFTMOUSE", "CLICK_DRAG", shift=shift,
+                                                                       ctrl=ctrl),
+             {"mode": mode}, first=True, shadows=("Graph Editor",))
+
+
+PATCHES += (patch_graph_handles,)
+
+PATCHES += (patch_numpad_digits,)
+
+
+def patch_attribute_edit(kd):
+    """Ctrl + left / middle / right drag on a number field of a kit editor (Attribute Editor, Channel Box, option
+    windows) changes it in fine / normal / coarse steps, like Maya's field sliders: a mouse-move item tracks the field
+    under the pointer and passes every event on, like the kit's other hover items (which pass it on too). Enter / Esc
+    in a floating option window run or close it (they pass through everywhere else)."""
+    for key, action in (('RET', 'RUN'), ('NUMPAD_ENTER', 'RUN'), ('ESC', 'CLOSE')):
+        _add(kd, 'Property Editor', 'allset.option_editor_key', make_event(key), {'action': action},
+             first=True, shadows=('Property Editor', 'Screen'))
+    hover = make_event('MOUSEMOVE', 'ANY', any=True)
+    hover_maps = ('Property Editor', 'View2D Buttons List', 'User Interface')
+    for i, (km, idname, event, props, shadows) in enumerate(ADDED):
+        if patch.event_key(event) == patch.event_key(hover):
+            ADDED[i] = km, idname, event, props, tuple(dict.fromkeys((*shadows, *hover_maps)))
+    for km in hover_maps:
+        _add(kd, km, 'allset.attribute_field_hover', hover, first=True,
+             shadows=(*hover_maps, '3D View Generic', 'Outliner', UV_KM, 'File Browser Main', 'Weight Paint'))
+
+
+PATCHES += (patch_attribute_edit,)
+PASS_THROUGH_FIRST += ('allset.attribute_field_hover', 'allset.option_editor_key')
+PASS_THROUGH_FIRST += OUTLINER_TREE_ITEMS
+
 
 def apply(data):
     """Apply all patches to IC data in place and return it."""

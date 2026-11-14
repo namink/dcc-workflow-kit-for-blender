@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Simplified Chinese localization by namink; additional display integration 2026-10-31.
-"""Global key batch 4 (docs/steps/step_90.md 「계획」 1): Ctrl+X cut / Ctrl+V paste, Alt+\\ playback range = animation range,
+"""Global key batch 4: Ctrl+X cut / Ctrl+V paste, Alt+\\ playback range = animation range,
 Alt+1 / 2 / 4 show toggles, Ctrl+` / Shift+~ / Ctrl+Shift+~ smooth proxy. Alt+X walk is Blender's view3d.walk.
 
 Maya 2022 behaviour:
@@ -12,19 +11,23 @@ Maya 2022 behaviour:
 - Ctrl+` swaps the proxy (cage) and smooth mesh visibility (both shown -> cage only), Shift+~ shows both;
   Ctrl+Shift+~ = Mesh > Smooth Proxy > Subdiv Proxy.
 """
-from ..i18n import source_message as _dcc_source, display_message as _dcc_display, format_message as _dcc_format
-from ..i18n import tr as _zh, enum_items as _zh_enum, native as _zh_native
+
 import re
+
 import bpy
+
 from .. import results
 from .. import undo_steps
 from . import display
 from . import group
 from . import naming
 
+
+# --- Ctrl+X ---------------------------------------------------------------------------------------------
+
 def cut_targets(selected):
     """The selection plus everything below it (Maya exports and deletes the selected DAG hierarchy)."""
-    (out, seen) = ([], set())
+    out, seen = [], set()
     for ob in selected:
         for o in (ob, *ob.children_recursive):
             if o.name not in seen:
@@ -32,12 +35,11 @@ def cut_targets(selected):
                 out.append(o)
     return out
 
+
 class ALLSET_OT_cut(bpy.types.Operator):
     """Cut the selected objects (Maya Ctrl+X): copy them to the clipboard, then delete them. Ctrl+V pastes them back"""
-    bl_translation_context = 'MWK:operators/global_keys4.py:44'
-    bl_idname = 'allset.cut'
-    bl_label = _zh_native('Cut', 'MWK:operators/global_keys4.py:44')
-    bl_description = _zh_native('Cut the selected objects (Maya Ctrl+X): copy them to the clipboard, then delete them. Ctrl+V pastes them back', 'MWK:operators/global_keys4.py:44')
+    bl_idname = "allset.cut"
+    bl_label = "Cut"
     bl_options = {'REGISTER', 'UNDO'}
 
     @classmethod
@@ -49,7 +51,7 @@ class ALLSET_OT_cut(bpy.types.Operator):
         for ob in targets:
             try:
                 ob.select_set(True)
-            except RuntimeError:
+            except RuntimeError:        # not in the view layer
                 pass
         names = [ob.name for ob in targets]
         with context.temp_override(selected_objects=targets):
@@ -57,10 +59,14 @@ class ALLSET_OT_cut(bpy.types.Operator):
         datas = {ob.data for ob in targets if ob.data is not None}
         for ob in targets:
             bpy.data.objects.remove(ob)
+        # Maya deletes the shape with its transform: drop data left without users, or the paste gets "pCubeShape1.001".
         bpy.data.batch_remove([d for d in datas if d.users == 0])
-        results.result(self, _zh(f'Cut {len(names)} object(s)', 'MWK:operators/global_keys4.py:66'))
+        results.result(self, f"Cut {len(names)} object(s)")
         return {'FINISHED'}
-PASTE_PREFIX = 'pasted__'
+
+
+PASTE_PREFIX = "pasted__"
+
 
 def pasted_roots(before, objects):
     """The new objects' top nodes (no parent among the new ones), by name for a stable order."""
@@ -68,25 +74,29 @@ def pasted_roots(before, objects):
     names = {o.name for o in new}
     return sorted((o for o in new if o.parent is None or o.parent.name not in names), key=lambda o: o.name)
 
+
 def _unsuffixed(name):
     """``pCube1.001`` -> ``pCube1`` (Blender's clash suffix)."""
-    return re.sub('\\.\\d{3,}$', '', name)
+    return re.sub(r"\.\d{3,}$", "", name)
+
 
 def pasted_name(orig, taken):
     """Maya Edit > Paste imports with every node renamed by the prefix "pasted_": every node becomes ``pasted__<name>``.
     Maya keeps a clashing short name under another group; Blender names are
-    unique, so a taken one counts up like a new node (``pasted__pCube2``, delegated)."""
+    unique, so a taken one counts up like a new node (``pasted__pCube2``)."""
     name = PASTE_PREFIX + orig
     if name not in taken:
         return name
     base = naming.base_name(name)
-    return f'{base}{naming.next_number(base, taken)}'
+    return f"{base}{naming.next_number(base, taken)}"
+
 
 def paste_group_name(taken):
     """Maya's paste puts the pasted nodes under ``group``, then ``group1``, ``group2``."""
-    if 'group' not in taken:
-        return 'group'
+    if "group" not in taken:
+        return "group"
     return f"group{naming.next_number('group', taken)}"
+
 
 def rename_pasted(new_objects):
     """Blender's pastebuffer names clashing objects / data ``pCube1.001``: give them Maya's ``pasted__`` names, the
@@ -102,20 +112,19 @@ def rename_pasted(new_objects):
             continue
         dorig = _unsuffixed(data.name)
         dtaken = {d.name for d in coll if d is not data}
-        (obase, nbase) = (naming.base_name(orig), naming.base_name(ob.name))
-        if orig != obase and dorig == f'{obase}Shape{orig[len(obase):]}':
-            want = f'{nbase}Shape{ob.name[len(nbase):]}'
+        obase, nbase = naming.base_name(orig), naming.base_name(ob.name)
+        if orig != obase and dorig == f"{obase}Shape{orig[len(obase):]}":
+            want = f"{nbase}Shape{ob.name[len(nbase):]}"      # the shape follows its transform's number
             if want not in dtaken:
                 data.name = want
                 continue
         data.name = pasted_name(dorig, dtaken)
 
+
 class ALLSET_OT_paste(bpy.types.Operator):
     """Paste the clipboard objects (Maya Ctrl+V): pasted__ names, under a new group that stays selected"""
-    bl_translation_context = 'MWK:operators/global_keys4.py:129'
-    bl_idname = 'allset.paste'
-    bl_label = _zh_native('Paste', 'MWK:operators/global_keys4.py:129')
-    bl_description = _zh_native('Paste the clipboard objects (Maya Ctrl+V): pasted__ names, under a new group that stays selected', 'MWK:operators/global_keys4.py:129')
+    bl_idname = "allset.paste"
+    bl_label = "Paste"
     bl_options = {'REGISTER', 'UNDO'}
 
     @classmethod
@@ -123,6 +132,8 @@ class ALLSET_OT_paste(bpy.types.Operator):
         return context.mode == 'OBJECT'
 
     def execute(self, context):
+        # Maya pasteScene:
+        # every node renamed pasted__<name>, the top nodes under a new group at the origin, only the group selected.
         before = set(bpy.data.objects.keys())
         if bpy.ops.view3d.pastebuffer() != {'FINISHED'}:
             return {'CANCELLED'}
@@ -139,17 +150,19 @@ class ALLSET_OT_paste(bpy.types.Operator):
         context.view_layer.objects.active = grp
         return {'FINISHED'}
 
+
+# --- Alt+\ ----------------------------------------------------------------------------------------------
+
 def playback_to_animation_range(scene):
-    """Kit rule (step 20): playback range = preview range, animation range = frame_start / end. Turning the preview
+    """Kit rule: playback range = preview range, animation range = frame_start / end. Turning the preview
     range off makes playback = animation; its values stay, so the Range Slider double-click can bring them back."""
     scene.use_preview_range = False
 
+
 class ALLSET_OT_playback_range_anim(bpy.types.Operator):
     """Set the playback range to the animation range (Maya Alt+\\)"""
-    bl_translation_context = 'MWK:operators/global_keys4.py:167'
-    bl_idname = 'allset.playback_range_anim'
-    bl_label = _zh_native('Playback Range = Animation Range', 'MWK:operators/global_keys4.py:167')
-    bl_description = _zh_native('Set the playback range to the animation range (Maya Alt+\\)', 'MWK:operators/global_keys4.py:167')
+    bl_idname = "allset.playback_range_anim"
+    bl_label = "Playback Range = Animation Range"
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
@@ -159,12 +172,22 @@ class ALLSET_OT_playback_range_anim(bpy.types.Operator):
                 if area.type in {'DOPESHEET_EDITOR', 'GRAPH_EDITOR', 'NLA_EDITOR', 'SEQUENCE_EDITOR'}:
                     area.tag_redraw()
         return {'FINISHED'}
-SHOW_KINDS = (('CURVES', _dcc_source('NURBS Curves'), _dcc_source('Maya Alt+1: curves in this view')), ('POLYGONS', _dcc_source('Polygons'), _dcc_source('Maya Alt+2: meshes in this view')), ('IMAGE_PLANES', _dcc_source('Image Planes'), _dcc_source('Maya Alt+4: image planes (image empties, every view)')))
-SPACE_FILTER = {'CURVES': 'show_object_viewport_curve', 'POLYGONS': 'show_object_viewport_mesh'}
-IMAGE_FLAGS = ('show_empty_image_perspective', 'show_empty_image_orthographic')
+
+
+# --- Alt+1 / 2 / 4 --------------------------------------------------------------------------------------
+
+SHOW_KINDS = (
+    ('CURVES', "NURBS Curves", "Maya Alt+1: curves in this view"),
+    ('POLYGONS', "Polygons", "Maya Alt+2: meshes in this view"),
+    ('IMAGE_PLANES', "Image Planes", "Maya Alt+4: image planes (image empties, every view)"),
+)
+SPACE_FILTER = {'CURVES': "show_object_viewport_curve", 'POLYGONS': "show_object_viewport_mesh"}
+IMAGE_FLAGS = ("show_empty_image_perspective", "show_empty_image_orthographic")
+
 
 def image_planes(scene):
     return [o for o in scene.objects if o.type == 'EMPTY' and o.empty_display_type == 'IMAGE']
+
 
 def toggle_show(space, scene, kind):
     """Flip one Maya Show type. Returns the new state (True = shown). Blender has no view filter for image empties
@@ -173,25 +196,25 @@ def toggle_show(space, scene, kind):
         attr = SPACE_FILTER[kind]
         new = not getattr(space, attr)
         setattr(space, attr, new)
-        if kind == 'CURVES':
+        if kind == 'CURVES':        # curve-shaped bone controls follow (ui/curve_controls.py)
             from ..ui import curve_controls
             curve_controls.sync(space, scene)
         return new
     planes = image_planes(scene)
-    new = not any((getattr(o, f) for o in planes for f in IMAGE_FLAGS))
+    new = not any(getattr(o, f) for o in planes for f in IMAGE_FLAGS)
     for o in planes:
         for f in IMAGE_FLAGS:
             setattr(o, f, new)
     return new
 
+
 class ALLSET_OT_toggle_show(bpy.types.Operator):
     """Show or hide one object type in the view under the mouse (Maya Alt+1 / Alt+2 / Alt+4)"""
-    bl_translation_context = 'MWK:operators/global_keys4.py:216'
-    bl_idname = 'allset.toggle_show'
-    bl_label = _zh_native('Toggle Show', 'MWK:operators/global_keys4.py:216')
-    bl_description = _zh_native('Show or hide one object type in the view under the mouse (Maya Alt+1 / Alt+2 / Alt+4)', 'MWK:operators/global_keys4.py:216')
+    bl_idname = "allset.toggle_show"
+    bl_label = "Toggle Show"
     bl_options = {'REGISTER'}
-    kind: bpy.props.EnumProperty(items=_zh_enum(SHOW_KINDS, 'MWK:operators/global_keys4.py:219'), name=_zh_native('Type', 'MWK:operators/global_keys4.py:219'), options={'SKIP_SAVE'}, translation_context='MWK:operators/global_keys4.py:219')
+
+    kind: bpy.props.EnumProperty(items=SHOW_KINDS, name="Type", options={'SKIP_SAVE'})
 
     @classmethod
     def poll(cls, context):
@@ -203,13 +226,43 @@ class ALLSET_OT_toggle_show(bpy.types.Operator):
             if area.type == 'VIEW_3D':
                 area.tag_redraw()
         return {'FINISHED'}
-PROXY_ACTIONS = (('TOGGLE', _dcc_source('Toggle Proxy Display'), _dcc_source('Maya Ctrl+`: cage <-> smooth')), ('BOTH', _dcc_source('Both Proxy and Subdiv Display'), _dcc_source('Maya Shift+~: cage wire and smooth surface')), ('CREATE', _dcc_source('Subdiv Proxy'), _dcc_source('Maya Ctrl+Shift+~: add the subdivision')))
-_BOTH_FLAG = 'allset_proxy_wire'
+
+
+# --- Ctrl+` / Shift+~ / Ctrl+Shift+~ ----------------------------------------------------------------------
+# The kit's Subdiv Proxy is a user Subsurf (ui/menu_map.py "Mesh/Smooth Proxy/Subdiv Proxy"): the cage is the mesh,
+# the smooth mesh is the modifier. "Both" draws the cage wire over the smooth surface like smooth preview 2.
+# Subdiv Proxy records which Subsurf it made, so a plain copy can leave the smooth side out (Maya's smooth side is
+# an object of its own: copying the cage copies the cage only).
+
+PROXY_ACTIONS = (
+    ('TOGGLE', "Toggle Proxy Display", "Maya Ctrl+`: cage <-> smooth"),
+    ('BOTH', "Both Proxy and Subdiv Display", "Maya Shift+~: cage wire and smooth surface"),
+    ('CREATE', "Subdiv Proxy", "Maya Ctrl+Shift+~: add the subdivision"),
+)
+_BOTH_FLAG = "allset_proxy_wire"   # object custom prop: show_wire turned on by "both"
+PROXY_KEY = "allset_subdiv_proxy"  # object custom prop: persistent_uid of the Subsurf Subdiv Proxy made or took over
+
 
 def proxy_modifier(ob):
     """The object's proxy Subsurf: its last Subsurf that is not the kit's smooth preview."""
-    mods = [m for m in ob.modifiers if m.type == 'SUBSURF' and (not display.is_preview(m))]
+    mods = [m for m in ob.modifiers if m.type == 'SUBSURF' and not display.is_preview(m)]
     return mods[-1] if mods else None
+
+
+def subdiv_proxy(ob):
+    """The Subsurf that Subdiv Proxy made or took over (the proxy's smooth side), or None."""
+    uid = ob.get(PROXY_KEY)
+    if uid is None:
+        return None
+    return next((m for m in ob.modifiers if m.type == 'SUBSURF' and m.persistent_uid == uid), None)
+
+
+def forget_proxy(ob):
+    """``ob`` is a cage without its smooth side: no proxy record and no cage wire of "both"."""
+    _set_both_wire(ob, False)
+    if PROXY_KEY in ob:
+        del ob[PROXY_KEY]
+
 
 def _set_both_wire(ob, on):
     if on:
@@ -220,43 +273,45 @@ def _set_both_wire(ob, on):
         ob.show_wire = False
         del ob[_BOTH_FLAG]
 
+
 def proxy_action(ob, action):
     """Apply one smooth-proxy key to a mesh object. Returns False when it has no proxy (nothing done)."""
     mod = proxy_modifier(ob)
     if action == 'CREATE':
         if mod is None:
-            mod = ob.modifiers.new(_dcc_source('Subdivision'), 'SUBSURF')
-            first_preview = next((i for (i, m) in enumerate(ob.modifiers) if display.is_preview(m)), None)
-            if first_preview is not None:
+            mod = ob.modifiers.new("Subdivision", 'SUBSURF')
+            first_preview = next((i for i, m in enumerate(ob.modifiers) if display.is_preview(m)), None)
+            if first_preview is not None:   # the kit's smooth preview stays last in the stack
                 with bpy.context.temp_override(object=ob):
                     bpy.ops.object.modifier_move_to_index(modifier=mod.name, index=first_preview)
         mod.show_viewport = True
+        ob[PROXY_KEY] = mod.persistent_uid
         return True
     if mod is None:
         return False
     if action == 'BOTH':
         mod.show_viewport = True
         _set_both_wire(ob, True)
-    elif ob.get(_BOTH_FLAG):
+    elif ob.get(_BOTH_FLAG):            # both shown -> the cage only
         _set_both_wire(ob, False)
         mod.show_viewport = False
     else:
         mod.show_viewport = not mod.show_viewport
     return True
 
-@undo_steps.no_redo_panel
+
+@undo_steps.no_redo_panel      # no Adjust Last Operation (Maya has none)
 class ALLSET_OT_smooth_proxy(bpy.types.Operator):
     """Maya smooth proxy keys: Ctrl+` toggle cage / smooth, Shift+~ show both, Ctrl+Shift+~ create"""
-    bl_translation_context = 'MWK:operators/global_keys4.py:290'
-    bl_idname = 'allset.smooth_proxy'
-    bl_label = _zh_native('Smooth Proxy', 'MWK:operators/global_keys4.py:290')
-    bl_description = _zh_native('Maya smooth proxy keys: Ctrl+` toggle cage / smooth, Shift+~ show both, Ctrl+Shift+~ create', 'MWK:operators/global_keys4.py:290')
+    bl_idname = "allset.smooth_proxy"
+    bl_label = "Smooth Proxy"
     bl_options = {'REGISTER', 'UNDO'}
-    action: bpy.props.EnumProperty(items=_zh_enum(PROXY_ACTIONS, 'MWK:operators/global_keys4.py:293'), name=_zh_native('Action', 'MWK:operators/global_keys4.py:293'), options={'SKIP_SAVE'}, translation_context='MWK:operators/global_keys4.py:293')
+
+    action: bpy.props.EnumProperty(items=PROXY_ACTIONS, name="Action", options={'SKIP_SAVE'})
 
     @classmethod
     def poll(cls, context):
-        return any((ob.type == 'MESH' for ob in cls._targets(context)))
+        return any(ob.type == 'MESH' for ob in cls._targets(context))
 
     @staticmethod
     def _targets(context):
@@ -267,7 +322,9 @@ class ALLSET_OT_smooth_proxy(bpy.types.Operator):
     def execute(self, context):
         done = [proxy_action(ob, self.action) for ob in self._targets(context) if ob.type == 'MESH']
         if not any(done):
-            self.report({'WARNING'}, _zh('No subdiv proxy on the selection (Mesh > Smooth Proxy > Subdiv Proxy, Ctrl+Shift+~)', 'MWK:operators/global_keys4.py:308'))
+            self.report({'WARNING'}, "No subdiv proxy on the selection (Mesh > Smooth Proxy > Subdiv Proxy, Ctrl+Shift+~)")
             return {'CANCELLED'}
         return {'FINISHED'}
+
+
 classes = (ALLSET_OT_cut, ALLSET_OT_paste, ALLSET_OT_playback_range_anim, ALLSET_OT_toggle_show, ALLSET_OT_smooth_proxy)

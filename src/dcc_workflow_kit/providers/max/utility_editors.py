@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Adapted for DCC Workflow Kit.
-from .i18n import msg as _msg, display as _dcc_ui_text, format_message as _dcc_format, error_text as _dcc_ui_error
+from .i18n import msg as _msg, display as _dcc_ui_text, format_message as _dcc_format
 "Render Setup and Edit UVWs surfaces backed by Blender scene and mesh data.\n\nThe interface is independently implemented from documented control placement\nand behavior. No application artwork, renderer, or proprietary modifier is\nbundled. Blender's render engines and UV algorithms keep their actual names.\n"
 from contextlib import contextmanager
 from math import atan2, ceil, cos, floor, hypot, log10, pi, sin
@@ -399,7 +399,7 @@ def _uv_draw(context):
         c.button(menu_x, c.h - 42, width, 18, label, surfaces.menu(_msg('BSM_MT_uv_') + menu_name), flat=True)
         menu_x += width + 2
     (x, y) = (8, c.h - 65)
-    for (icon, tool, label) in (('cursor', 'SELECT', _msg('Select')), ('move', 'MOVE', _msg('Move')), ('rotate', 'ROTATE', _msg('Rotate')), ('scale', 'SCALE', _msg('Scale')), ('selection_region', 'BOX', _msg('Region')), ('pan', 'PAN', _msg('Pan'))):
+    for (icon, tool, label) in ((_msg('cursor'), 'SELECT', _msg('Select')), ('move', 'MOVE', _msg('Move')), ('rotate', 'ROTATE', _msg('Rotate')), ('scale', 'SCALE', _msg('Scale')), ('selection_region', 'BOX', _msg('Region')), ('pan', 'PAN', _msg('Pan'))):
         c.button(x, y, 25, 24, icon=icon, action=action('TOOL', tool), selected=view['tool'] == tool, flat=True)
         x += 27
     for (icon, op) in (('mirror', 'MIRROR_U'), ('frame', 'FIT'), ('zoom', 'FIT_SELECTED')):
@@ -612,7 +612,7 @@ def _render_draw(context):
             group(_msg('Render Output'), 738, 896)
             check(907, 756, _msg('Save File'), value=_render['write_still'], action=action('SAVE_FILE'))
             c.button(X(1079), Y(762), 54, 13, _msg('Files...'), action('BROWSE'))
-            c.field(X(905), Y(767) - 15, 228, render, 'filepath')
+            c.field(X(905), Y(767) - 15, 228, render, _msg('filepath'))
             check(907, 793, _msg('Put Image File List(s) in Output Path(s)'), value=False, enabled=False)
             c.button(X(1079), Y(800), 54, 13, _msg('Create Now'), enabled=False)
             radio(921, 810, _msg('Autodesk ME Image Sequence File (.imsq)'), True, ('NONE',), enabled=False)
@@ -1082,7 +1082,7 @@ class BSM_OT_utility_action(bpy.types.Operator):
         try:
             return dispatch(context, action(self.command, self.value) if self.value else action(self.command))
         except (ValueError, RuntimeError, ReferenceError) as error:
-            self.report({'WARNING'}, _dcc_ui_error(error))
+            self.report({'WARNING'}, _dcc_ui_text(str(error)))
             return {'CANCELLED'}
     bl_translation_context = _msg('DCCWorkflowKit.Max')
 

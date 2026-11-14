@@ -1,12 +1,13 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Adapted for DCC Workflow Kit.
-from .i18n import msg as _msg, display as _dcc_ui_text, format_message as _dcc_format, error_text as _dcc_ui_error
+from .i18n import msg as _msg, display as _dcc_ui_text, format_message as _dcc_format
 "The Default Viewport Quad: four quadrants drawn around the cursor.\n\nQuadrant titles, item order and colours follow 3ds Max 2027's Default.qmnxb and\nDefaultUI.qop (tools 1 top-left, display top-right, transform bottom-right,\ntools 2 bottom-left). Items nearest the centre come first in each quadrant.\n"
 import bpy
 import blf
 import gpu
 from gpu_extras.batch import batch_for_shader
 from . import runtime
+from .i18n import tr_ui as tr
 from .operators import INTERACTIVE
 TITLE_BG = (0.235, 0.235, 0.235, 1)
 TITLE_TEXT = (0.6, 0.6, 0.6, 1)
@@ -94,11 +95,10 @@ def _rect(x, y, w, h, color):
 _fonts = {}
 
 def _font(bold=False):
-    """Arial, the quad menu face in DefaultUI.qop (titles render bold in Max 2027);
-    the panel font if it is missing."""
     from ...localization import is_chinese
     if is_chinese():
         return 0
+    'Arial, the quad menu face in DefaultUI.qop (titles render bold in Max 2027);\n    the panel font if it is missing.'
     import os
     from pathlib import Path
     from .surfaces import font, load_font
@@ -110,12 +110,12 @@ def _text(value, x, y, color, size, bold=False):
     blf.size(f, size)
     blf.position(f, x, y, 0)
     blf.color(f, *color)
-    blf.draw(f, _dcc_ui_text(value))
+    blf.draw(f, _dcc_ui_text(tr(value)))
 
 def _width(value, size, bold=False):
     f = _font(bold)
     blf.size(f, size)
-    return blf.dimensions(f, _dcc_ui_text(value))[0]
+    return blf.dimensions(f, _dcc_ui_text(tr(value)))[0]
 
 def _column_width(state, item_lists):
     u = state['u']
@@ -216,7 +216,7 @@ def draw():
             hot = rect == hover or (sub is not None and rect[2] is sub[2])
             lit = hot and item['enabled']
             _rect(x, y, w, h, HIGHLIGHT_BG if lit else ITEM_BG)
-            last = item['enabled'] and _last.get((state['name'], key)) == item['label']
+            last = item['enabled'] and _last.get((state[_msg('name')], key)) == item['label']
             color = LAST_TEXT if lit or last else ITEM_TEXT if item['enabled'] else DISABLED
             _text(item['label'], x + TEXT_LEFT * u, y + (h - size * 0.7) / 2, color, size)
             mark = LAST_TEXT if lit else BORDER
@@ -312,7 +312,7 @@ class BSM_OT_quad_modal(bpy.types.Operator):
             item = hit[2]
             if 'items' in item or not item['enabled']:
                 return {'RUNNING_MODAL'}
-            _last[state['name'], hit[1]] = item['label']
+            _last[state[_msg('name')], hit[1]] = item['label']
             (operator, props, call) = (item['op'], item['props'], item['call'])
             if item.get('option'):
                 (bx, by, bs) = _option_box(hit, state['u'])
@@ -341,7 +341,7 @@ class BSM_OT_quad_modal(bpy.types.Operator):
                     (group, method) = operator.split('.')
                     getattr(getattr(bpy.ops, group), method)('INVOKE_DEFAULT', **props)
             except RuntimeError as error:
-                self.report({'WARNING'}, _dcc_ui_error(error).split('\n')[0])
+                self.report({'WARNING'}, _dcc_ui_text(str(error).split('\n')[0]))
         return {'FINISHED'}
     bl_translation_context = _msg('DCCWorkflowKit.Max')
 
@@ -404,7 +404,7 @@ def open_menu(context, event, quads, name):
     if area is None or area.type not in spaces or region is None or (region.type != 'WINDOW'):
         return {'CANCELLED'}
     close()
-    _state = {'name': name, 'area': area.as_pointer(), 'region': region.as_pointer(), 'u': scale(), 'center': (event.mouse_x - region.x, event.mouse_y - region.y), 'quads': {key: (title, tidy(items)) for (key, (title, items)) in quads.items()}, 'hover': None, 'submenu': None}
+    _state = {_msg('name'): name, 'area': area.as_pointer(), 'region': region.as_pointer(), 'u': scale(), 'center': (event.mouse_x - region.x, event.mouse_y - region.y), 'quads': {key: (title, tidy(items)) for (key, (title, items)) in quads.items()}, 'hover': None, 'submenu': None}
     space = spaces[area.type]
     _handle = (space, space.draw_handler_add(draw, (), 'WINDOW', 'POST_PIXEL'))
     area.tag_redraw()

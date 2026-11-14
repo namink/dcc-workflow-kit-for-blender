@@ -75,7 +75,7 @@ def draw_switch(self, context):
         return
     row = self.layout.row(align=True)
     row.operator('bsm.environment', text=_dcc_ui_text(_msg('Blender')), depress=not runtime.is_active()).mode = 'BLENDER'
-    row.operator('bsm.environment', text=_dcc_ui_text(_msg('Blender Max')), depress=runtime.is_active()).mode = 'STUDIO'
+    row.operator('bsm.environment', text=_dcc_ui_text(_msg('MaxFlow')), depress=runtime.is_active()).mode = 'STUDIO'
 
 def draw_view_header(self, context):
     layout = self.layout
@@ -101,8 +101,9 @@ _original_time_header = bpy.types.DOPESHEET_HT_header.draw
 
 def draw_menus(self, context):
     from . import max_menus
+    from .i18n import tr_ui as tr
     for (idname, label) in max_menus.MAIN_MENUS:
-        self.layout.menu(idname, text=_dcc_ui_text(label))
+        self.layout.menu(idname, text=_dcc_ui_text(tr(label)), translate=False)
 
 class BSM_MT_edit(bpy.types.Menu):
     bl_label = _msg('Edit')

@@ -1,36 +1,45 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Simplified Chinese localization by namink; additional display integration 2026-10-31.
-"""Maya projects, scene saving and references (docs/steps/step_69.md).
+"""Maya projects, scene saving and references.
 
-Blender has no project system. A Maya Workflow Kit project is a root folder with Maya's default sub-folders
+Blender has no project system. A Maya Workflow Kit project is a root folder with Maya's standard sub-folders
 (Project Window) and a marker file; the current project and Recent Projects live in
 the add-on preferences (like Maya keeps the workspace in its prefs). Effects:
 
 - File > Open / Save As (Ctrl+O / Ctrl+S on a new file / Ctrl+Shift+S) and Create Reference start in
   ``<root>/scenes`` (``wm.open_mainfile`` / ``wm.save_as_mainfile`` invoked with that ``filepath``);
+- a file browser that picks a texture for an empty image slot (Image Open, Dome Light) starts in
+  ``<root>/sourceimages`` when that folder exists (``texture_folder``; the file browser side is
+  ``ui/file_project.py``);
 - a file saved inside the project renders to ``<root>/images`` (relative ``//../images/``) when its render
-  output is still Blender's default (``save_pre`` gets the path being saved, measured);
+  output is still Blender's default (``save_pre`` gets the path being saved);
 - opening a ``.blend`` under ``<root>/scenes`` of a marked project makes it the current project.
 
 Create Reference (Ctrl+R) = link the other file's scene contents and make them editable with a library override
-(Maya reference edits), under a ``<namespace>`` collection with ``ns:`` name prefixes (Blender has no namespaces);
-measured in step 69 「계획」.
+(Maya reference edits), under a ``<namespace>`` collection with ``ns:`` name prefixes (Blender has no namespaces).
 """
-from ..i18n import source_message as _dcc_source, display_message as _dcc_display, format_message as _dcc_format
-from ..i18n import tr as _zh, enum_items as _zh_enum, native as _zh_native
+
 import json
 import os
+
 import bpy
 from bpy.app.handlers import persistent
 from bpy.props import BoolProperty, StringProperty
+
 from .. import results
 from ..names import PRODUCT
-FOLDERS = ('scenes', 'assets', 'images', 'sourceimages', 'renderData', 'clips', 'sound', 'scripts', 'data', 'movies', 'cache', 'autosave')
-MARKER = 'allset_project.json'
+
+# Maya's standard project folders (Scenes, Templates = assets, Images, Source Images, Render Data,
+# Clips, Sound, Scripts, Disk Cache = data, Movies, ..., AutoSave); "cache" for Blender's simulation caches.
+FOLDERS = ("scenes", "assets", "images", "sourceimages", "renderData", "clips", "sound", "scripts", "data", "movies",
+           "cache", "autosave")
+MARKER = "allset_project.json"
 RECENT_MAX = 10
 DIALOG_WIDTH = 420
-DEFAULT_RENDER_PATHS = {'', '/tmp\\', '/tmp/', '//'}
-NOTICE = 'Blender has no project system: Maya Workflow Kit keeps this folder as your project. File dialogs open in its scenes folder, renders go to its images folder and paths are saved relative (//).'
+# Blender's factory render output ('/tmp\\' on Windows).
+DEFAULT_RENDER_PATHS = {"", "/tmp\\", "/tmp/", "//"}
+NOTICE = ("Blender has no project system: Maya Workflow Kit keeps this folder as your project. File dialogs open in its "
+          "scenes folder, renders go to its images folder and paths are saved relative (//).")
+
 
 def _prefs(context=None):
     from .. import preferences
@@ -39,35 +48,49 @@ def _prefs(context=None):
     except KeyError:
         return None
 
+
 def _norm(path):
-    return os.path.normcase(os.path.abspath(bpy.path.abspath(path))) if path else ''
-DEFAULT_NAME = 'default'
+    return os.path.normcase(os.path.abspath(bpy.path.abspath(path))) if path else ""
+
+
+# Like Maya, which keeps a default project under <Documents>/maya/projects, a dialog never starts in a
+# bare Documents folder. The kit's own default sits next to it
+# under "Maya Workflow Kit/" (the product name; the user's real Maya folder is never written);
+# ALLSET_PROJECTS_DIR moves it (test sandboxes).
+DEFAULT_NAME = "default"
+
 
 def projects_dir():
-    return os.environ.get('ALLSET_PROJECTS_DIR') or os.path.join(os.path.expanduser('~'), _dcc_source('Documents'), PRODUCT, 'projects')
+    return os.environ.get("ALLSET_PROJECTS_DIR") or \
+        os.path.join(os.path.expanduser("~"), "Documents", PRODUCT, "projects")
+
 
 def default_root():
     return os.path.join(projects_dir(), DEFAULT_NAME)
 
+
 def current_root(context=None):
     """The current project: the one set (Set Project / Project Window / opened scene), else the default project."""
     prefs = _prefs(context)
-    root = prefs.project_root if prefs is not None else ''
+    root = prefs.project_root if prefs is not None else ""
     return os.path.abspath(bpy.path.abspath(root)) if root else default_root()
+
 
 def ensure_root(context=None):
     """The current project root; the default project's folders are made on first use (like Maya's first start)."""
     root = current_root(context)
-    if _norm(root) == _norm(default_root()) and (not is_project(root)):
+    if _norm(root) == _norm(default_root()) and not is_project(root):
         try:
             create_project(root)
         except OSError:
             pass
     return root
 
+
 def recent(context=None):
     prefs = _prefs(context)
-    return [p for p in (prefs.recent_projects.split('\n') if prefs else []) if p]
+    return [p for p in (prefs.recent_projects.split("\n") if prefs else []) if p]
+
 
 def set_current(root, context=None):
     """Make ``root`` the current project and put it first in Recent Projects."""
@@ -77,7 +100,8 @@ def set_current(root, context=None):
     root = os.path.abspath(root)
     prefs.project_root = root
     items = [root] + [p for p in recent(context) if _norm(p) != _norm(root)]
-    prefs.recent_projects = '\n'.join(items[:RECENT_MAX])
+    prefs.recent_projects = "\n".join(items[:RECENT_MAX])
+
 
 def create_project(root, folders=FOLDERS):
     """Make the project folders and the marker file; returns the folders made."""
@@ -87,50 +111,77 @@ def create_project(root, folders=FOLDERS):
         if not os.path.isdir(path):
             os.makedirs(path, exist_ok=True)
             made.append(name)
-    with open(os.path.join(root, MARKER), 'w', encoding='utf-8') as fh:
-        json.dump({'folders': list(folders)}, fh, indent=1)
+    with open(os.path.join(root, MARKER), "w", encoding="utf-8") as fh:
+        json.dump({"folders": list(folders)}, fh, indent=1)
     return made
+
 
 def is_project(root):
     return bool(root) and os.path.isfile(os.path.join(root, MARKER))
 
+
 def inside(path, root):
     if not path or not root:
         return False
-    (path, root) = (_norm(path), _norm(root))
+    path, root = _norm(path), _norm(root)
     return path == root or path.startswith(root.rstrip(os.sep) + os.sep)
+
 
 def detect_root(blend_path):
     """The marked project whose ``scenes`` folder holds ``blend_path`` (any depth), or ""."""
-    folder = os.path.dirname(os.path.abspath(blend_path)) if blend_path else ''
+    folder = os.path.dirname(os.path.abspath(blend_path)) if blend_path else ""
     while folder and os.path.dirname(folder) != folder:
-        if os.path.basename(folder).lower() == 'scenes' and is_project(os.path.dirname(folder)):
+        if os.path.basename(folder).lower() == "scenes" and is_project(os.path.dirname(folder)):
             return os.path.dirname(folder)
         folder = os.path.dirname(folder)
-    return ''
+    return ""
+
 
 def scenes_dir(context=None):
     root = ensure_root(context)
-    return os.path.join(root, 'scenes') if root else ''
+    return os.path.join(root, "scenes") if root else ""
+
 
 def open_path(context=None):
     """Where File > Open starts: the project's scenes folder ("" = Blender's own choice)."""
     folder = scenes_dir(context)
-    return os.path.join(folder, '') if folder and os.path.isdir(folder) else ''
+    return os.path.join(folder, "") if folder and os.path.isdir(folder) else ""
+
 
 def save_as_path(context=None):
     """Where Save As starts: a file already in the project keeps its folder, else the project's scenes folder."""
     folder = scenes_dir(context)
     current = bpy.data.filepath
     if not folder or not os.path.isdir(folder):
-        return ''
+        return ""
     if current and inside(current, current_root(context)):
         return current
-    return os.path.join(folder, os.path.basename(current) if current else 'untitled.blend')
+    return os.path.join(folder, os.path.basename(current) if current else "untitled.blend")
+
+
+def sourceimages_dir(context=None):
+    """The current project's sourceimages folder, "" when it doesn't exist (never made here)."""
+    folder = os.path.join(current_root(context), "sourceimages")
+    return folder if os.path.isdir(folder) else ""
+
+
+def texture_folder(context, start=None):
+    """Where a file browser that picks a texture for an empty image slot starts: the project's sourceimages folder,
+    like Maya. ``start`` is the path Blender opens the browser at (Image Open: the Preferences > File Paths >
+    Textures path for an empty slot, the slot image's own file otherwise); None = a kit dialog with no image yet.
+    "" (Blender's own start) when Maya mode is off, the folder is missing, the Textures path isn't the default
+    ``//`` or the slot already has an image."""
+    from .. import switch
+    textures = context.preferences.filepaths.texture_directory
+    if textures != "//" or (start is not None and start != textures) or not switch.is_on():
+        return ""
+    return sourceimages_dir(context)
+
 
 def images_relpath(blend_path, root):
-    rel = os.path.relpath(os.path.join(root, 'images'), os.path.dirname(os.path.abspath(blend_path)))
-    return '//' + rel.replace('\\', '/').rstrip('/') + '/'
+    rel = os.path.relpath(os.path.join(root, "images"), os.path.dirname(os.path.abspath(blend_path)))
+    return "//" + rel.replace("\\", "/").rstrip("/") + "/"
+
 
 def fix_render_output(blend_path, root):
     """Point Blender-default render outputs of every scene at the project's images folder; scenes changed."""
@@ -141,13 +192,18 @@ def fix_render_output(blend_path, root):
             changed.append(scene.name)
     return changed
 
+
 @persistent
 def _on_save_pre(filepath, *_args):
     if not isinstance(filepath, str) or not filepath:
         return
+    from . import autosave
+    if autosave.saving():       # an autosave copy leaves the open scene as it is
+        return
     root = current_root() or detect_root(filepath)
     if root and inside(filepath, root):
         fix_render_output(filepath, root)
+
 
 @persistent
 def _on_load_post(filepath, *_args):
@@ -156,16 +212,20 @@ def _on_load_post(filepath, *_args):
     if root and _norm(root) != _norm(current_root()):
         set_current(root)
 
+
+# --- operators: project ---------------------------------------------------------------------------
+
 class ALLSET_OT_set_project(bpy.types.Operator):
     """Choose the project folder: file dialogs open in its scenes folder, renders go to its images folder
     (Maya File > Set Project; Blender has no projects)"""
-    bl_translation_context = 'MWK:operators/project.py:200'
-    bl_idname = 'allset.set_project'
-    bl_label = _zh_native('Set Project', 'MWK:operators/project.py:200')
-    bl_description = _zh_native('Choose the project folder: file dialogs open in its scenes folder, renders go to its images folder\n(Maya File > Set Project; Blender has no projects)', 'MWK:operators/project.py:200')
-    directory: StringProperty(subtype='DIR_PATH', translation_context='MWK:operators/project.py:202')
-    filter_folder: BoolProperty(default=True, options={'HIDDEN'}, translation_context='MWK:operators/project.py:203')
-    create_folders: BoolProperty(name=_zh_native('Create Default Folders', 'MWK:operators/project.py:204'), default=True, description=_zh_native("Make Maya's project folders (scenes, sourceimages, images ...) that are missing (Maya: Create Default Workspace)", 'MWK:operators/project.py:204'), translation_context='MWK:operators/project.py:204')
+    bl_idname = "allset.set_project"
+    bl_label = "Set Project"
+
+    directory: StringProperty(subtype='DIR_PATH')
+    filter_folder: BoolProperty(default=True, options={'HIDDEN'})
+    create_folders: BoolProperty(name="Create Default Folders", default=True,
+                                 description="Make Maya's project folders (scenes, sourceimages, images ...) "
+                                             "that are missing (Maya: Create Default Workspace)")
 
     def invoke(self, context, event):
         self.directory = ensure_root(context)
@@ -175,105 +235,112 @@ class ALLSET_OT_set_project(bpy.types.Operator):
     def execute(self, context):
         root = os.path.abspath(bpy.path.abspath(self.directory))
         if not os.path.isdir(root):
-            self.report({'ERROR'}, _zh(f'No such folder: {root}', 'MWK:operators/project.py:216'))
+            self.report({'ERROR'}, f"No such folder: {root}")
             return {'CANCELLED'}
         if self.create_folders or is_project(root):
             create_project(root)
         set_current(root, context)
-        results.result(self, _zh(f'Project: {root}', 'MWK:operators/project.py:221'))
+        results.result(self, f"Project: {root}")
         return {'FINISHED'}
 
+
 class ALLSET_OT_project_window(bpy.types.Operator):
-    """Create a project: a folder with Maya's default sub-folders (Maya File > Project Window)"""
-    bl_translation_context = 'MWK:operators/project.py:228'
-    bl_idname = 'allset.project_window'
-    bl_label = _zh_native('Project Window', 'MWK:operators/project.py:228')
-    bl_description = _zh_native("Create a project: a folder with Maya's default sub-folders (Maya File > Project Window)", 'MWK:operators/project.py:228')
-    name: StringProperty(name=_zh_native('Current Project', 'MWK:operators/project.py:231'), default=DEFAULT_NAME, description=_zh_native(NOTICE, 'MWK:operators/project.py:231'), translation_context='MWK:operators/project.py:231')
-    location: StringProperty(name=_zh_native('Location', 'MWK:operators/project.py:232'), subtype='DIR_PATH', translation_context='MWK:operators/project.py:232')
+    """Create a project: a folder with Maya's standard sub-folders (Maya File > Project Window)"""
+    bl_idname = "allset.project_window"
+    bl_label = "Project Window"
+
+    # The Blender notice is this field's tooltip, not a paragraph in the window.
+    name: StringProperty(name="Current Project", default=DEFAULT_NAME, description=NOTICE)
+    location: StringProperty(name="Location", subtype='DIR_PATH')
 
     def invoke(self, context, event):
         root = current_root(context)
-        (self.name, self.location) = (os.path.basename(root), os.path.dirname(root))
-        return context.window_manager.invoke_props_dialog(self, width=DIALOG_WIDTH, confirm_text=_zh('Accept', 'MWK:operators/project.py:237'))
+        self.name, self.location = os.path.basename(root), os.path.dirname(root)
+        return context.window_manager.invoke_props_dialog(self, width=DIALOG_WIDTH, confirm_text="Accept")
 
     def draw(self, context):
         layout = self.layout
-        layout.prop(self, 'name')
-        layout.prop(self, 'location')
+        layout.prop(self, "name")
+        layout.prop(self, "location")
         box = layout.box()
-        box.label(text=_zh('Primary Project Locations', 'MWK:operators/project.py:244'))
+        box.label(text="Primary Project Locations")
         grid = box.grid_flow(columns=3, even_columns=True)
         for folder in FOLDERS:
-            grid.label(text=_zh(folder, 'MWK:operators/project.py:247'), icon='FILE_FOLDER')
+            grid.label(text=folder, icon='FILE_FOLDER')
 
     def execute(self, context):
         if not self.name.strip():
-            self.report({'ERROR'}, _zh('Give the project a name', 'MWK:operators/project.py:251'))
+            self.report({'ERROR'}, "Give the project a name")
             return {'CANCELLED'}
         root = os.path.join(os.path.abspath(bpy.path.abspath(self.location)), self.name.strip())
         try:
             made = create_project(root)
         except OSError as exc:
-            self.report({'ERROR'}, _zh(f'Could not create {root}: {exc}', 'MWK:operators/project.py:257'))
+            self.report({'ERROR'}, f"Could not create {root}: {exc}")
             return {'CANCELLED'}
         set_current(root, context)
-        results.result(self, _zh(f'Project {self.name}: {len(made)} folder(s) created in {root}', 'MWK:operators/project.py:260'))
+        results.result(self, f"Project {self.name}: {len(made)} folder(s) created in {root}")
         return {'FINISHED'}
+
 
 class ALLSET_OT_project_recent(bpy.types.Operator):
     """Make this the current project (Maya File > Recent Projects)"""
-    bl_translation_context = 'MWK:operators/project.py:267'
-    bl_idname = 'allset.project_recent'
-    bl_label = _zh_native('Recent Project', 'MWK:operators/project.py:267')
-    bl_description = _zh_native('Make this the current project (Maya File > Recent Projects)', 'MWK:operators/project.py:267')
-    path: StringProperty(options={'SKIP_SAVE'}, translation_context='MWK:operators/project.py:269')
+    bl_idname = "allset.project_recent"
+    bl_label = "Recent Project"
+
+    path: StringProperty(options={'SKIP_SAVE'})
 
     def execute(self, context):
         if not os.path.isdir(self.path):
-            self.report({'WARNING'}, _zh(f'Project folder is gone: {self.path}', 'MWK:operators/project.py:273'))
+            self.report({'WARNING'}, f"Project folder is gone: {self.path}")
             return {'CANCELLED'}
         set_current(self.path, context)
         return {'FINISHED'}
 
+
 class ALLSET_MT_recent_projects(bpy.types.Menu):
     """Recently used projects (Maya File > Recent Projects)"""
-    bl_translation_context = 'MWK:operators/project.py:282'
-    bl_idname = 'ALLSET_MT_recent_projects'
-    bl_label = _zh_native('Recent Projects', 'MWK:operators/project.py:282')
+    bl_idname = "ALLSET_MT_recent_projects"
+    bl_label = "Recent Projects"
 
     def draw(self, context):
         items = recent(context)
         if not items:
-            self.layout.label(text=_zh('No recent projects', 'MWK:operators/project.py:287'))
+            self.layout.label(text="No recent projects")
         for path in items:
-            self.layout.operator('allset.project_recent', text=_dcc_display(path), icon='FILE_FOLDER').path = path
+            self.layout.operator("allset.project_recent", text=path, icon='FILE_FOLDER').path = path
 
-def browse_from_later(folder, op_idname='WM_OT_open_mainfile', tries=40):
+
+# --- operators: open / save -------------------------------------------------------------------------
+
+def browse_from_later(folder, op_idname="WM_OT_open_mainfile", tries=40):
     """Point the file browser that ``op_idname`` opens at ``folder`` once it is there (a few ticks later).
-    Blender's Open dialog starts at the most recent file whatever ``filepath`` it is given (measured, step 97:
-    Ctrl+O went to Documents), unlike Save As."""
+    Blender's Open dialog starts at the most recent file whatever ``filepath`` it is given (Ctrl+O
+    goes to Documents), unlike Save As."""
     left = [tries]
 
     def tick():
         for window in bpy.context.window_manager.windows:
             for area in window.screen.areas:
                 space = area.spaces.active
-                op = getattr(space, 'active_operator', None) if area.type == 'FILE_BROWSER' else None
-                if op is not None and op.bl_idname == op_idname and (space.params is not None):
+                op = getattr(space, "active_operator", None) if area.type == 'FILE_BROWSER' else None
+                if op is not None and op.bl_idname == op_idname and space.params is not None:
                     space.params.directory = folder.encode()
                     return None
         left[0] -= 1
         return 0.05 if left[0] > 0 else None
     bpy.app.timers.register(tick, first_interval=0.01)
-_OPTION_BOX = BoolProperty(options={'HIDDEN', 'SKIP_SAVE'}, description=_zh_native("Maya option box: the file dialog's Options panel shows the settings", 'MWK:operators/project.py:313'), translation_context='MWK:operators/project.py:313')
+
+
+_OPTION_BOX = BoolProperty(options={'HIDDEN', 'SKIP_SAVE'},
+                           description="Maya option box: the file dialog's Options panel shows the settings")
+
 
 class ALLSET_OT_open_scene(bpy.types.Operator):
     """Open a scene; the file browser starts in the project's scenes folder (Maya Open Scene)"""
-    bl_translation_context = 'MWK:operators/project.py:320'
-    bl_idname = 'allset.open_scene'
-    bl_label = _zh_native('Open Scene', 'MWK:operators/project.py:320')
-    bl_description = _zh_native("Open a scene; the file browser starts in the project's scenes folder (Maya Open Scene)", 'MWK:operators/project.py:320')
+    bl_idname = "allset.open_scene"
+    bl_label = "Open Scene"
+
     option_box: _OPTION_BOX
 
     def invoke(self, context, event):
@@ -287,13 +354,13 @@ class ALLSET_OT_open_scene(bpy.types.Operator):
     def execute(self, context):
         return self.invoke(context, None)
 
+
 class ALLSET_OT_save_scene_as(bpy.types.Operator):
     """Save the scene under a new name; the file browser starts in the project's scenes folder
     (Maya Save Scene As)"""
-    bl_translation_context = 'MWK:operators/project.py:340'
-    bl_idname = 'allset.save_scene_as'
-    bl_label = _zh_native('Save Scene As', 'MWK:operators/project.py:340')
-    bl_description = _zh_native("Save the scene under a new name; the file browser starts in the project's scenes folder\n(Maya Save Scene As)", 'MWK:operators/project.py:340')
+    bl_idname = "allset.save_scene_as"
+    bl_label = "Save Scene As"
+
     option_box: _OPTION_BOX
 
     def invoke(self, context, event):
@@ -305,16 +372,16 @@ class ALLSET_OT_save_scene_as(bpy.types.Operator):
     def execute(self, context):
         return self.invoke(context, None)
 
+
 def _save_args(op):
     from .. import compat
     return compat.save_dialog_args(op)
 
+
 class ALLSET_OT_save_scene(bpy.types.Operator):
     """Save the scene; a scene never saved asks for a name in the project's scenes folder (Maya Save Scene)"""
-    bl_translation_context = 'MWK:operators/project.py:362'
-    bl_idname = 'allset.save_scene'
-    bl_label = _zh_native('Save Scene', 'MWK:operators/project.py:362')
-    bl_description = _zh_native("Save the scene; a scene never saved asks for a name in the project's scenes folder (Maya Save Scene)", 'MWK:operators/project.py:362')
+    bl_idname = "allset.save_scene"
+    bl_label = "Save Scene"
 
     def invoke(self, context, event):
         if bpy.data.filepath:
@@ -324,21 +391,26 @@ class ALLSET_OT_save_scene(bpy.types.Operator):
     def execute(self, context):
         return self.invoke(context, None)
 
+
+# --- references ------------------------------------------------------------------------------------------
+
 def unique_namespace(ns, scene):
     """Maya: a namespace already in use gets a number (prop, prop1, prop2 ...)."""
     taken = {c.name for c in scene.collection.children}
-    taken |= {o.name.split(':', 1)[0] for o in scene.objects if ':' in o.name}
+    taken |= {o.name.split(":", 1)[0] for o in scene.objects if ":" in o.name}
     if ns not in taken:
         return ns
     n = 1
-    while f'{ns}{n}' in taken:
+    while f"{ns}{n}" in taken:
         n += 1
-    return f'{ns}{n}'
+    return f"{ns}{n}"
+
 
 def _source_name(id_):
     ov = id_.override_library
     ref = ov.reference if ov is not None else None
     return ref.name if ref is not None else id_.name
+
 
 def reference(path, ns, context, editable=True):
     """Bring the scene of ``path`` in as a reference under the collection ``ns``; returns that collection.
@@ -346,10 +418,10 @@ def reference(path, ns, context, editable=True):
     Linked collections / objects of the source's first scene are put under ``ns``, then (editable) replaced by
     library overrides (``override_hierarchy_create`` needs the linked data in the scene first) whose objects and
     collections are renamed ``ns:name``."""
-    (scene, view_layer) = (context.scene, context.view_layer)
+    scene, view_layer = context.scene, context.view_layer
     with bpy.data.libraries.load(path, link=True) as (src, dst):
         if not src.scenes:
-            raise ValueError(_dcc_source('no scene in the file'))
+            raise ValueError("no scene in the file")
         dst.scenes = [src.scenes[0]]
     linked = dst.scenes[0]
     group = bpy.data.collections.new(ns)
@@ -359,6 +431,7 @@ def reference(path, ns, context, editable=True):
         if editable:
             ov = coll.override_hierarchy_create(scene, view_layer, do_fully_editable=True)
             if ov is not None:
+                # the override takes the linked collection's place next to it: drop the original
                 if coll in list(group.children):
                     group.children.unlink(coll)
                 if ov not in list(group.children):
@@ -373,65 +446,74 @@ def reference(path, ns, context, editable=True):
                 if ov not in list(group.objects):
                     group.objects.link(ov)
     if editable:
+        # the source's names, not the ".001" Blender gave an override whose name was taken locally (Maya: prop:pCube1)
         for coll in list(group.children_recursive):
-            if coll.library is None and (not coll.name.startswith(f'{ns}:')):
-                coll.name = f'{ns}:{_source_name(coll)}'
+            if coll.library is None and not coll.name.startswith(f"{ns}:"):
+                coll.name = f"{ns}:{_source_name(coll)}"
         for ob in group.all_objects:
-            if ob.library is None and (not ob.name.startswith(f'{ns}:')):
-                ob.name = f'{ns}:{_source_name(ob)}'
-    group['allset_reference'] = path
+            if ob.library is None and not ob.name.startswith(f"{ns}:"):
+                ob.name = f"{ns}:{_source_name(ob)}"
+    group["allset_reference"] = path
     return group
+
 
 class ALLSET_OT_create_reference(bpy.types.Operator):
     """Reference another scene: its objects come in linked and editable (library override), names prefixed
     with the namespace (Maya File > Create Reference; .blend files only)"""
-    bl_translation_context = 'MWK:operators/project.py:442'
-    bl_idname = 'allset.create_reference'
-    bl_label = _zh_native('Create Reference', 'MWK:operators/project.py:442')
-    bl_description = _zh_native('Reference another scene: its objects come in linked and editable (library override), names prefixed\nwith the namespace (Maya File > Create Reference; .blend files only)', 'MWK:operators/project.py:442')
+    bl_idname = "allset.create_reference"
+    bl_label = "Create Reference"
     bl_options = {'UNDO'}
-    filepath: StringProperty(subtype='FILE_PATH', translation_context='MWK:operators/project.py:445')
-    filter_glob: StringProperty(default='*.blend', options={'HIDDEN'}, translation_context='MWK:operators/project.py:446')
-    namespace: StringProperty(name=_zh_native('Namespace', 'MWK:operators/project.py:447'), description=_zh_native('Name prefix (ns:name); empty = the file name', 'MWK:operators/project.py:447'), translation_context='MWK:operators/project.py:447')
-    editable: BoolProperty(name=_zh_native('Editable (Library Override)', 'MWK:operators/project.py:448'), default=True, description=_zh_native("Make the referenced objects editable; off = linked only, like an unloaded reference you can't change", 'MWK:operators/project.py:448'), translation_context='MWK:operators/project.py:448')
+
+    filepath: StringProperty(subtype='FILE_PATH')
+    filter_glob: StringProperty(default="*.blend", options={'HIDDEN'})
+    namespace: StringProperty(name="Namespace", description="Name prefix (ns:name); empty = the file name")
+    editable: BoolProperty(name="Editable (Library Override)", default=True,
+                           description="Make the referenced objects editable; off = linked only, like an "
+                                       "unloaded reference you can't change")
 
     def invoke(self, context, event):
         folder = scenes_dir(context)
-        if folder and os.path.isdir(folder) and (not self.filepath):
-            self.filepath = os.path.join(folder, '')
+        if folder and os.path.isdir(folder) and not self.filepath:
+            self.filepath = os.path.join(folder, "")
         context.window_manager.fileselect_add(self)
         return {'RUNNING_MODAL'}
 
     def execute(self, context):
         path = bpy.path.abspath(self.filepath)
-        if not path.lower().endswith('.blend') or not os.path.isfile(path):
-            self.report({'ERROR'}, _zh("Blender references .blend files only: use File > Import for .fbx / .obj / .abc / .usd (Maya .ma / .mb can't be read)", 'MWK:operators/project.py:462'))
+        if not path.lower().endswith(".blend") or not os.path.isfile(path):
+            self.report({'ERROR'}, "Blender references .blend files only: use File > Import for .fbx / .obj / .abc / .usd (Maya .ma / .mb can't be read)")
             return {'CANCELLED'}
         if bpy.data.filepath and _norm(path) == _norm(bpy.data.filepath):
-            self.report({'ERROR'}, _zh("A scene can't reference itself", 'MWK:operators/project.py:465'))
+            self.report({'ERROR'}, "A scene can't reference itself")
             return {'CANCELLED'}
-        ns = (self.namespace.strip() or os.path.splitext(os.path.basename(path))[0]).replace(':', '_')
+        ns = (self.namespace.strip() or os.path.splitext(os.path.basename(path))[0]).replace(":", "_")
         from . import references
-        node = references.new_node_name(ns, context.scene)
+        node = references.new_node_name(ns, context.scene)       # Maya: propRN, then propRN1
         order = references.next_order(context.scene)
         ns = unique_namespace(ns, context.scene)
         try:
             group = reference(path, ns, context, self.editable)
         except (OSError, ValueError, RuntimeError) as exc:
-            self.report({'ERROR'}, _zh(f'Could not reference {path}: {exc}', 'MWK:operators/project.py:475'))
+            self.report({'ERROR'}, f"Could not reference {path}: {exc}")
             return {'CANCELLED'}
-        (group[references.NODE], group[references.ORDER]) = (node, order)
-        if hasattr(context.window_manager, 'allset_ref_current'):
+        group[references.NODE], group[references.ORDER] = node, order
+        if hasattr(context.window_manager, "allset_ref_current"):
             context.window_manager.allset_ref_current = group.name
-        results.result(self, _zh(f'Referenced {os.path.basename(path)} as {group.name}: {len(group.all_objects)} object(s)', 'MWK:operators/project.py:480'))
+        results.result(self, f"Referenced {os.path.basename(path)} as {group.name}: "
+                              f"{len(group.all_objects)} object(s)")
         return {'FINISHED'}
-classes = (ALLSET_OT_set_project, ALLSET_OT_project_window, ALLSET_OT_project_recent, ALLSET_MT_recent_projects, ALLSET_OT_open_scene, ALLSET_OT_save_scene_as, ALLSET_OT_save_scene, ALLSET_OT_create_reference)
+
+
+classes = (ALLSET_OT_set_project, ALLSET_OT_project_window, ALLSET_OT_project_recent, ALLSET_MT_recent_projects,
+           ALLSET_OT_open_scene, ALLSET_OT_save_scene_as, ALLSET_OT_save_scene, ALLSET_OT_create_reference)
+
 
 def register_handlers():
     bpy.app.handlers.save_pre.append(_on_save_pre)
     bpy.app.handlers.load_post.append(_on_load_post)
 
+
 def unregister_handlers():
-    for (lst, fn) in ((bpy.app.handlers.save_pre, _on_save_pre), (bpy.app.handlers.load_post, _on_load_post)):
+    for lst, fn in ((bpy.app.handlers.save_pre, _on_save_pre), (bpy.app.handlers.load_post, _on_load_post)):
         if fn in lst:
             lst.remove(fn)

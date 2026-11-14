@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Simplified Chinese localization by namink; additional display integration 2026-10-31.
-"""Maya panel View menu commands that had no kit counterpart until step 177 (docs/steps/step_177.md):
+"""Maya panel View menu commands with a kit counterpart:
 
 - View > Center View of Selection = Maya ``cmds.viewFit(camera)`` (Maya 2026 panel View menu). In
   Maya the camera keeps its rotation and its straight-line distance to the
@@ -8,75 +7,86 @@
   (5, 2, -3): rotation unchanged, centre of interest 44.82 -> 43.02 = |centre - eye|).
 - View > Camera Attribute Editor... / panel toolbar Camera Attributes = Maya's camera Attribute Editor: the Attribute
   Editor of the camera the panel looks through. Blender's own persp / ortho views have no camera object: a popover
-  shows the view's camera values (Focal Length in Maya millimetres, near / far clip) — Maya's perspShape.
+  shows the view's camera values (Focal Length in millimetres, near / far clip) — Maya's perspShape.
 - View > Camera Tools > Tumble / Track / Dolly Tool = Maya's camera tools: tools whose LMB drag tumbles / tracks /
   dollies the view (like Alt+LMB / Alt+MMB / Alt+RMB) until another tool is picked (Q / W / E / R).
+- View > Camera Tools > 2D Pan/Zoom Tool = Maya's 2D Pan/Zoom Tool: LMB / MMB drag pans the view's picture in 2D
+  (Mode 2D Pan) or zooms it (Mode 2D Zoom, Zoom scale = the rate), Ctrl+LMB drag a box zooms into it; the camera
+  doesn't move (operators/pan_zoom.py). RMB keeps the marking menu, Alt+drags keep moving the camera.
 """
-from ..i18n import source_message as _dcc_source, display_message as _dcc_display, format_message as _dcc_format
-from ..i18n import tr as _zh, enum_items as _zh_enum, native as _zh_native
+
 import bpy
 from bpy.props import FloatProperty
 from mathutils import Matrix, Vector
-(TUMBLE_TOOL, TRACK_TOOL, DOLLY_TOOL) = ('allset.tumble_tool', 'allset.track_tool', 'allset.dolly_tool')
-MAYA_FILM_MM = 36.0
+
+TUMBLE_TOOL, TRACK_TOOL, DOLLY_TOOL = "allset.tumble_tool", "allset.track_tool", "allset.dolly_tool"
+PAN_ZOOM_TOOL = "allset.pan_zoom_tool"
+MAYA_FILM_MM = 36.0       # 35 mm camera film back (create.MAYA_FILM_MM)
+
+
+# --- Center View of Selection (pure maths) -----------------------------------------------------
 
 def bbox_centre(points):
     pts = [Vector(p) for p in points]
-    lo = Vector((min((p.x for p in pts)), min((p.y for p in pts)), min((p.z for p in pts))))
-    hi = Vector((max((p.x for p in pts)), max((p.y for p in pts)), max((p.z for p in pts))))
+    lo = Vector((min(p.x for p in pts), min(p.y for p in pts), min(p.z for p in pts)))
+    hi = Vector((max(p.x for p in pts), max(p.y for p in pts), max(p.z for p in pts)))
     return (lo + hi) / 2
+
 
 def centre_view(eye, forward, centre):
     """Maya viewFit -c: (new eye, distance) of a camera at ``eye`` looking along unit ``forward`` that keeps its
     rotation and its distance to ``centre`` and puts ``centre`` on its view axis."""
-    (eye, forward, centre) = (Vector(eye), Vector(forward).normalized(), Vector(centre))
+    eye, forward, centre = Vector(eye), Vector(forward).normalized(), Vector(centre)
     dist = (centre - eye).length
-    return (centre - forward * dist, dist)
+    return centre - forward * dist, dist
+
+
+# --- operators ----------------------------------------------------------------------------------
 
 def _view_camera(context):
     from . import panel_menus
     return panel_menus.view_camera(context)
 
+
 class ALLSET_OT_center_view_selection(bpy.types.Operator):
     """Turn nothing, move the camera so the selection is in the middle of the view at the same distance
     (Maya View > Center View of Selection)"""
-    bl_translation_context = 'MWK:ui/camera_tools.py:53'
-    bl_idname = 'allset.center_view_selection'
-    bl_label = _zh_native('Center View of Selection', 'MWK:ui/camera_tools.py:53')
-    bl_description = _zh_native('Turn nothing, move the camera so the selection is in the middle of the view at the same distance\n(Maya View > Center View of Selection)', 'MWK:ui/camera_tools.py:53')
+    bl_idname = "allset.center_view_selection"
+    bl_label = "Center View of Selection"
     bl_options = {'UNDO'}
 
     @classmethod
     def poll(cls, context):
-        return context.area is not None and context.area.type == 'VIEW_3D' and (context.region_data is not None)
+        return context.area is not None and context.area.type == 'VIEW_3D' and context.region_data is not None
 
     def execute(self, context):
         from ..operators import view
-        (space, rv3d) = (context.space_data, context.region_data)
+        space, rv3d = context.space_data, context.region_data
         cam = _view_camera(context)
         pts = view.frame_points(context, space, True, False, exclude=cam)
         if not pts:
-            self.report({'WARNING'}, _zh('Nothing to center on', 'MWK:ui/camera_tools.py:66'))
+            self.report({'WARNING'}, "Nothing to center on")
             return {'CANCELLED'}
         centre = bbox_centre(pts)
         if cam is not None:
-            if all(cam.lock_location):
-                self.report({'WARNING'}, _zh(f'{cam.name} is locked', 'MWK:ui/camera_tools.py:71'))
+            if all(cam.lock_location):            # Maya Lock Camera
+                self.report({'WARNING'}, f"{cam.name} is locked")
                 return {'CANCELLED'}
-            (loc, rot, scale) = cam.matrix_world.decompose()
-            (eye, _d) = centre_view(loc, rot @ Vector((0.0, 0.0, -1.0)), centre)
+            loc, rot, scale = cam.matrix_world.decompose()
+            eye, _d = centre_view(loc, rot @ Vector((0.0, 0.0, -1.0)), centre)
             cam.matrix_world = Matrix.LocRotScale(eye, rot, scale)
         else:
             rot = rv3d.view_rotation
             forward = rot @ Vector((0.0, 0.0, -1.0))
-            if rv3d.view_perspective == 'ORTHO':
+            if rv3d.view_perspective == 'ORTHO':      # the distance is the ortho zoom: only the centre moves
                 rv3d.view_location = centre
             else:
                 eye0 = rv3d.view_location + rot @ Vector((0.0, 0.0, rv3d.view_distance))
-                (_eye, dist) = centre_view(eye0, forward, centre)
-                (rv3d.view_location, rv3d.view_distance) = (centre, dist)
+                _eye, dist = centre_view(eye0, forward, centre)
+                rv3d.view_location, rv3d.view_distance = centre, dist
         context.area.tag_redraw()
         return {'FINISHED'}
+
 
 def _persp_focal_get(self):
     space = bpy.context.space_data
@@ -85,17 +95,18 @@ def _persp_focal_get(self):
     from ..operators.key_batch import VIEW_SENSOR
     return space.lens * MAYA_FILM_MM / VIEW_SENSOR
 
+
 def _persp_focal_set(self, value):
     space = bpy.context.space_data
     if space is not None and space.type == 'VIEW_3D':
         from ..operators.key_batch import VIEW_SENSOR
         space.lens = value * VIEW_SENSOR / MAYA_FILM_MM
 
+
 class ALLSET_PT_persp_camera(bpy.types.Panel):
     """The camera values of a Blender persp / ortho view (Maya perspShape)"""
-    bl_translation_context = 'MWK:ui/camera_tools.py:107'
-    bl_idname = 'ALLSET_PT_persp_camera'
-    bl_label = _zh_native('perspShape', 'MWK:ui/camera_tools.py:107')
+    bl_idname = "ALLSET_PT_persp_camera"
+    bl_label = "perspShape"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'HEADER'
     bl_ui_units_x = 13
@@ -103,21 +114,20 @@ class ALLSET_PT_persp_camera(bpy.types.Panel):
     def draw(self, context):
         layout = self.layout
         space = context.space_data
-        layout.label(text=_zh("perspShape (this view's camera)", 'MWK:ui/camera_tools.py:115'))
+        layout.label(text="perspShape (this view's camera)")
         col = layout.column()
         col.use_property_split = True
-        col.prop(context.window_manager, 'allset_persp_focal')
+        col.prop(context.window_manager, "allset_persp_focal")
         if space is not None and space.type == 'VIEW_3D':
-            col.prop(space, 'clip_start', text=_zh('Near Clip Plane', 'MWK:ui/camera_tools.py:120'))
-            col.prop(space, 'clip_end', text=_zh('Far Clip Plane', 'MWK:ui/camera_tools.py:121'))
-        layout.label(text=_zh('A camera view shows its full Attribute Editor', 'MWK:ui/camera_tools.py:122'), icon='INFO')
+            col.prop(space, "clip_start", text="Near Clip Plane")
+            col.prop(space, "clip_end", text="Far Clip Plane")
+        layout.label(text="A camera view shows its full Attribute Editor", icon='INFO')
+
 
 class ALLSET_OT_camera_attribute_editor(bpy.types.Operator):
     """Show the camera this view looks through in the Attribute Editor (Maya View > Camera Attribute Editor)"""
-    bl_translation_context = 'MWK:ui/camera_tools.py:128'
-    bl_idname = 'allset.camera_attribute_editor'
-    bl_label = _zh_native('Camera Attribute Editor', 'MWK:ui/camera_tools.py:128')
-    bl_description = _zh_native('Show the camera this view looks through in the Attribute Editor (Maya View > Camera Attribute Editor)', 'MWK:ui/camera_tools.py:128')
+    bl_idname = "allset.camera_attribute_editor"
+    bl_label = "Camera Attribute Editor"
     bl_options = {'INTERNAL'}
 
     @classmethod
@@ -129,20 +139,19 @@ class ALLSET_OT_camera_attribute_editor(bpy.types.Operator):
         if cam is None:
             bpy.ops.wm.call_panel(name=ALLSET_PT_persp_camera.bl_idname, keep_open=True)
             return {'FINISHED'}
-        try:
+        try:   # Maya shows the camera without selecting it; the kit AE shows the active object (as object_attributes)
             cam.select_set(True)
             context.view_layer.objects.active = cam
         except RuntimeError:
-            self.report({'WARNING'}, _zh(f'{cam.name} is not in the view layer', 'MWK:ui/camera_tools.py:144'))
+            self.report({'WARNING'}, f"{cam.name} is not in the view layer")
             return {'CANCELLED'}
         return bpy.ops.allset.dock_show(dock='ATTRIBUTE_EDITOR')
 
+
 class ALLSET_OT_track(bpy.types.Operator):
     """Track the view (Maya Alt+MMB, Track Tool)"""
-    bl_translation_context = 'MWK:ui/camera_tools.py:152'
-    bl_idname = 'allset.track'
-    bl_label = _zh_native('Track', 'MWK:ui/camera_tools.py:152')
-    bl_description = _zh_native('Track the view (Maya Alt+MMB, Track Tool)', 'MWK:ui/camera_tools.py:152')
+    bl_idname = "allset.track"
+    bl_label = "Track"
 
     @classmethod
     def poll(cls, context):
@@ -153,21 +162,79 @@ class ALLSET_OT_track(bpy.types.Operator):
         view.camera_navigation(context)
         bpy.ops.view3d.move('INVOKE_DEFAULT')
         return {'FINISHED'}
-_TOOLS = ((TUMBLE_TOOL, _dcc_source('Tumble Tool'), _dcc_source('Drag to tumble the view around its centre of interest (Maya Tumble Tool)'), 'ops.transform.rotate', 'allset.tumble'), (TRACK_TOOL, _dcc_source('Track Tool'), _dcc_source('Drag to track the view (Maya Track Tool)'), 'ops.transform.translate', 'allset.track'), (DOLLY_TOOL, _dcc_source('Dolly Tool'), _dcc_source('Drag left / right to dolly the view in / out (Maya Dolly Tool)'), 'ops.transform.push_pull', 'allset.dolly'))
+
+
+# --- tools ----------------------------------------------------------------------------------------
+
+_TOOLS = (
+    (TUMBLE_TOOL, "Tumble Tool", "Drag to tumble the view around its centre of interest (Maya Tumble Tool)",
+     "ops.transform.rotate", "allset.tumble"),
+    (TRACK_TOOL, "Track Tool", "Drag to track the view (Maya Track Tool)", "ops.transform.translate", "allset.track"),
+    (DOLLY_TOOL, "Dolly Tool", "Drag left / right to dolly the view in / out (Maya Dolly Tool)",
+     "ops.transform.push_pull", "allset.dolly"),
+)
+
 
 def _tool_class(idname, label, description, icon, op, mode):
-    return type(f"ALLSET_TL_{idname.split('.')[1]}_{mode.lower()}", (bpy.types.WorkSpaceTool,), {'bl_translation_context': 'MWK:ui/camera_tools.py:177', 'bl_space_type': 'VIEW_3D', 'bl_context_mode': mode, 'bl_idname': idname, 'bl_label': _zh_native(label, 'MWK:ui/camera_tools.py:177'), 'bl_description': _zh_native(description, 'MWK:ui/camera_tools.py:177'), 'bl_icon': icon, 'bl_widget': None, 'bl_keymap': ((op, {'type': 'LEFTMOUSE', 'value': 'PRESS'}, None),)})
+    return type(f"ALLSET_TL_{idname.split('.')[1]}_{mode.lower()}", (bpy.types.WorkSpaceTool,), {
+        "bl_space_type": 'VIEW_3D', "bl_context_mode": mode, "bl_idname": idname, "bl_label": label,
+        "bl_description": description, "bl_icon": icon, "bl_widget": None,
+        "bl_keymap": ((op, {"type": 'LEFTMOUSE', "value": 'PRESS'}, None),)})
+
+
 TOOLS = [_tool_class(*t, mode) for mode in ('OBJECT', 'EDIT_MESH') for t in _TOOLS]
+
+
+class _PanZoomTool:
+    bl_space_type = 'VIEW_3D'
+    bl_idname = PAN_ZOOM_TOOL
+    bl_label = "2D Pan/Zoom Tool"
+    bl_description = ("Drag to pan the picture in 2D (Mode 2D Zoom: to zoom it), Ctrl+drag a box to zoom into it; "
+                      "the camera stays (Maya 2D Pan/Zoom Tool)")
+    bl_icon = "ops.transform.resize.cage"
+    bl_widget = None
+    bl_cursor = 'SCROLL_XY'           # a four-way arrow, like Maya's
+    bl_keymap = (
+        ("allset.pan_zoom_drag", {"type": 'LEFTMOUSE', "value": 'PRESS'}, None),
+        ("allset.pan_zoom_drag", {"type": 'LEFTMOUSE', "value": 'PRESS', "shift": True}, None),
+        ("allset.pan_zoom_drag", {"type": 'MIDDLEMOUSE', "value": 'PRESS'}, None),
+        ("allset.pan_zoom_box", {"type": 'LEFTMOUSE', "value": 'PRESS', "ctrl": True}, None),
+    )
+
+    @staticmethod
+    def draw_settings(context, layout, tool):
+        props = tool.operator_properties("allset.pan_zoom_drag")
+        layout.prop(props, "zoom_scale")
+        layout.prop(props, "mode", expand=True)
+
+
+class ALLSET_TL_pan_zoom_object(_PanZoomTool, bpy.types.WorkSpaceTool):
+    bl_context_mode = 'OBJECT'
+
+
+class ALLSET_TL_pan_zoom_edit_mesh(_PanZoomTool, bpy.types.WorkSpaceTool):
+    bl_context_mode = 'EDIT_MESH'
+
+
+PAN_ZOOM_TOOLS = (ALLSET_TL_pan_zoom_object, ALLSET_TL_pan_zoom_edit_mesh)
 classes = (ALLSET_OT_center_view_selection, ALLSET_PT_persp_camera, ALLSET_OT_camera_attribute_editor, ALLSET_OT_track)
+
 
 def register():
     for cls in classes:
         bpy.utils.register_class(cls)
-    bpy.types.WindowManager.allset_persp_focal = FloatProperty(name=_zh_native('Focal Length', 'MWK:ui/camera_tools.py:190'), description=_zh_native("Maya focal length of this view (mm on Maya's 36 mm film back)", 'MWK:ui/camera_tools.py:190'), get=_persp_focal_get, set=_persp_focal_set, min=2.5, max=3500.0, precision=1, translation_context='MWK:ui/camera_tools.py:190')
-    for (i, tool) in enumerate(TOOLS):
-        bpy.utils.register_tool(tool, after={'builtin.measure'}, separator=i % len(_TOOLS) == 0)
+    bpy.types.WindowManager.allset_persp_focal = FloatProperty(
+        name="Focal Length", description="Focal length of this view in mm (36 mm film back)",
+        get=_persp_focal_get, set=_persp_focal_set, min=2.5, max=3500.0, precision=1)
+    for i, tool in enumerate(TOOLS):
+        bpy.utils.register_tool(tool, after={"builtin.measure"}, separator=(i % len(_TOOLS) == 0))
+    for tool in PAN_ZOOM_TOOLS:          # after the Dolly Tool, like Maya's Camera Tools menu
+        bpy.utils.register_tool(tool, after={DOLLY_TOOL})
+
 
 def unregister():
+    for tool in reversed(PAN_ZOOM_TOOLS):
+        bpy.utils.unregister_tool(tool)
     for tool in reversed(TOOLS):
         bpy.utils.unregister_tool(tool)
     del bpy.types.WindowManager.allset_persp_focal

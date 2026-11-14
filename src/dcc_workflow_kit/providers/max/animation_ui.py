@@ -232,7 +232,7 @@ def _button(c, x, y, label, command, icon=None, selected=False, width=24):
 
 def _draw_toolbar(c, state):
     y = c.h - 89
-    buttons = [(_msg('Filters'), _command('FILTER'), 'filter', state.selected_only), (_msg('Move Keys'), _command('TOOL', 'MOVE'), 'move', state.tool == 'MOVE'), (_msg('Move Keys Horizontally'), _command('TOOL', 'TIME'), 'right', state.tool == 'TIME'), (_msg('Move Keys Vertically'), _command('TOOL', 'VALUE'), 'angle', state.tool == 'VALUE'), (_msg('Scale Keys'), _command('TOOL', 'SCALE_TIME'), 'scale', state.tool == 'SCALE_TIME'), (_msg('Scale Values'), _command('TOOL', 'SCALE_VALUE'), 'percent', state.tool == 'SCALE_VALUE'), (_msg('Add Keys'), _command('TOOL', 'ADD'), 'key', state.tool == 'ADD'), (_msg('Delete Keys'), 'DELETE', 'minus', False), (_msg('Zoom Extents'), 'FRAME_ALL', 'frame', False), (_msg('Zoom Selected'), 'FRAME_SELECTED', 'selection_region', False), (_msg('Pan'), _command('TOOL', 'PAN'), 'pan', state.tool == 'PAN'), (_msg('Zoom'), _command('TOOL', 'ZOOM'), 'zoom', state.tool == 'ZOOM')]
+    buttons = [(_msg('Filters'), _command('FILTER'), 'filter', state.selected_only), (_msg('Move Keys'), _command('TOOL', 'MOVE'), 'move', state.tool == 'MOVE'), (_msg('Move Keys Horizontally'), _command('TOOL', 'TIME'), _msg('right'), state.tool == 'TIME'), (_msg('Move Keys Vertically'), _command('TOOL', 'VALUE'), 'angle', state.tool == 'VALUE'), (_msg('Scale Keys'), _command('TOOL', 'SCALE_TIME'), 'scale', state.tool == 'SCALE_TIME'), (_msg('Scale Values'), _command('TOOL', 'SCALE_VALUE'), 'percent', state.tool == 'SCALE_VALUE'), (_msg('Add Keys'), _command('TOOL', 'ADD'), 'key', state.tool == 'ADD'), (_msg('Delete Keys'), 'DELETE', 'minus', False), (_msg('Zoom Extents'), 'FRAME_ALL', 'frame', False), (_msg('Zoom Selected'), 'FRAME_SELECTED', 'selection_region', False), (_msg('Pan'), _command('TOOL', 'PAN'), 'pan', state.tool == 'PAN'), (_msg('Zoom'), _command('TOOL', 'ZOOM'), 'zoom', state.tool == 'ZOOM')]
     x = 5
     for (label, cmd, icon, pressed) in buttons:
         _button(c, x, y, label, cmd, icon, pressed)
@@ -358,7 +358,7 @@ def draw(context, kind=_msg('Curve')):
                     continue
                 selected = key.select_control_point
                 if selected and state.handles and (key.interpolation == 'BEZIER'):
-                    for side in ('left', 'right'):
+                    for side in (_msg('left'), _msg('right')):
                         handle = getattr(key, 'handle_' + side)
                         (hx, hy) = _screen(state, plot, handle.x, handle.y * factor)
                         clipped = _clip_line((sx, sy), (hx, hy), plot)
@@ -491,8 +491,8 @@ def _restore(snapshot):
         key.handle_left_type = item['left_type']
         key.handle_right_type = item['right_type']
         key.interpolation = item['interpolation']
-        key.handle_left = item['left']
-        key.handle_right = item['right']
+        key.handle_left = item[_msg('left')]
+        key.handle_right = item[_msg('right')]
 
 def transform_keys(snapshot, delta_time=0.0, delta_value=0.0, time_scale=1.0, value_scale=1.0, origin_time=0.0, origin_value=0.0):
     """Transform saved coordinates; repeated moves never accumulate rounding error."""
@@ -507,7 +507,7 @@ def transform_keys(snapshot, delta_time=0.0, delta_value=0.0, time_scale=1.0, va
         else:
             key.handle_left_type = item['left_type']
             key.handle_right_type = item['right_type']
-        for (attr, old) in (('co', item['co']), ('handle_left', item['right'] if reverse else item['left']), ('handle_right', item['left'] if reverse else item['right'])):
+        for (attr, old) in (('co', item['co']), ('handle_left', item[_msg('right')] if reverse else item[_msg('left')]), ('handle_right', item[_msg('left')] if reverse else item[_msg('right')])):
             target = getattr(key, attr)
             target.x = origin_time + (old[0] - origin_time) * time_scale + delta_time
             target.y = (origin_value + (old[1] * factor - origin_value) * value_scale + delta_value) / factor
@@ -550,8 +550,8 @@ def paste_keys(context, state):
         key.interpolation = item['interpolation']
         key.handle_left_type = item['left_type']
         key.handle_right_type = item['right_type']
-        key.handle_left = (frame + item['left'][0], item['value'] + item['left'][1])
-        key.handle_right = (frame + item['right'][0], item['value'] + item['right'][1])
+        key.handle_left = (frame + item[_msg('left')][0], item['value'] + item[_msg('left')][1])
+        key.handle_right = (frame + item[_msg('right')][0], item['value'] + item[_msg('right')][1])
         key.select_control_point = True
         count += 1
         changed.add(curve)
@@ -762,7 +762,7 @@ def active_event(context, event):
     if event.type in {'ESC', 'RIGHTMOUSE'} and event.value == 'PRESS':
         if d['kind'] not in {'PAN', 'ZOOM', 'BOX', 'ZOOM_BOX', 'SCRUB'}:
             _finish_snapshot(context, d['snapshot'], True)
-        (state.tmin, state.tmax, state.vmin, state.vmax) = d['view']
+        (state.tmin, state.tmax, state.vmin, state.vmax) = d[_msg('view')]
         state.rectangle = None
         _drag = None
         runtime.redraw()
@@ -807,7 +807,7 @@ def active_event(context, event):
     if event.type != 'MOUSEMOVE':
         return {'RUNNING_MODAL'}
     (px, py, pw, ph) = d['plot']
-    (t0, t1, v0, v1) = d['view']
+    (t0, t1, v0, v1) = d[_msg('view')]
     dt = (x - d['x']) / pw * (t1 - t0)
     dv = (y - d['y']) / ph * (v1 - v0)
     if state.snap and (not event.alt):
@@ -837,7 +837,7 @@ def active_event(context, event):
         key = item['key']
         side = d['side']
         key.handle_left_type = key.handle_right_type = 'FREE'
-        old = item['left' if side == 'left' else 'right']
+        old = item[_msg('left') if side == _msg('left') else _msg('right')]
         factor = _display_scale(item['curve'])
         getattr(key, 'handle_' + side).xy = (old[0] + dt, old[1] + dv / factor)
         _changed(context, [item['obj']])

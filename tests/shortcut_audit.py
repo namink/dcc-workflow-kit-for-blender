@@ -23,5 +23,5 @@ for profile in ('MAX','MAYA'):
    except Exception as e:fail.append({'map':km.name,'key':k.type,'op':k.idname,'error':str(e)})
  report[profile]={'checked':len(rows),'failures':fail,'bindings':rows}
  core.set_mode('BLENDER',layout=False)
-out=ROOT/'test-results/shortcut-audit-4.5.json';out.write_text(json.dumps(report,ensure_ascii=False,indent=2,default=str),encoding='utf-8')
+out=ROOT/'test-results/shortcut-audit-5.3.json';out.write_text(json.dumps(report,ensure_ascii=False,indent=2,default=str),encoding='utf-8')
 for p,v in report.items():print(p,'CHECKED',v['checked'],'FAIL',len(v['failures']),json.dumps(v['failures'],ensure_ascii=False))

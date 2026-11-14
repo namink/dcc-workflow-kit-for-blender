@@ -1,27 +1,27 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Simplified Chinese localization by namink; additional display integration 2026-10-31.
-"""Maya pre-selection highlight in mesh edit mode (docs/steps/step_30.md, step_74.md 「계획」).
+"""Maya pre-selection highlight in mesh edit mode.
 
 Maya highlights the component under the mouse before you click (``preSelectHilite true``),
 following the select mode, also while the
 Move / Rotate / Scale tool is active: a vertex = 5 px red
 square, an edge = 2 px red line (an edge also near its vertices), a face = red outline + red stipple.
-Maya 2022 doesn't highlight objects in object mode (pre_01), so neither does the kit.
+Maya 2022 doesn't highlight objects in object mode (pre_01), so neither does the kit,
+except for component targets while editing a custom pivot.
 
-Blender's ``GIZMO_GT_mesh_preselect_elem_3d`` (step 30) picks the nearest vertex in every select
-mode (measured, step_74.md), so this is a Python gizmo with its own picking:
+Blender's ``GIZMO_GT_mesh_preselect_elem_3d`` picks the nearest vertex in every select
+mode, so this is a Python gizmo with its own picking:
 
 - ``pick_*`` (numpy, no bpy): nearest vertex / edge within ``RADIUS_PX`` on screen that the
   ``visible`` callback accepts; a face = the one under the cursor (BVH ray cast).
 - Occlusion: a per-object ``BVHTree`` of the visible faces, cached until the next depsgraph update;
   X-ray (the shading flag) turns it off.
 - With a transform tool, ``test_select`` declines over the manipulator's handles (a Python gizmo's
-  test_select wins the hover over them, step 30).
+  test_select wins the hover over them).
 - The gizmo has no invoke / modal, so a click goes on to the select tool (GUI test).
 """
-from ..i18n import source_message as _dcc_source, display_message as _dcc_display, format_message as _dcc_format
-from ..i18n import tr as _zh, enum_items as _zh_enum, native as _zh_native
+
 import math
+
 import bpy
 import gpu
 import numpy as np
@@ -29,40 +29,52 @@ from bpy_extras import view3d_utils
 from gpu_extras.batch import batch_for_shader
 from mathutils import Vector
 from mathutils.bvhtree import BVHTree
+
 MODES = {'EDIT_MESH'}
-SELECT_TOOLS = ('builtin.select', 'allset.target_weld_tool', 'allset.cut_sew_tool')
-TRANSFORM_TOOLS = {'builtin.move': 'TRANSLATE', 'builtin.scale': 'RESIZE', 'builtin.rotate': 'ROTATE', 'builtin.transform': 'TRANSFORM'}
-RGB = (1.0, 0.0, 0.0)
+SELECT_TOOLS = ("builtin.select", "allset.target_weld_tool", "allset.cut_sew_tool")   # the edge a press cuts
+TRANSFORM_TOOLS = {"builtin.move": 'TRANSLATE', "builtin.scale": 'RESIZE', "builtin.rotate": 'ROTATE',
+                   "builtin.transform": 'TRANSFORM'}
+
+# --- Maya-style look ------------------------------------------------------------------
+RGB = (1.0, 0.0, 0.0)               # preselect_hilite_component
 VERT_PX = 5.0
 LINE_PX = 2.0
-FACE_FILL = (0.85, 0.26, 0.25, 0.35)
-RADIUS_PX = 16.0
-HANDLE_PX = 12.0
-ROTATE_RING = 1.25
-_last = []
-_cache = {}
+FACE_FILL = (0.85, 0.26, 0.25, 0.35)  # the #d84240 stipple seen as a fill
+RADIUS_PX = 16.0                    # pre-selection radius
+HANDLE_PX = 12.0                    # keep the hover on a manipulator handle this close
+ROTATE_RING = 1.25                  # Transform tool (Blender's gizmo): disc of gizmo_size / 2 x this
+
+_last = []    # the live group (tests read its gizmo)
+_cache = {}   # object pointer -> MeshCache
+_held = {}    # object pointer -> edit BMesh wrapper of a cache dropped while a transform ran (see _drop_caches)
+_coordinate_session = None  # Quad Draw modal: topology is fixed until release
+
+
+# --- pure helpers (tests/test_step74_preselect.py) ----------------------------------------------------
 
 def project(co, persp, width, height):
     """Screen xy (N x 2) and an in-front mask of world points ``co`` (N x 3) under ``persp`` (4 x 4)."""
     co = np.asarray(co, dtype=np.float64).reshape(-1, 3)
     h = np.hstack([co, np.ones((len(co), 1))]) @ np.asarray(persp, dtype=np.float64).T
     w = h[:, 3]
-    front = w > 1e-09
+    front = w > 1e-9
     w = np.where(front, w, 1.0)
     xy = np.empty((len(co), 2))
     xy[:, 0] = (h[:, 0] / w + 1.0) * 0.5 * width
     xy[:, 1] = (h[:, 1] / w + 1.0) * 0.5 * height
-    return (xy, front)
+    return xy, front
+
 
 def segment_distance(p, a, b):
     """Distances from point ``p`` to segments a[i]-b[i] (N x 2 each) and the segment parameters t."""
-    (a, b) = (np.asarray(a, dtype=np.float64), np.asarray(b, dtype=np.float64))
+    a, b = np.asarray(a, dtype=np.float64), np.asarray(b, dtype=np.float64)
     d = b - a
     ll = (d * d).sum(axis=1)
     t = np.where(ll > 1e-12, ((np.asarray(p) - a) * d).sum(axis=1) / np.where(ll > 1e-12, ll, 1.0), 0.0)
     t = np.clip(t, 0.0, 1.0)
     q = a + d * t[:, None]
-    return (np.hypot(q[:, 0] - p[0], q[:, 1] - p[1]), t)
+    return np.hypot(q[:, 0] - p[0], q[:, 1] - p[1]), t
+
 
 def pick_vert(xy, ok, mouse, radius, visible):
     """Index of the nearest ``ok`` point within ``radius`` that ``visible(i)`` accepts, or None."""
@@ -76,13 +88,14 @@ def pick_vert(xy, ok, mouse, radius, visible):
             return int(i)
     return None
 
+
 def pick_edge(xy, edges, ok, mouse, radius, visible, fallback=()):
     """Index of the nearest ``ok`` edge within ``radius`` (screen) that ``visible(i, t)`` accepts; else the
     nearest of ``fallback`` (the edges of the face under the cursor); else None."""
     edges = np.asarray(edges, dtype=np.int64).reshape(-1, 2)
     if len(edges) == 0:
         return None
-    (dist, t) = segment_distance(mouse, xy[edges[:, 0]], xy[edges[:, 1]])
+    dist, t = segment_distance(mouse, xy[edges[:, 0]], xy[edges[:, 1]])
     for i in np.argsort(dist):
         if dist[i] > radius:
             break
@@ -92,6 +105,7 @@ def pick_edge(xy, edges, ok, mouse, radius, visible, fallback=()):
     if fallback:
         return int(min(fallback, key=lambda i: dist[i]))
     return None
+
 
 def near_handles(mouse, center, tips, center_half, reach):
     """True when ``mouse`` is on a manipulator: within ``center_half`` + ``reach`` of ``center`` or within
@@ -103,44 +117,101 @@ def near_handles(mouse, center, tips, center_half, reach):
     if not tips:
         return False
     a = np.repeat(np.asarray([center], dtype=np.float64), len(tips), axis=0)
-    (dist, _t) = segment_distance(mouse, a, np.asarray(tips, dtype=np.float64))
+    dist, _t = segment_distance(mouse, a, np.asarray(tips, dtype=np.float64))
     return bool((dist <= reach).any())
 
+
+# --- per-object cache ---------------------------------------------------------------------------------
+
+def mesh_arrays(bm):
+    """Read edit topology through Blender's bulk API, releasing the temporary ID.
+
+    BMesh has no foreach_get. A native copy avoids hundreds of thousands of
+    Python corner wrappers on dense retopology, without touching the real mesh.
+    """
+    mesh=bpy.data.meshes.new('_allset_mesh_cache')
+    try:
+        bm.to_mesh(mesh)
+        def read(collection,name,size,dtype):
+            data=np.empty(size,dtype=dtype);collection.foreach_get(name,data);return data
+        co=read(mesh.vertices,'co',len(mesh.vertices)*3,'float64').reshape(-1,3)
+        edges=read(mesh.edges,'vertices',len(mesh.edges)*2,'int32').reshape(-1,2)
+        vok=~read(mesh.vertices,'hide',len(mesh.vertices),'bool')
+        eok=~read(mesh.edges,'hide',len(mesh.edges),'bool')
+        sizes=read(mesh.polygons,'loop_total',len(mesh.polygons),'int32')
+        starts=read(mesh.polygons,'loop_start',len(mesh.polygons),'int32')
+        shown=~read(mesh.polygons,'hide',len(mesh.polygons),'bool')
+        corners=read(mesh.loops,'vertex_index',len(mesh.loops),'int32')
+        loop_edges=read(mesh.loops,'edge_index',len(mesh.loops),'int32')
+        counts=np.bincount(loop_edges,minlength=len(edges))
+        face_vertex=np.zeros(len(co),dtype=bool);face_vertex[corners]=True
+        border=np.zeros(len(co),dtype=bool);border[edges[counts==1].ravel()]=True
+        groups=[(np.flatnonzero(sizes==n),corners[starts[sizes==n,None]+np.arange(n)]) for n in np.unique(sizes)]
+        return co,edges,vok,eok,counts,border|~face_vertex,shown,groups
+    finally:bpy.data.meshes.remove(mesh)
+
 class MeshCache:
-    """World vertex positions, edges, visible-face BVH and (lazily) selection of one edit mesh.
-    Rebuilt after geometry / transform updates only (selection updates keep it, step_74.md)."""
+    """World vertex positions, edges, visible-face BVH and (lazily) selection of one mesh.
+    Rebuilt after geometry / transform updates only (selection updates keep it)."""
 
     def __init__(self, ob):
         import bmesh
         self.ob_ptr = ob.as_pointer()
+        self.revision = 0
         self.name = ob.name
-        self.bm = bm = bmesh.from_edit_mesh(ob.data)
+        self.editing = ob.mode == 'EDIT'
+        self.bm = bm = bmesh.from_edit_mesh(ob.data) if self.editing else bmesh.new()
+        if not self.editing:
+            bm.from_mesh(ob.data)
+            bm.normal_update()
         bm.verts.ensure_lookup_table()
         bm.edges.ensure_lookup_table()
         bm.faces.ensure_lookup_table()
         self.mw = ob.matrix_world.copy()
         self.inv = self.mw.inverted_safe()
         m = np.array(self.mw, dtype=np.float64)
-        local = np.array([v.co[:] for v in bm.verts], dtype=np.float64).reshape(-1, 3)
+        self.arrays=None
+        if self.editing and len(bm.verts)>=2048:
+            self.arrays=mesh_arrays(bm)
+            local,self.edges,self.vok,self.eok,*_=self.arrays
+        else:
+            local = np.array([v.co[:] for v in bm.verts], dtype=np.float64).reshape(-1, 3)
+            self.vok = np.array([not v.hide for v in bm.verts], dtype=bool)
+            self.edges = np.array([(e.verts[0].index, e.verts[1].index) for e in bm.edges],dtype=np.int64).reshape(-1,2)
+            self.eok = np.array([not e.hide for e in bm.edges], dtype=bool)
         self.co = local @ m[:3, :3].T + m[:3, 3]
-        self.vok = np.array([not v.hide for v in bm.verts], dtype=bool)
-        self.edges = np.array([(e.verts[0].index, e.verts[1].index) for e in bm.edges], dtype=np.int64).reshape(-1, 2)
-        self.eok = np.array([not e.hide for e in bm.edges], dtype=bool)
-        hidden = [f.index for f in bm.faces if f.hide]
+        hidden = np.flatnonzero(~self.arrays[6]).tolist() if self.arrays else [f.index for f in bm.faces if f.hide]
         if not hidden:
-            self.bvh_map = None
-            self.bvh = BVHTree.FromBMesh(bm) if len(bm.faces) else None
+            self.bvh_map = None                         # BVH index = face index
+            self._bvh = BVHTree.FromBMesh(bm) if len(bm.faces) else None
         else:
             vis = [f.index for f in bm.faces if not f.hide]
             self.bvh_map = vis
-            self.bvh = BVHTree.FromPolygons([v.co.copy() for v in bm.verts], [self.face_verts(i) for i in vis]) if vis else None
+            self._bvh = BVHTree.FromPolygons([v.co.copy() for v in bm.verts],
+                                            [self.face_verts(i) for i in vis]) if vis else None
         self._sel = None
+        self._bvh_dirty = False
+
+    @property
+    def bvh(self):
+        if self._bvh_dirty:
+            if self.bvh_map is None:
+                self._bvh=BVHTree.FromBMesh(self.bm) if len(self.bm.faces) else None
+            else:
+                self._bvh=BVHTree.FromPolygons([v.co.copy() for v in self.bm.verts],[self.face_verts(i) for i in self.bvh_map])
+            self._bvh_dirty=False
+        return self._bvh
+
+    def __del__(self):
+        bm = getattr(self, "bm", None)
+        if not getattr(self, "editing", True) and bm is not None and bm.is_valid:
+            bm.free()
 
     def face_verts(self, i):
-        return tuple((v.index for v in self.bm.faces[i].verts))
+        return tuple(v.index for v in self.bm.faces[i].verts)
 
     def face_edges(self, i):
-        return tuple((e.index for e in self.bm.faces[i].edges))
+        return tuple(e.index for e in self.bm.faces[i].edges)
 
     def face_ok(self, i):
         return not self.bm.faces[i].hide
@@ -149,9 +220,12 @@ class MeshCache:
         """(world points of the selected vertices, active element centre or None), cached."""
         if self._sel is None:
             import bmesh
-            (bm, mw) = (self.bm, self.mw)
-            pts = [mw @ v.co for v in bm.verts if v.select and (not v.hide)]
-            (el, active) = (bm.select_history.active, None)
+            bm, mw = self.bm, self.mw
+            if not self.editing:
+                self._sel = ([mw.translation.copy()], mw.translation.copy())
+                return self._sel
+            pts = [mw @ v.co for v in bm.verts if v.select and not v.hide]
+            el, active = bm.select_history.active, None
             if isinstance(el, bmesh.types.BMVert):
                 active = mw @ el.co
             elif isinstance(el, bmesh.types.BMEdge):
@@ -167,35 +241,91 @@ class MeshCache:
             return None
         lo = self.inv @ origin
         ld = (self.inv.to_3x3() @ direction).normalized()
-        (loc, _n, idx, _d) = self.bvh.ray_cast(lo, ld)
+        loc, _n, idx, _d = self.bvh.ray_cast(lo, ld)
         if loc is None:
             return None
-        return ((self.mw @ loc - origin).length, idx if self.bvh_map is None else self.bvh_map[idx])
+        return (self.mw @ loc - origin).length, (idx if self.bvh_map is None else self.bvh_map[idx])
+
 
 def caches(context):
+    if _held and not _edit_modal_running():
+        _held.clear()
     out = []
-    for ob in context.objects_in_mode_unique_data or ():
+    objects = context.selected_objects if context.mode == 'OBJECT' else context.objects_in_mode_unique_data or ()
+    for ob in objects:
         if ob is None or ob.type != 'MESH':
             continue
+        if context.mode == 'OBJECT':
+            space = getattr(context, "space_data", None)
+            viewport = {"viewport": space} if space is not None and space.type == 'VIEW_3D' else {}
+            if not ob.visible_get(**viewport):
+                continue
         c = _cache.get(ob.as_pointer())
-        if c is None or c.name != ob.name:
+        if c is None or c.name != ob.name or c.editing != (ob.mode == 'EDIT'):
             c = _cache[ob.as_pointer()] = MeshCache(ob)
         out.append((ob, c))
     return out
+
 
 @bpy.app.handlers.persistent
 def invalidate(_scene=None, depsgraph=None):
     """depsgraph_update_post: drop the caches on a geometry / transform change; a selection-only change
     keeps them and only forgets the selection."""
+    global _coordinate_session
     if depsgraph is not None:
         for u in depsgraph.updates:
             if isinstance(u.id, (bpy.types.Mesh, bpy.types.Object)) and (u.is_updated_geometry or u.is_updated_transform):
+                # Only a running coordinate-only modal can retain topology.
+                # Transforms, other meshes and all explicit invalidations reset it.
+                if _coordinate_session and not u.is_updated_transform and u.id.original.as_pointer() in _coordinate_session:
+                    continue
                 break
         else:
             for c in _cache.values():
                 c._sel = None
             return
+    _coordinate_session=None
+    _drop_caches()
+
+
+def _edit_modal_running():
+    wm = getattr(bpy.context, "window_manager", None)
+    if wm is None:
+        return False
+    from .uv_arrays import editing_now
+    return editing_now(wm)
+
+
+def _drop_caches():
+    """Forget the caches. While a transform / mesh modal runs, the edit BMesh wrappers they held stay referenced
+    until it ends: when the last Python reference to an edit BMesh goes, Python frees the element-pointer layers
+    it added to that BMesh, which moves every loop's data in memory, and Blender's UV correction (Preserve UVs,
+    the edge / vertex slide) keeps pointers into that data for the whole drag: the slid UVs would land on
+    (0, 0) or be written into freed memory."""
+    if _edit_modal_running():
+        for ptr, c in _cache.items():
+            if c.editing and c.bm is not None:
+                _held[ptr] = c.bm
+    else:
+        _held.clear()
     _cache.clear()
+
+
+def coordinates_changed(ob,verts):
+    """Refresh a fixed-topology modal without rebuilding indices, selection or BVH."""
+    global _coordinate_session
+    c=_cache.get(ob.as_pointer())
+    if c is None or not c.editing:return
+    _coordinate_session=(ob.as_pointer(),ob.data.as_pointer())
+    ids=[v.index for v in verts if v.is_valid]
+    if ids:
+        m=np.asarray(c.mw)
+        co=np.asarray([c.bm.verts[i].co[:] for i in ids])
+        c.co[ids]=co@m[:3,:3].T+m[:3,3]
+    c.revision+=1;c._bvh_dirty=True;c._sel=None
+
+
+# --- policy -------------------------------------------------------------------------------------------
 
 def tool_id(context):
     try:
@@ -204,32 +334,43 @@ def tool_id(context):
         return None
     return tool.idname if tool is not None else None
 
+
 def _enabled(context):
     from .. import preferences
     try:
-        if not preferences.get().maya_mode or not preferences.get().preselect_highlight:
+        if not preferences.get().preselect_highlight:
             return False
     except KeyError:
         return False
+    from .pivot_menu import pivot_editing
+    if context.mode in {'OBJECT', 'EDIT_MESH'} and pivot_editing(context):
+        return True
     if context.mode not in MODES:
         return False
     tid = tool_id(context)
     return tid is not None and (tid.startswith(SELECT_TOOLS) or tid in TRANSFORM_TOOLS)
 
+
 def _xray(space):
     shading = space.shading
     return shading.show_xray_wireframe if shading.type == 'WIREFRAME' else shading.show_xray
 
+
+def pivot_picking(context):
+    from .pivot_menu import pivot_editing
+    return context.mode in {'OBJECT', 'EDIT_MESH'} and pivot_editing(context)
+
+
 def _handles_block(context, region, rv3d, mouse, cs):
     """The mouse is over the transform manipulator of the active tool."""
-    kind = TRANSFORM_TOOLS.get(tool_id(context))
+    from ..ui import manipulator
+    kind = manipulator.tool_kind(context) or TRANSFORM_TOOLS.get(tool_id(context))
     if kind is None:
         return False
-    sels = [c.selection() for (_ob, c) in cs]
+    sels = [c.selection() for _ob, c in cs]
     pts = [p for s_ in sels for p in s_[0]]
     if not pts:
         return False
-    from ..ui import manipulator
     act = next((s_[1] for s_ in sels if s_[1] is not None), None)
     ts = context.scene.tool_settings
     center = manipulator.center_of(pts, act, ts.transform_pivot_point, context.scene.cursor.location)
@@ -238,15 +379,28 @@ def _handles_block(context, region, rv3d, mouse, cs):
         return False
     scale = context.preferences.system.ui_scale or 1.0
     size = context.preferences.view.gizmo_size
-    if kind in ('ROTATE', 'TRANSFORM'):
+    if kind == 'TRANSFORM':
         return math.hypot(mouse[0] - c2.x, mouse[1] - c2.y) <= size / 2.0 * scale * ROTATE_RING
-    length_px = manipulator.ARROW_PX * size / 75.0 * scale
+    length_px = manipulator.ARROW_PX * size / 75.0 * scale * manipulator.SIZE[0]
+    if kind == 'ROTATE':     # the kit's rings: inside the view ring (the trackball and every ring)
+        ring = length_px * manipulator.ROTATE_RING_R * manipulator.VIEW_RING
+        return math.hypot(mouse[0] - c2.x, mouse[1] - c2.y) <= ring + 3.0 * scale
+    if pivot_picking(context):          # the pivot orientation rings (object or component pivot)
+        cached = manipulator.PIVOT_RING_CACHE.get(region.as_pointer())
+        for xy in cached[1] if cached is not None else ():
+            distances, _t = segment_distance(mouse, xy, np.roll(xy, -1, axis=0))
+            if bool((distances <= 3.0*scale).any()):
+                return True
     right = rv3d.view_rotation @ Vector((1.0, 0.0, 0.0))
     p1 = view3d_utils.location_3d_to_region_2d(region, rv3d, center + right)
     px_per_world = (p1 - c2).length if p1 is not None else 0.0
     tips = []
-    if px_per_world > 1e-09:
-        frame = manipulator.axes_of(context, manipulator.slot_type(context.scene, kind), rv3d)
+    if px_per_world > 1e-9:
+        frame = manipulator.axes_of(context, 'CURSOR' if context.mode == 'EDIT_MESH' and pivot_picking(context)
+                                     else manipulator.slot_type(context.scene, kind), rv3d)
+        if context.mode == 'OBJECT' and pivot_picking(context) and context.active_object is not None:
+            from . import pivot
+            frame = pivot.axes_for(context.active_object)
         for i in range(3):
             t = view3d_utils.location_3d_to_region_2d(region, rv3d, center + frame.col[i] * (length_px / px_per_world))
             if t is not None:
@@ -254,23 +408,30 @@ def _handles_block(context, region, rv3d, mouse, cs):
     half = length_px * manipulator.CENTER_HALF
     return near_handles(mouse, (c2.x, c2.y), tips, half, HANDLE_PX * scale)
 
+
 def _extrude_block(context, region, rv3d, mouse):
-    """The mouse is over the polyExtrudeFace arrow or the In-View Editor box (step 65): like the manipulator's
-    handles, they must get the click, not the hovered face under them (step 97)."""
+    """The mouse is over the polyExtrudeFace arrow or the In-View Editor box: like the manipulator's
+    handles, they must get the click, not the hovered face under them."""
     from ..ui import in_view
+    from ..ui import smart_extrude
+    if smart_extrude.handles_hit(context, region, rv3d, mouse, HANDLE_PX * (context.preferences.system.ui_scale or 1.0)):
+        return True
     try:
         if not in_view.manip_visible(context):
             return False
-        (ob, rec) = in_view.record(context)
+        ob, rec = in_view.record(context)
         frame = in_view.cap_frame(ob, rec) if rec is not None else None
     except (ReferenceError, AttributeError):
         return False
     if frame is None:
         return False
-    (_r, lay) = in_view.current_layout(context)
-    if lay is not None and any((x0 <= mouse[0] <= x1 and y0 <= mouse[1] <= y1 for (x0, y0, x1, y1) in (lay['box'], lay['title']))):
+    _r, lay = in_view.current_layout(context)
+    if lay is not None and any(x0 <= mouse[0] <= x1 and y0 <= mouse[1] <= y1
+                               for x0, y0, x1, y1 in (lay["box"], lay["title"])):
         return True
+    # every handle of Maya's extrude manipulator (arrows, scale cubes, plane handles, centre square)
     return in_view.handles_hit(context, region, rv3d, mouse, HANDLE_PX * (context.preferences.system.ui_scale or 1.0))
+
 
 def pick(context, region, rv3d, mouse):
     """(object pointer, 'VERT' / 'EDGE' / 'FACE', index) under ``mouse`` (region pixels), or None."""
@@ -278,14 +439,15 @@ def pick(context, region, rv3d, mouse):
     if not cs or _handles_block(context, region, rv3d, mouse, cs) or _extrude_block(context, region, rv3d, mouse):
         return None
     ts = context.tool_settings
-    (vmode, emode, fmode) = tuple(ts.mesh_select_mode)
+    multi = pivot_picking(context)
+    vmode, emode, fmode = (True, True, True) if multi else tuple(ts.mesh_select_mode)
     xray = _xray(context.space_data)
     scale = context.preferences.system.ui_scale or 1.0
     radius = RADIUS_PX * scale
     origin = view3d_utils.region_2d_to_origin_3d(region, rv3d, mouse)
     direction = view3d_utils.region_2d_to_vector_3d(region, rv3d, mouse)
-    hit = None
-    for (_ob, c) in cs:
+    hit = None   # (distance, cache, face index)
+    for _ob, c in cs:
         h = c.ray(origin, direction)
         if h is not None and (hit is None or h[0] < hit[0]):
             hit = (h[0], c, h[1])
@@ -302,59 +464,66 @@ def pick(context, region, rv3d, mouse):
         if dist < 1e-12:
             return False
         d /= dist
-        for (_ob, c) in cs:
+        for _ob, c in cs:
             h = c.ray(o, d)
-            if h is not None and h[0] < dist * (1.0 - 0.0001) - 1e-06:
+            if h is not None and h[0] < dist * (1.0 - 1e-4) - 1e-6:
                 return True
         return False
-    if fmode and (not (vmode or emode)):
+
+    if fmode and not (vmode or emode):
         return None if hit is None else (hit[1].ob_ptr, 'FACE', hit[2])
-    best = None
+    best = None   # (screen distance, result)
     persp = rv3d.perspective_matrix
-    for (_ob, c) in cs:
-        (xy, front) = project(c.co, persp, region.width, region.height)
+    for _ob, c in cs:
+        xy, front = project(c.co, persp, region.width, region.height)
         if vmode:
             i = pick_vert(xy, c.vok & front, mouse, radius, lambda i, c=c: not occluded(Vector(c.co[i])))
             if i is not None:
                 d = math.hypot(xy[i, 0] - mouse[0], xy[i, 1] - mouse[1])
-                if best is None or d < best[0]:
+                if best is None or best[1][1] != 'VERT' or d < best[0]:
                     best = (d, (c.ob_ptr, 'VERT', i))
-        elif emode:
-            fallback = c.face_edges(hit[2]) if hit is not None and hit[1] is c else ()
+        if emode and (not vmode or multi) and (best is None or best[1][1] != 'VERT'):
+            fallback = c.face_edges(hit[2]) if not multi and hit is not None and hit[1] is c else ()
             ok = c.eok & front[c.edges[:, 0]] & front[c.edges[:, 1]] if len(c.edges) else c.eok
 
             def vis(i, t, c=c):
-                (a, b) = (c.co[c.edges[i, 0]], c.co[c.edges[i, 1]])
+                a, b = c.co[c.edges[i, 0]], c.co[c.edges[i, 1]]
                 return not occluded(Vector(a + (b - a) * t))
             i = pick_edge(xy, c.edges, ok, mouse, radius, vis, fallback)
             if i is not None:
-                (d, _t) = segment_distance(mouse, xy[c.edges[[i], 0]], xy[c.edges[[i], 1]])
+                d, _t = segment_distance(mouse, xy[c.edges[[i], 0]], xy[c.edges[[i], 1]])
                 d = float(d[0]) if i not in fallback else radius + 1.0
                 if best is None or d < best[0]:
                     best = (d, (c.ob_ptr, 'EDGE', i))
-    return None if best is None else best[1]
+    if best is not None:
+        return best[1]
+    return (hit[1].ob_ptr, 'FACE', hit[2]) if multi and hit is not None else None
+
+
+# --- the gizmo ----------------------------------------------------------------------------------------
 
 def _cache_of(ptr):
     return _cache.get(ptr)
 
+
 class ALLSET_GT_preselect(bpy.types.Gizmo):
-    bl_idname = 'ALLSET_GT_preselect'
+    bl_idname = "ALLSET_GT_preselect"
 
     def setup(self):
-        self.target = None
+        self.target = None          # (object pointer, kind, index)
         self.vert_index = self.edge_index = self.face_index = -1
 
     def _set(self, target):
         self.target = target
         self.vert_index = self.edge_index = self.face_index = -1
         if target is not None:
-            setattr(self, {'VERT': 'vert_index', 'EDGE': 'edge_index', 'FACE': 'face_index'}[target[1]], target[2])
+            setattr(self, {'VERT': "vert_index", 'EDGE': "edge_index", 'FACE': "face_index"}[target[1]], target[2])
 
     def test_select(self, context, location):
-        (region, rv3d) = (context.region, context.region_data)
+        region, rv3d = context.region, context.region_data
         try:
             target = pick(context, region, rv3d, (float(location[0]), float(location[1])))
-        except ReferenceError:
+        except ReferenceError:      # the edit mesh changed under the cache
             invalidate()
             target = None
         if target != self.target:
@@ -368,16 +537,16 @@ class ALLSET_GT_preselect(bpy.types.Gizmo):
         c = _cache_of(self.target[0])
         if c is None:
             return
-        (kind, i) = (self.target[1], self.target[2])
+        kind, i = self.target[1], self.target[2]
         scale = context.preferences.system.ui_scale or 1.0
         region = context.region
         gpu.state.depth_test_set('NONE')
         gpu.state.blend_set('ALPHA')
         if kind == 'VERT':
-            shader = gpu.shader.from_builtin('UNIFORM_COLOR')
+            shader = gpu.shader.from_builtin('POINT_UNIFORM_COLOR')     # sized points on Vulkan / Metal too
             gpu.state.point_size_set(VERT_PX * scale)
-            batch = batch_for_shader(shader, 'POINTS', {'pos': [tuple(c.co[i])]})
-            shader.uniform_float('color', (*RGB, 1.0))
+            batch = batch_for_shader(shader, 'POINTS', {"pos": [tuple(c.co[i])]})
+            shader.uniform_float("color", (*RGB, 1.0))
             batch.draw(shader)
             gpu.state.point_size_set(1.0)
         else:
@@ -387,17 +556,18 @@ class ALLSET_GT_preselect(bpy.types.Gizmo):
                 verts = [tuple(c.co[v]) for v in c.face_verts(i)]
                 fill = gpu.shader.from_builtin('UNIFORM_COLOR')
                 tris = [(0, k, k + 1) for k in range(1, len(verts) - 1)]
-                fill.uniform_float('color', FACE_FILL)
-                batch_for_shader(fill, 'TRIS', {'pos': verts}, indices=tris).draw(fill)
+                fill.uniform_float("color", FACE_FILL)
+                batch_for_shader(fill, 'TRIS', {"pos": verts}, indices=tris).draw(fill)
                 lines = []
                 for k in range(len(verts)):
                     lines += [verts[k], verts[(k + 1) % len(verts)]]
             shader = gpu.shader.from_builtin('POLYLINE_UNIFORM_COLOR')
-            shader.uniform_float('viewportSize', (region.width, region.height))
-            shader.uniform_float('lineWidth', LINE_PX * scale)
-            shader.uniform_float('color', (*RGB, 1.0))
-            batch_for_shader(shader, 'LINES', {'pos': lines}).draw(shader)
+            shader.uniform_float("viewportSize", (region.width, region.height))
+            shader.uniform_float("lineWidth", LINE_PX * scale)
+            shader.uniform_float("color", (*RGB, 1.0))
+            batch_for_shader(shader, 'LINES', {"pos": lines}).draw(shader)
         gpu.state.blend_set('NONE')
+
 
 def gizmo():
     """The pre-selection gizmo of the last set-up group, or None."""
@@ -406,10 +576,10 @@ def gizmo():
     except ReferenceError:
         return None
 
+
 class ALLSET_GGT_preselect(bpy.types.GizmoGroup):
-    bl_translation_context = 'MWK:operators/preselect.py:448'
-    bl_idname = 'ALLSET_GGT_preselect'
-    bl_label = _zh_native('Maya Pre-selection Highlight', 'MWK:operators/preselect.py:448')
+    bl_idname = "ALLSET_GGT_preselect"
+    bl_label = "Maya Pre-selection Highlight"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'WINDOW'
     bl_options = {'3D', 'PERSISTENT', 'SELECT'}
@@ -420,16 +590,23 @@ class ALLSET_GGT_preselect(bpy.types.GizmoGroup):
 
     def setup(self, context):
         self.gz = self.gizmos.new(ALLSET_GT_preselect.bl_idname)
-        self.gz.hide_keymap = True
+        self.gz.hide_keymap = True   # a click goes to the select tool, not to a gizmo tweak
         _last[:] = [self]
+
+
 classes = (ALLSET_GT_preselect, ALLSET_GGT_preselect)
+
 
 def register_handlers():
     if invalidate not in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.append(invalidate)
 
+
 def clear():
+    global _coordinate_session
+    _coordinate_session=None
     _last.clear()
     _cache.clear()
+    _held.clear()
     if invalidate in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.remove(invalidate)

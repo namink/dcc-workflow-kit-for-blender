@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Simplified Chinese localization by namink; additional display integration 2026-10-31.
-"""Swap only a Blender UI class's *own* draw function (docs/steps/step_115.md, docs/distribution/listing.md).
+"""Swap only a Blender UI class's *own* draw function.
 
 Blender keeps a header / panel / menu's draw functions in a list once anything is appended or prepended to it
 (``bpy_types._GenericUI._dyn_ui_initialize``, the mechanism ``append`` / ``prepend`` use). Where the kit has to draw
@@ -9,19 +8,23 @@ Blender's own entry in that list, never the class's ``draw`` attribute: other ad
 drawing, and ``restore`` puts Blender's function back at the same place even if others extended the class after us.
 The kit function falls back to Blender's own draw (``original``) outside the kit's areas.
 """
-from ..i18n import source_message as _dcc_source, display_message as _dcc_display, format_message as _dcc_format
+
 import bpy
-_saved = {}
+
+_saved = {}   # (class name, kit function) -> Blender's own draw
+
 
 def _funcs(cls_name):
     return getattr(bpy.types, cls_name)._dyn_ui_initialize()
 
+
 def _own_index(cls_name, funcs):
     """Index of the class's own draw (something may have been prepended before it)."""
-    for (i, f) in enumerate(funcs):
-        if getattr(f, '__qualname__', '') == f'{cls_name}.draw':
+    for i, f in enumerate(funcs):
+        if getattr(f, "__qualname__", "") == f"{cls_name}.draw":
             return i
     return 0
+
 
 def swap(cls_name, fn):
     """Put ``fn`` where ``cls_name``'s own draw is; returns Blender's own draw."""
@@ -34,8 +37,10 @@ def swap(cls_name, fn):
     funcs[i] = fn
     return _saved[key]
 
+
 def original(cls_name, fn):
-    return _saved[cls_name, fn]
+    return _saved[(cls_name, fn)]
+
 
 def restore(cls_name, fn):
     """Blender's own draw back in place of ``fn`` (wherever ``fn`` is now)."""

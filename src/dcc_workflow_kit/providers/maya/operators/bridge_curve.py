@@ -1,0 +1,417 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Bridge path evaluation, scalar ramps and explicit editable NURBS paths."""
+
+import hashlib
+import json
+import math
+
+import bpy
+from mathutils import Matrix, Quaternion, Vector
+
+from . import curves_math
+
+RAMP_DEFAULT = '[[0.0,1.0,1],[1.0,1.0,1]]'
+REFERENCE = 'allset_bridge_path_'
+_dirty = set()
+_updating = False
+_revisions = {}
+
+
+def reference_key(name):
+    return REFERENCE+hashlib.blake2s(name.encode('utf-8'), digest_size=12).hexdigest()
+
+
+def ramp_points(text):
+    points = json.loads(text or RAMP_DEFAULT)
+    if not isinstance(points, list) or not 1 <= len(points) <= 256:
+        raise ValueError('A taper ramp requires between 1 and 256 points')
+    result = []
+    for point in points:
+        if (not isinstance(point, (list, tuple)) or len(point) != 3
+                or not all(isinstance(v, (int, float)) and math.isfinite(v) for v in point)
+                or not 0 <= point[0] <= 1 or point[1] < 0 or point[2] not in (0, 1, 2, 3)):
+            raise ValueError('Invalid taper ramp position, value or interpolation')
+        result.append((float(point[0]), float(point[1]), int(point[2])))
+    return sorted(result, key=lambda point: point[0])
+
+
+def ramp_value(points, t):
+    if t <= points[0][0]:
+        return points[0][1]
+    if t >= points[-1][0]:
+        return points[-1][1]
+    for index in range(len(points)-1):
+        x0, y0, mode = points[index]
+        x1, y1, _next_mode = points[index+1]
+        if t >= x1 or x1 <= x0:
+            continue
+        u = (t-x0)/(x1-x0)
+        if mode == 0:
+            return y0
+        if mode == 1:
+            return y0+(y1-y0)*u
+        if mode == 2:
+            return y0+(y1-y0)*u*u*(3-2*u)
+        previous = points[max(0, index-1)]
+        following = points[min(len(points)-1, index+2)]
+        left = (y1-previous[1])/(x1-previous[0])*(x1-x0) if x1 > previous[0] else 0
+        right = (following[1]-y0)/(following[0]-x0)*(x1-x0) if following[0] > x0 else 0
+        return max(0, (2*u**3-3*u*u+1)*y0+(u**3-2*u*u+u)*left
+                   +(-2*u**3+3*u*u)*y1+(u**3-u*u)*right)
+    return points[-1][1]
+
+
+def path_point(a, b, start, end, t):
+    """Quintic endpoint interpolation, with zero endpoint acceleration."""
+    return (a*(1-10*t**3+15*t**4-6*t**5)+b*(10*t**3-15*t**4+6*t**5)
+            +start*(t-6*t**3+8*t**4-3*t**5)+end*(-4*t**3+7*t**4-3*t**5))
+
+
+def directions(source, params):
+    chord = source['b']-source['a']
+    start, end = source['start'].copy(), source['end'].copy()
+    if params.get('direction', 0):
+        if params.get('source_direction', 0):
+            start.negate()
+        if params.get('target_direction', 0):
+            end.negate()
+    else:
+        if start.dot(chord) < 0:
+            start.negate()
+        if end.dot(chord) < 0:
+            end.negate()
+    return start, end
+
+
+def curve_object(ob, params):
+    name = params.get('input_curve', '')
+    curve = ob.data.get(reference_key(name)) or bpy.data.objects.get(name)
+    if curve is None or curve.type != 'CURVE' or not curve.data.splines:
+        raise ValueError('Choose an existing curve or create a Bridge path')
+    return curve
+
+
+def path_evaluator(ob, source, params):
+    a, b = source['a'], source['b']
+    start, end = directions(source, params)
+    if params.get('curve_type', 0) == 0:
+        return lambda t: a.lerp(b, t)
+    if params.get('curve_type') == 2:
+        from .curves_maya import read_spline
+        curve = curve_object(ob, params)
+        data = read_spline(curve.data.splines[0], ob.matrix_world.inverted() @ curve.matrix_world)
+        lo, hi = data.knots[0], data.knots[-1]
+        def evaluate(t):
+            return Vector(curves_math.evaluate(data.cvs, data.knots, data.degree,
+                                              lo+(hi-lo)*t, data.weights))
+        first, last = evaluate(0), evaluate(1)
+        return lambda t: evaluate(t)+(a-first)*(1-t)+(b-last)*t
+    return lambda t: path_point(a, b, start, end, t)
+
+
+def taper_value(taper, t):
+    """A symmetric middle section with smooth tangent transitions at the peak."""
+    u = 2*min(t, 1-t)
+    delta = taper-1
+    slope = max(-3*abs(delta), min(3*abs(delta), taper*taper-1))
+    return ((2*u**3-3*u*u+1)+(u**3-2*u*u+u)*slope
+            +(-2*u**3+3*u*u)*taper)
+
+
+def deform(vertices, source, params, ob=None):
+    if params.get('evaluation_version', 0):
+        return deform_transport(vertices, source, params, ob)
+    if hasattr(vertices, 'ensure_lookup_table'):
+        vertices.ensure_lookup_table()
+    smooth = bool(params.get('curve_type', 0))
+    path = path_evaluator(ob, source, params)
+    start, end = directions(source, params)
+    ramp = ramp_points(params.get('taper_curve', RAMP_DEFAULT))
+    divisions = len(source['rows'])+1
+    for t, row in source['rows']:
+        centre = path(t)
+        axis = path(min(1, t+1/divisions))-path(max(0, t-1/divisions))
+        if axis.length_squared < 1e-16:
+            axis = source['b']-source['a']
+        axis.normalize()
+        reference = start.lerp(end, t).normalized()
+        rotation = reference.rotation_difference(axis) if reference.length_squared else axis.to_track_quat('Z','Y')
+        blend = math.sin(math.pi*t)**1.5 if smooth else 0
+        scale = taper_value(float(params.get('taper', 1)), t)*ramp_value(ramp, t) if smooth else 1
+        twist = Quaternion(axis, math.radians(float(params.get('twist_angle', 0)))*math.sin(math.pi*t))
+        for index, a, b in row:
+            offset = (a-source['a']).lerp(b-source['b'], t)
+            offset = offset.lerp(rotation @ offset, blend)
+            if smooth:
+                offset = twist @ offset
+            vertices[index].co = centre+offset*scale
+
+
+def transported_frames(source, params, ob):
+    fields = ('curve_type', 'direction', 'source_direction', 'target_direction', 'input_curve')
+    key = tuple(params.get(field) for field in fields)
+    if params.get('curve_type') == 2:
+        curve = curve_object(ob, params)
+        relative = ob.matrix_world.inverted() @ curve.matrix_world
+        key += (curve.data.session_uid, _revisions.get(curve.data.session_uid, 0),
+                tuple(value for row in relative for value in row))
+    cached = source.get('frames')
+    if cached is not None and cached[0] == key:
+        return cached[1]
+    path = path_evaluator(ob, source, params)
+    start, end = directions(source, params)
+    step = 1/(len(source['rows'])+1)
+    times = sorted({0.0, 1.0, *(index/32 for index in range(1,32)), *(t for t, _row in source['rows'])})
+    axes = []
+    for t in times:
+        axis = path(min(1,t+step))-path(max(0,t-step))
+        if axis.length_squared < 1e-16:
+            axis = source['b']-source['a']
+        axes.append(axis.normalized())
+    forward, backward = {}, {}
+    rotation, previous = Quaternion(), start.normalized()
+    for t, axis in zip(times, axes):
+        rotation = previous.rotation_difference(axis) @ rotation
+        forward[t] = rotation.copy()
+        previous = axis
+    rotation, previous = Quaternion(), end.normalized()
+    for t, axis in reversed(list(zip(times, axes))):
+        rotation = previous.rotation_difference(axis) @ rotation
+        backward[t] = rotation.copy()
+        previous = axis
+    frames = {t:(path(t), axis, forward[t], backward[t]) for t,axis in zip(times,axes)}
+    source['frames'] = key, frames
+    return frames
+
+
+def deform_transport(vertices, source, params, ob):
+    if hasattr(vertices, 'ensure_lookup_table'):
+        vertices.ensure_lookup_table()
+    frames = transported_frames(source, params, ob)
+    smooth = bool(params.get('curve_type'))
+    ramp = ramp_points(params.get('taper_curve', RAMP_DEFAULT))
+    angle = math.radians(float(params.get('twist_angle', 0))) if smooth else 0
+    identity = Matrix.Identity(3)
+    for t, row in source['rows']:
+        centre, axis, start, end = frames[t]
+        blend = math.sin(math.pi*t)**1.5 if smooth else 0
+        scale = taper_value(float(params.get('taper',1)),t)*ramp_value(ramp,t) if smooth else 1
+        source_twist, target_twist = Quaternion(axis,angle*t), Quaternion(axis,-angle*(1-t))
+        # Compose per-section transforms once instead of rotating every endpoint separately.
+        source_frame = identity*(1-blend)+start.to_matrix()*blend
+        target_frame = identity*(1-blend)+end.to_matrix()*blend
+        source_transform = (source_twist.to_matrix() @ source_frame)*((1-t)*scale)
+        target_transform = (target_twist.to_matrix() @ target_frame)*(t*scale)
+        for index,a,b in row:
+            vertices[index].co = centre+source_transform @ (a-source['a'])+target_transform @ (b-source['b'])
+
+
+def match_offset(data, params):
+    if data is None:
+        return int(params.get('bridge_offset', 0))
+    source, targets, step, path = data
+    raw_offset = int(params.get('bridge_offset',0))
+    manual_offset = raw_offset+1 if raw_offset else 0
+    if not params.get('curve_type'):
+        return manual_offset%len(targets)
+    key = tuple(params.get(field) for field in ('twist_angle','divisions','direction',
+                                               'source_direction','target_direction','bridge_offset'))
+    cached = path.get('match_cache')
+    if cached is not None and cached[0] == key:
+        return cached[1]
+    import numpy as np
+    buffers = path.get('match_buffers')
+    if buffers is None:
+        order, seen, index = [], set(), 0
+        while index not in seen:
+            order.append(index)
+            seen.add(index)
+            index = step[index]
+        if len(order) != len(targets):
+            raise ValueError('The Bridge borders do not have a cyclic correspondence')
+        source_array = np.array([tuple(source[index]) for index in order], dtype=np.float64)
+        target_array = np.array([tuple(targets[index]) for index in order], dtype=np.float64)
+        buffers = source_array, target_array, np.fft.fft(target_array, axis=0)
+        path['match_buffers'] = buffers
+    source_array, target_array, target_fft = buffers
+    start, end = directions(path, params)
+    normal = end.normalized()
+    alignment = start.normalized().rotation_difference(normal)
+    angle = math.radians(float(params.get('twist_angle',0)))*int(params['divisions'])
+    axis = np.array(normal, dtype=np.float64)
+    axis /= np.linalg.norm(axis)
+    aligned = source_array @ np.array(alignment.to_matrix(), dtype=np.float64).T
+    cosine, sine = math.cos(angle), math.sin(angle)
+    rotated = cosine*aligned+sine*np.cross(axis, aligned)+(1-cosine)*np.outer(aligned @ axis, axis)
+    scores = np.fft.ifft(np.conj(np.fft.fft(rotated, axis=0))*target_fft, axis=0).real.sum(axis=1)
+    tolerance = max(1.0, float((aligned*aligned).sum()))*1e-7
+    choices = np.flatnonzero(scores >= scores.max()-tolerance)
+    def phase(index):
+        left, right = aligned[0], target_array[index]
+        value = math.atan2(float(np.dot(axis,np.cross(left,right))), float(np.dot(left,right)))%(2*math.pi)
+        return 0.0 if min(value,2*math.pi-value) < 1e-8 else value
+    best = min((int(index) for index in choices), key=phase)
+    offset = (best+manual_offset)%len(targets)
+    path['match_cache'] = key, offset
+    return offset
+
+
+def prepare(context, ob, record, params):
+    """Create the explicit path inside the caller's normal undoable command."""
+    if params.get('curve_type') != 2:
+        return params
+    if params.get('input_curve'):
+        curve = curve_object(ob, params)
+        ob.data[reference_key(params['input_curve'])] = curve
+        return params
+    from . import model_history, poly_attribute_nodes
+    import bmesh
+    temporary = None
+    if record is not None and record.pre is not None:
+        bm = record.pre
+    elif record is not None:
+        temporary = model_history.input_mesh(ob, record.history_id)
+        bm = temporary
+    else:
+        bm = bmesh.from_edit_mesh(ob.data)
+    try:
+        source = poly_attribute_nodes.path_source(bm, params)
+        if source is None:
+            raise ValueError('Select two compatible Bridge borders')
+        start, end = directions(source, params)
+        a, b = source['a'], source['b']
+        cvs = [a, a+start/5, a+start*2/5, b-end*2/5, b-end/5, b]
+        from .curves_maya import MCurve, _new_curve_object
+        data = MCurve([tuple(point) for point in cvs], curves_math.clamped_uniform(6, 5), 5)
+        curve = _new_curve_object(context, ob.name+'_BridgeCurve', [data], select=False)
+        curve.parent = ob
+        curve.matrix_basis = Matrix.Identity(4)
+        values = dict(params, input_curve=curve.name)
+        ob.data[reference_key(curve.name)] = curve
+        return values
+    finally:
+        if temporary is not None:
+            temporary.free()
+
+
+def cleanup(ob, previous, params):
+    if previous.get('input_curve') or not params.get('input_curve'):
+        return
+    key = reference_key(params['input_curve'])
+    curve = ob.data.get(key)
+    if key in ob.data:
+        del ob.data[key]
+    if curve is not None and curve.parent == ob:
+        data = curve.data
+        bpy.data.objects.remove(curve, do_unlink=True)
+        if data.users == 0:
+            bpy.data.curves.remove(data)
+
+
+@bpy.app.handlers.persistent
+def changed(_scene, depsgraph):
+    if _updating:
+        return
+    for update in depsgraph.updates:
+        data = update.id.original
+        if isinstance(data, bpy.types.Curve):
+            _dirty.add(data.session_uid)
+            _revisions[data.session_uid] = _revisions.get(data.session_uid, 0)+1
+        elif isinstance(data, bpy.types.Object) and data.type == 'CURVE':
+            _dirty.add(data.data.session_uid)
+            _revisions[data.data.session_uid] = _revisions.get(data.data.session_uid, 0)+1
+
+
+def _refresh_newest(ob, changed_curves):
+    """Without Persistent Modeling History: the object's newest kit node, when it is a Bridge along a changed path
+    curve, is rebuilt along the new curve."""
+    from . import extrude, units
+    if not isinstance(ob, bpy.types.Object) or ob.type != 'MESH':
+        return
+    record = extrude.current(ob) if ob.mode == 'EDIT' else extrude.object_record(ob)
+    if record is None or record.spec.kind != 'BRIDGE' or record.params.get('curve_type') != 2:
+        return
+    if curve_object(ob, record.params).data.session_uid not in changed_curves:
+        return
+    extrude.preview(ob, record, dict(record.params), units.maya_unit(bpy.context.scene))
+    if record.fast_preview:
+        extrude.capture_preview(ob, record)
+    record.live = False
+
+
+def refresh():
+    global _updating
+    if not _dirty or _updating:
+        return .1
+    from . import extrude, model_history
+    _updating = True
+    changed_curves = set(_dirty)
+    _dirty.clear()
+    for uid in changed_curves:
+        _revisions[uid] = _revisions.get(uid, 0)+1
+    try:
+        for ob in tuple(bpy.data.objects):
+            data = model_history.read(ob)
+            if data is None:
+                try:
+                    _refresh_newest(ob, changed_curves)
+                except (ValueError, ReferenceError, RuntimeError):
+                    pass
+                continue
+            if model_history.ensure(ob) is None:
+                continue
+            for node in data['nodes']:
+                if node['kind'] != 'BRIDGE' or node['params'].get('curve_type') != 2:
+                    continue
+                try:
+                    curve = curve_object(ob, node['params'])
+                    if curve.data.session_uid not in changed_curves:
+                        continue
+                    record = extrude.RECORDS.get(ob.name)
+                    if record is not None and node['id'] == record.history_id:
+                        extrude.preview(ob, record, dict(record.params), node['unit'])
+                        if record.fast_preview:
+                            extrude.capture_preview(ob, record)
+                        else:
+                            model_history.update(ob, record)
+                        record.live = False
+                    else:
+                        model_history.edit(ob, node['id'], node['params'])
+                except (ValueError, ReferenceError, RuntimeError):
+                    continue
+    finally:
+        _updating = False
+    return .1
+
+
+@bpy.app.handlers.persistent
+def save(_dummy=None):
+    refresh()
+
+
+@bpy.app.handlers.persistent
+def clear(_dummy=None):
+    _dirty.clear()
+    _revisions.clear()
+
+
+def register():
+    if changed not in bpy.app.handlers.depsgraph_update_post:
+        bpy.app.handlers.depsgraph_update_post.append(changed)
+    if not bpy.app.timers.is_registered(refresh):
+        bpy.app.timers.register(refresh, first_interval=.1, persistent=True)
+    for handlers, callback in ((bpy.app.handlers.save_pre, save), (bpy.app.handlers.load_pre, clear)):
+        if callback not in handlers:
+            handlers.append(callback)
+
+
+def unregister():
+    _dirty.clear()
+    _revisions.clear()
+    if changed in bpy.app.handlers.depsgraph_update_post:
+        bpy.app.handlers.depsgraph_update_post.remove(changed)
+    if bpy.app.timers.is_registered(refresh):
+        bpy.app.timers.unregister(refresh)
+    for handlers, callback in ((bpy.app.handlers.save_pre, save), (bpy.app.handlers.load_pre, clear)):
+        if callback in handlers:
+            handlers.remove(callback)

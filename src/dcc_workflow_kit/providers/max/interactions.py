@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Adapted for DCC Workflow Kit.
-from .i18n import msg as _msg, display as _dcc_ui_text, format_message as _dcc_format, error_text as _dcc_ui_error
+from .i18n import msg as _msg, display as _dcc_ui_text, format_message as _dcc_format
 'Creation gestures, region selection and property popups on actual Blender data.'
 import random
 import bpy
@@ -83,7 +83,7 @@ class BSM_OT_draw_primitive(operators.Active, bpy.types.Operator):
         try:
             self._create(context, anchor)
         except RuntimeError as error:
-            self.report({'WARNING'}, _dcc_ui_error(error))
+            self.report({'WARNING'}, _dcc_ui_text(str(error)))
             return {'CANCELLED'}
         context.window_manager.modal_handler_add(self)
         context.window_manager.bsm.prompt = _msg('Drag to define the base; release, then move to set the next dimension')
@@ -448,7 +448,7 @@ class BSM_OT_select_region(operators.Active, bpy.types.Operator):
                     bpy.ops.object.select_all(action='DESELECT') if context.mode == 'OBJECT' else bpy.ops.mesh.select_all(action='DESELECT')
                 bpy.ops.view3d.select_circle(x=int(cx), y=int(cy), radius=int(((x1 - cx) ** 2 + (y1 - cy) ** 2) ** 0.5), wait_for_input=False, mode='SUB' if self.mode == 'SUB' else 'ADD')
             else:
-                path = [{'name': '', 'loc': (float(x), float(y)), 'time': 0.0} for (x, y) in self.points]
+                path = [{_msg('name'): '', 'loc': (float(x), float(y)), 'time': 0.0} for (x, y) in self.points]
                 bpy.ops.view3d.select_lasso(path=path, mode=self.mode)
             if context.mode == 'OBJECT':
                 from . import object_icons
@@ -513,7 +513,7 @@ class BSM_OT_surface_properties(operators.Active, bpy.types.Operator):
             return
         self.layout.label(text=_dcc_ui_text(mod.name))
         for p in mod.bl_rna.properties:
-            if p.identifier not in {'rna_type', 'name', 'type', 'is_override_data_editable', 'persistent_uid', 'is_active', 'use_pin_to_last'} and (not p.is_readonly):
+            if p.identifier not in {'rna_type', _msg('name'), 'type', 'is_override_data_editable', 'persistent_uid', 'is_active', 'use_pin_to_last'} and (not p.is_readonly):
                 self.layout.prop(mod, p.identifier)
     bl_translation_context = _msg('DCCWorkflowKit.Max')
 
@@ -644,6 +644,6 @@ class BSM_MT_categories(bpy.types.Menu):
     bl_label = _msg('Object Categories')
 
     def draw(self, context):
-        self.layout.prop(context.window_manager.bsm, 'category', expand=True)
+        self.layout.prop(context.window_manager.bsm, _msg('category'), expand=True)
     bl_translation_context = _msg('DCCWorkflowKit.Max')
 CLASSES = (BSM_OT_draw_primitive, BSM_OT_select_region, BSM_OT_surface_color, BSM_OT_surface_properties, BSM_MT_orientation, BSM_MT_pivot, BSM_MT_snap, BSM_MT_categories, BSM_OT_navigation, BSM_OT_place_surface)

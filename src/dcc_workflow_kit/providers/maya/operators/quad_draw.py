@@ -1,18 +1,17 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Simplified Chinese localization by namink; additional display integration 2026-10-31.
-"""Maya Quad Draw (Mesh Tools > Quad Draw, Ctrl+Shift+Q): retopology on a live surface (docs/steps/step_144_poly.md
-「계획」 5, GitHub #30).
+"""Maya Quad Draw (Mesh Tools > Quad Draw, Ctrl+Shift+Q): retopology on a live surface
+(GitHub #30).
 
 The kit tool ``allset.quad_draw_tool`` (edit mode, ui/mesh_tools_poly.py) edits one mesh — the selected one, or a new
-empty ``polySurfaceN`` (``allset.quad_draw_start``) — on the reference surface: the live surface (Modify > Make Live,
-``Scene.allset_live``), else every other visible mesh, else Maya's construction plane.
+empty ``polySurfaceN`` (``allset.quad_draw_start``) — on the Make Live mesh list, or Maya's construction plane
+when no surface is live. Unrelated visible meshes never participate.
 
 - click = a dot on the surface; press-drag on a dot / vertex / edge / face = move it along the surface (Auto-weld:
-  a vertex let go within the weld distance of another vertex is merged with it); middle-drag = move too;
+  eligible points snap during the drag and weld on release); middle-drag = move too;
 - Shift+click = fill: the polygon of the dots / border vertices around the mouse (4, else 3); Shift+drag = relax brush;
 - Ctrl+click on an edge = edge loop there (new vertices on the surface);
 - Ctrl+Shift+click = delete the dot / vertex / edge / face under the mouse;
-- Tab held + drag from a border edge = extend it by a quad (Extend: Edge / Loop), from a border vertex with two
+- Tab held + drag from a border edge = extend it by a quad (Extend: Edge / Loop / Border), from a border vertex with two
   border edges = the quad of the vertex, its two border neighbours and the mouse point (an inner corner, #180), from
   empty space = a strip of quads Quad Strip Width pixels wide;
 - hover previews (Shift: the fill, Ctrl: the loop, Ctrl+Shift: what goes, Tab: the border edge).
@@ -20,10 +19,10 @@ Pure parts (``fill_order``, ``fill_face``, ``extend_edges``, ``corner_quad``, ``
 ``delete_at``) are tested headless
 (tests/test_step144_poly.py).
 """
-from ..i18n import source_message as _dcc_source, display_message as _dcc_display, format_message as _dcc_format
-from ..i18n import tr as _zh, enum_items as _zh_enum, native as _zh_native
+
 import itertools
 import math
+
 import bmesh
 import bpy
 import gpu
@@ -31,39 +30,44 @@ from bpy.props import BoolProperty
 from bpy_extras import view3d_utils
 from gpu_extras.batch import batch_for_shader
 from mathutils import Vector
-from mathutils.bvhtree import BVHTree
-from . import mesh_tools, multi_cut, poly_draw, preselect
-TOOL = 'allset.quad_draw_tool'
-DOT_LAYER = 'allset_dot'
-DRAG_PX = 4.0
-BRUSH_PX = 50.0
-RELAX_STEP = 0.5
-DOT_RGB = (0.26, 1.0, 0.64)
+
+from . import multi_cut, poly_draw, preselect, quad_draw_symmetry
+from .. import results
+
+TOOL = "allset.quad_draw_tool"
+DOT_LAYER = "allset_dot"   # int vertex layer: 1 = a Quad Draw dot (a loose vertex until a face uses it)
+DRAG_PX = 4.0           # a press that moves less than this is a click
+BRUSH_PX = 50.0         # relax brush radius
+RELAX_STEP = 0.5        # share of the way to the neighbours' average per brush move
+DOT_RGB = (0.26, 1.0, 0.64)        # selection green #43ffa3 for the dots
 FILL_RGB = (0.26, 1.0, 0.64)
 LOOP_RGB = (1.0, 0.55, 0.1)
 DELETE_RGB = (1.0, 0.2, 0.2)
-HOVER_RGB = (0.39, 0.86, 1.0)
 DOT_SIZE = 8.0
 LINE_PX = 2.0
 
+
+# --- pure: fill ---------------------------------------------------------------------------------------
+
 def _inside(poly, p):
     """Point-in-polygon (even-odd) in 2D."""
-    (x, y) = p
+    x, y = p
     inside = False
-    for ((x1, y1), (x2, y2)) in zip(poly, poly[1:] + poly[:1]):
-        if (y1 > y) != (y2 > y) and x < (x2 - x1) * (y - y1) / (y2 - y1 or 1e-12) + x1:
+    for (x1, y1), (x2, y2) in zip(poly, poly[1:] + poly[:1]):
+        if (y1 > y) != (y2 > y) and x < (x2 - x1) * (y - y1) / ((y2 - y1) or 1e-12) + x1:
             inside = not inside
     return inside
 
+
 def _area(poly):
-    return 0.5 * sum((a[0] * b[1] - b[0] * a[1] for (a, b) in zip(poly, poly[1:] + poly[:1])))
+    return 0.5 * sum(a[0] * b[1] - b[0] * a[1] for a, b in zip(poly, poly[1:] + poly[:1]))
+
 
 def _simple(poly):
     """No two non-adjacent sides cross."""
     n = len(poly)
 
     def cross(a, b, c, d):
-
         def orient(p, q, r):
             return (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0])
         return orient(a, b, c) * orient(a, b, d) < 0 and orient(c, d, a) * orient(c, d, b) < 0
@@ -75,6 +79,7 @@ def _simple(poly):
                 return False
     return True
 
+
 def fill_order(xy, mouse, nearest=6, banned=()):
     """Maya Shift+click fill: indices (counter-clockwise on screen) of the 4 points of ``xy`` — else 3 — around
     ``mouse``, chosen among the ``nearest`` closest: the polygon must contain the mouse, be simple, and not be a set in
@@ -85,18 +90,19 @@ def fill_order(xy, mouse, nearest=6, banned=()):
         for combo in itertools.combinations(order, n):
             if frozenset(combo) in banned:
                 continue
-            cx = sum((xy[i][0] for i in combo)) / n
-            cy = sum((xy[i][1] for i in combo)) / n
+            cx = sum(xy[i][0] for i in combo) / n
+            cy = sum(xy[i][1] for i in combo) / n
             ring = sorted(combo, key=lambda i: math.atan2(xy[i][1] - cy, xy[i][0] - cx))
             poly = [tuple(xy[i]) for i in ring]
             area = _area(poly)
-            if area <= 1e-06 or not _simple(poly) or (not _inside(poly, mouse)):
+            if area <= 1e-6 or not _simple(poly) or not _inside(poly, mouse):
                 continue
             if best is None or area < best[0]:
                 best = (area, ring)
         if best is not None:
             return best[1]
     return None
+
 
 def fill_face(bm, ring):
     """The fill polygon: ``ring`` items are BMVerts or local Vectors (new vertices), counter-clockwise as seen by the
@@ -124,22 +130,27 @@ def fill_face(bm, ring):
     _indices(bm)
     return face
 
+
 def _indices(bm):
     bm.verts.index_update()
     bm.edges.index_update()
     bm.faces.index_update()
     bm.normal_update()
 
+
+# --- pure: extend / strip -------------------------------------------------------------------------------
+
 def edge_loop(edge):
     """The edge loop through ``edge``: across each 4-edge vertex to the edge that shares no face with the last one
     (stops at borders, poles and where it closes)."""
-    (out, seen) = ([edge], {edge})
+    out, seen = [edge], {edge}
     for start in edge.verts:
-        (e, cur) = (edge, start)
+        e, cur = edge, start
         while len(cur.link_edges) == 4:
+            if any(f.hide or len(f.verts)!=4 for f in cur.link_faces):break
             faces = set(e.link_faces)
-            nxt = [x for x in cur.link_edges if x is not e and (not set(x.link_faces) & faces)]
-            if len(nxt) != 1 or nxt[0] in seen:
+            nxt = [x for x in cur.link_edges if x is not e and not set(x.link_faces) & faces]
+            if len(nxt) != 1 or nxt[0] in seen or nxt[0].hide or any(v.hide for v in nxt[0].verts):
                 break
             e = nxt[0]
             seen.add(e)
@@ -147,9 +158,10 @@ def edge_loop(edge):
             cur = e.other_vert(cur)
     return out
 
+
 def border_loop(edge):
     """Border edges connected to border ``edge`` along the border (one open or closed chain)."""
-    (out, todo) = ({edge}, [edge])
+    out, todo = {edge}, [edge]
     while todo:
         e = todo.pop()
         for v in e.verts:
@@ -159,7 +171,30 @@ def border_loop(edge):
                     todo.append(e2)
     return list(out)
 
-def extend_edges(bm, edges, offset):
+
+def border_chain(edge):
+    """Boundary edge loop, stopping at corners/poles instead of turning around the entire border."""
+    out, seen = [edge], {edge}
+    for start in edge.verts:
+        cur, previous = start, edge
+        while len(cur.link_edges) == 3:
+            candidates = [e for e in cur.link_edges if e.is_boundary and e is not previous and not e.hide and not any(v.hide for v in e.verts)]
+            if len(candidates) != 1 or candidates[0] in seen:
+                break
+            previous = candidates[0]
+            seen.add(previous)
+            out.append(previous)
+            cur = previous.other_vert(cur)
+    return out
+
+
+def component_loop(edge):
+    """The editable loop: a boundary chain or a regular interior quad loop."""
+    if edge.hide or any(v.hide for v in edge.verts) or len(edge.link_faces)>2:return []
+    return border_chain(edge) if edge.is_boundary else edge_loop(edge)
+
+
+def extend_edges(bm, edges, offset, positions=None, created=None):
     """Tab+drag: a quad on each border edge, its far side = the edge's vertices moved by ``offset(co) -> new co``
     (shared between neighbouring edges). Returns the new faces."""
     new = {}
@@ -167,10 +202,13 @@ def extend_edges(bm, edges, offset):
     for e in edges:
         if not e.is_valid or not e.is_boundary:
             continue
-        (b, a) = poly_draw.edge_start(e)
+        b, a = poly_draw.edge_start(e)       # against the bordering face's winding
         for v in (a, b):
             if v not in new:
-                new[v] = bm.verts.new(offset(v.co.copy()))
+                co=positions[v.index] if positions is not None else offset(v.co.copy())
+                new[v] = bm.verts.new(co)
+                if created is not None:
+                    created[v.index]=new[v]
         try:
             faces.append(bm.faces.new((b, a, new[a], new[b])))
         except ValueError:
@@ -178,48 +216,53 @@ def extend_edges(bm, edges, offset):
     _indices(bm)
     return faces
 
+
 def corner_neighbours(v):
     """(A, B): the other ends of the two border edges at border vertex ``v`` (in the winding a face appended there
     needs), or None when ``v`` doesn't have exactly two border edges."""
     border = [e for e in v.link_edges if e.is_boundary]
     if len(border) != 2:
         return None
-    (first, second) = border
-    (start, end) = poly_draw.edge_start(first)
+    first, second = border
+    start, end = poly_draw.edge_start(first)
     a = first.other_vert(v)
     b = second.other_vert(v)
+    # the new face runs along ``first`` as edge_start says: A -> V when it starts at A, else V -> A (then reversed)
     return (a, b) if start is a else (b, a)
+
 
 def corner_quad(bm, v, co):
     """Tab+drag from border vertex ``v`` (Maya 2026 Quad Draw, Autodesk's help "Extend edges with Quad Draw": with
     the Edge extend option a vertex can be dragged to create a polygon): the quad A, V, B, N of ``v``, its two border
     neighbours and a new vertex at local ``co``. Only where that quad fills the open side of ``v`` (an inner corner):
-    at an outer corner or a straight border it would fold over the faces there, and nothing is made (delegated,
-    [I]). Returns the face or None."""
+    at an outer corner or a straight border it would fold over the faces there, and nothing is made
+    (a kit choice). Returns the face or None."""
     pair = corner_neighbours(v)
     if pair is None:
         return None
-    (a, b) = pair
+    a, b = pair
     n = sum((f.normal for f in v.link_faces), Vector())
-    if n.length < 1e-09:
+    if n.length < 1e-9:
         return None
     n.normalize()
 
     def flat(p):
         d = p - v.co
         return d - n * d.dot(n)
-    (pa, pb, pn) = (flat(a.co), flat(b.co), flat(co))
+    pa, pb, pn = flat(a.co), flat(b.co), flat(co)
+    # N on the far side of A-B from V, and a convex quad A V B N seen along the normal
     ab = pb - pa
     side_v = ab.cross(-pa).dot(n)
     side_n = ab.cross(pn - pa).dot(n)
     if side_v * side_n >= 0:
         return None
-    ring = [Vector(), pa, pn, pb]
+    ring = [Vector(), pa, pn, pb]           # V, A, N, B in order around the quad
     turns = [(ring[(i + 1) % 4] - ring[i]).cross(ring[(i + 2) % 4] - ring[(i + 1) % 4]).dot(n) for i in range(4)]
-    if not (all((t > 1e-12 for t in turns)) or all((t < -1e-12 for t in turns))):
+    if not (all(t > 1e-12 for t in turns) or all(t < -1e-12 for t in turns)):
         return None
-    if any((f.calc_center_median() is not None and _inside_quad(flat(f.calc_center_median()), ring, n) for f in v.link_faces)):
-        return None
+    if any(f.calc_center_median() is not None and _inside_quad(flat(f.calc_center_median()), ring, n)
+           for f in v.link_faces):
+        return None                          # the quad would lie over a face at V
     nv = bm.verts.new(co)
     try:
         face = bm.faces.new((a, v, b, nv))
@@ -229,18 +272,20 @@ def corner_quad(bm, v, co):
     _indices(bm)
     return face
 
+
 def _inside_quad(p, ring, n):
     signs = [(ring[(i + 1) % 4] - ring[i]).cross(p - ring[i]).dot(n) for i in range(4)]
-    return all((x > 0 for x in signs)) or all((x < 0 for x in signs))
+    return all(x > 0 for x in signs) or all(x < 0 for x in signs)
+
 
 def strip_pairs(path, width):
     """Tab+drag in empty space: (left, right) screen points every ``width`` pixels along ``path`` (a list of screen
     points), ``width`` apart across the path. Needs a path at least ``width`` long."""
     pts = [path[0]]
     acc = 0.0
-    for (a, b) in zip(path, path[1:]):
+    for a, b in zip(path, path[1:]):
         seg = math.hypot(b[0] - a[0], b[1] - a[1])
-        if seg < 1e-09:
+        if seg < 1e-9:
             continue
         t = 0.0
         while acc + (seg - t) >= width:
@@ -251,27 +296,48 @@ def strip_pairs(path, width):
     if len(pts) < 2:
         return []
     out = []
-    for (k, p) in enumerate(pts):
+    for k, p in enumerate(pts):
         q0 = pts[max(0, k - 1)]
         q1 = pts[min(len(pts) - 1, k + 1)]
-        (dx, dy) = (q1[0] - q0[0], q1[1] - q0[1])
+        dx, dy = q1[0] - q0[0], q1[1] - q0[1]
         n = math.hypot(dx, dy) or 1.0
-        (nx, ny) = (-dy / n * width / 2, dx / n * width / 2)
+        nx, ny = -dy / n * width / 2, dx / n * width / 2
         out.append(((p[0] + nx, p[1] + ny), (p[0] - nx, p[1] - ny)))
     return out
+
+
+TAB_HINT = ("Quad Draw: hold Tab and drag a border edge to extend it, a corner vertex to fill the corner, or drag in "
+            "empty space for a strip of quads; middle-drag in empty space sets the strip width")
+
+
+def width_preview(center, width, count=3):
+    """Tab+MMB drag in empty space: the screen line segments of a preview strip of ``count`` quads ``width`` pixels
+    wide, running up from ``center`` (the quads a Tab+LMB stroke of that width would make)."""
+    x, y = center
+    pairs = strip_pairs([(x, y), (x, y + width * count)], width)
+    segs = []
+    for k, (left, right) in enumerate(pairs):
+        segs += [left, right]
+        if k:
+            segs += [pairs[k - 1][0], left, pairs[k - 1][1], right]
+    return segs
+
 
 def strip_faces(bm, pairs):
     """Quads between consecutive (left, right) local points; winding: counter-clockwise for a path seen from the
     viewer going left to right on screen with left = +normal side (callers pass screen-ordered pairs)."""
     faces = []
     prev = None
-    for (left, right) in pairs:
+    for left, right in pairs:
         cur = (bm.verts.new(left), bm.verts.new(right))
         if prev is not None:
             faces.append(bm.faces.new((prev[1], cur[1], cur[0], prev[0])))
         prev = cur
     _indices(bm)
     return faces
+
+
+# --- pure: relax / delete -------------------------------------------------------------------------------
 
 def relax(bm, verts, mode='AUTO_LOCK', step=RELAX_STEP, project=None):
     """Maya Quad Draw relax on ``verts``: each moves ``step`` of the way to its neighbours' average (border vertices
@@ -283,13 +349,15 @@ def relax(bm, verts, mode='AUTO_LOCK', step=RELAX_STEP, project=None):
     border = [v for v in verts if v.is_boundary]
     if mode == 'INTERIOR' or (mode == 'AUTO_LOCK' and inner):
         moving = inner
+    elif mode == 'ALL':
+        moving = verts
     elif mode == 'BORDER':
         moving = border
     else:
         moving = border
     targets = {}
     for v in moving:
-        if v.is_boundary:
+        if v.is_boundary and mode != 'ALL':
             nb = [e.other_vert(v) for e in v.link_edges if e.is_boundary]
         else:
             nb = [e.other_vert(v) for e in v.link_edges]
@@ -297,9 +365,10 @@ def relax(bm, verts, mode='AUTO_LOCK', step=RELAX_STEP, project=None):
             continue
         avg = sum((u.co for u in nb), Vector()) / len(nb)
         targets[v] = v.co.lerp(avg, step)
-    for (v, co) in targets.items():
+    for v, co in targets.items():
         v.co = project(co) if project else co
     return list(targets)
+
 
 def delete_at(bm, kind, index):
     """Ctrl+Shift+click: delete the face; an edge (inside: dissolved into one face; on the border: its face goes);
@@ -318,80 +387,79 @@ def delete_at(bm, kind, index):
             bmesh.ops.delete(bm, geom=list(el.link_faces), context='FACES')
         else:
             bmesh.ops.delete(bm, geom=[el], context='EDGES')
-    elif el.link_faces and (not el.is_boundary) and (len(el.link_edges) > 2):
-        bmesh.ops.dissolve_verts(bm, verts=[el])
     else:
-        bmesh.ops.delete(bm, geom=[el], context='VERTS')
+        if el.link_faces and not el.is_boundary and len(el.link_edges) > 2:
+            bmesh.ops.dissolve_verts(bm, verts=[el])
+        else:
+            bmesh.ops.delete(bm, geom=[el], context='VERTS')
     _indices(bm)
     return True
+
 
 def delete_loop(bm, edge_index):
     """Ctrl+Shift+click an edge: its edge loop goes (inner edges dissolve; a border edge takes its faces)."""
     bm.edges.ensure_lookup_table()
     edge = bm.edges[edge_index]
+    if edge.hide or any(v.hide for v in edge.verts) or len(edge.link_faces)>2:return False
+    if edge.is_boundary:
+        faces={f for e in component_loop(edge) for f in e.link_faces if not f.hide}
+        if not faces:return False
+        bmesh.ops.delete(bm,geom=list(faces),context='FACES');_indices(bm)
+        return True
     if len(edge.link_faces) != 2:
         return delete_at(bm, 'EDGE', edge_index)
-    loop = [e for e in edge_loop(edge) if len(e.link_faces) == 2]
+    loop = [e for e in component_loop(edge) if len(e.link_faces) == 2]
     bmesh.ops.dissolve_edges(bm, edges=loop, use_verts=True)
     _indices(bm)
     return True
+
 
 def weld_target(xy, moved, mouse_xy, radius, exclude=()):
     """Index of the vertex whose screen point is within ``radius`` of ``mouse_xy`` (closest), not ``moved`` and not
     in ``exclude``; None if none (Auto-weld)."""
     best = None
-    for (i, p) in enumerate(xy):
+    for i, p in enumerate(xy):
         if i == moved or i in exclude or p is None:
             continue
         d = math.hypot(p[0] - mouse_xy[0], p[1] - mouse_xy[1])
         if d <= radius and (best is None or d < best[0]):
             best = (d, i)
     return best[1] if best else None
-_bvh = {}
+
+
+# --- reference surface ----------------------------------------------------------------------------------
 
 def reference_objects(context):
-    """The live surface if one is set (and shown), else every visible mesh not being edited."""
-    live = getattr(context.scene, 'allset_live', None)
-    shown = [o for o in context.visible_objects if o.type == 'MESH' and o.mode != 'EDIT']
-    if live is not None and live in shown:
-        return [live]
-    return shown
+    """Only explicitly live meshes constrain Quad Draw; otherwise use the construction plane."""
+    from . import live
+    return live.objects(context.scene)
 
-def _tree(context, ob):
-    sig = (tuple(map(tuple, ob.matrix_world)), len(ob.data.vertices), len(ob.data.polygons))
-    got = _bvh.get(ob.name)
-    if got is not None and got[0] == sig:
-        return got
-    dg = context.evaluated_depsgraph_get()
-    ev = ob.evaluated_get(dg)
-    tree = BVHTree.FromObject(ev, dg)
-    mw = ob.matrix_world.copy()
-    got = _bvh[ob.name] = (sig, tree, mw, mw.inverted_safe())
-    return got
+
+def surface_offset(context):
+    """Offset in Blender units, from the Maya-style scene length-unit field."""
+    s = poly_draw.settings(context)
+    if not s.qd_offset_on or s.qd_surface_offset == 0:
+        return 0.0
+    from . import units
+    return s.qd_surface_offset * units.maya_unit(context.scene)
+
+
+def _surface_point(context, hit):
+    if hit is None:
+        return None
+    s = poly_draw.settings(context)
+    return hit[0] + hit[1] * surface_offset(context) if s.qd_offset_on else hit[0]
+
 
 def surface_hit(context, region, rv3d, mouse, refs=None):
     """World point of the reference surface under ``mouse``, or None."""
     refs = reference_objects(context) if refs is None else refs
     origin = view3d_utils.region_2d_to_origin_3d(region, rv3d, mouse)
     ray = view3d_utils.region_2d_to_vector_3d(region, rv3d, mouse).normalized()
-    backfaces = poly_draw.settings(context).qd_snap_backfaces
-    best = None
-    for ob in refs:
-        (_s, tree, mw, inv) = _tree(context, ob)
-        lo = inv @ origin
-        ld = (inv.to_3x3() @ ray).normalized()
-        (loc, n, _i, _d) = tree.ray_cast(lo, ld)
-        for _k in range(16):
-            if loc is None or backfaces or n.dot(ld) <= 0:
-                break
-            (loc, n, _i, _d) = tree.ray_cast(loc + ld * 1e-05, ld)
-        if loc is None:
-            continue
-        w = mw @ loc
-        d = (w - origin).length
-        if best is None or d < best[0]:
-            best = (d, w)
-    return best[1] if best else None
+    from . import live
+    hit = live.ray_hit(context, origin, ray, refs, poly_draw.settings(context).qd_snap_backfaces)
+    return _surface_point(context, hit)
+
 
 def place_point(context, region, rv3d, mouse, refs=None):
     """Where a dot goes: the surface under the mouse; with no reference surface at all, Maya's construction plane."""
@@ -400,54 +468,108 @@ def place_point(context, region, rv3d, mouse, refs=None):
         return surface_hit(context, region, rv3d, mouse, refs)
     return poly_draw.construction_point(context, region, rv3d, mouse)
 
-def project_point(context, w, refs=None):
+
+def project_point(context, w, refs=None, region=None, rv3d=None):
     """The closest reference surface point to world ``w`` (``w`` itself without a surface)."""
     refs = reference_objects(context) if refs is None else refs
-    best = None
-    for ob in refs:
-        (_s, tree, mw, inv) = _tree(context, ob)
-        (loc, _n, _i, _d) = tree.find_nearest(inv @ w)
-        if loc is None:
-            continue
-        p = mw @ loc
-        d = (p - w).length
-        if best is None or d < best[0]:
-            best = (d, p)
-    return best[1] if best else w
+    # Screen-ray projection follows the visible side of thin/folded surfaces. A nearest-only
+    # query can jump to an unrelated sheet behind the point during relax/extend.
+    from . import live
+    nearest = None
+    if refs and region is not None and rv3d is not None:
+        base = w
+        if surface_offset(context):
+            # Project from the surface foot, not from an already offset point.
+            # Reusing its shifted screen position adds a sideways drift each time.
+            nearest = live.nearest(context, w, refs)
+            if nearest is not None:
+                base = nearest[0]
+        xy = _screen_xy(region, rv3d, base)
+        if xy is not None:
+            hit = surface_hit(context, region, rv3d, xy, refs)
+            if hit is not None:
+                return hit
+    hit = nearest if nearest is not None else live.nearest(context, w, refs)
+    return _surface_point(context, hit) if hit else w
 
-@bpy.app.handlers.persistent
-def _forget(_scene=None, depsgraph=None):
-    """depsgraph_update_post: drop the BVH of a reference object whose geometry / transform changed."""
-    if depsgraph is None:
-        _bvh.clear()
-        return
-    for u in depsgraph.updates:
-        if not (u.is_updated_geometry or u.is_updated_transform):
-            continue
-        idb = u.id
-        if isinstance(idb, bpy.types.Object) and idb.mode != 'EDIT':
-            _bvh.pop(idb.name, None)
-        elif isinstance(idb, bpy.types.Mesh):
-            for name in [n for n in _bvh if (o := bpy.data.objects.get(n)) is None or o.data == idb.original]:
-                _bvh.pop(name, None)
-STATE = {'ob': None, 'preview': None, 'created': None, 'overlays': {}, 'timer': False}
+
+# --- live state -----------------------------------------------------------------------------------------
+
+STATE = {"ob": None, "preview": None, "snap": [], "created": None, "overlays": {}, "timer": False}
+_topology_preview=None
+_pick_projection = None
+_fill_projection = None
+_component_loop_cache=None
+
+
+def loop_plan(context,ob,index):
+    """Share one loop traversal between hover, delete and loop tweak."""
+    global _component_loop_cache
+    c=next((c for candidate,c in preselect.caches(context) if candidate==ob),None)
+    if c is None:return None
+    key=(c,c.revision,index)
+    if _component_loop_cache is not None and _component_loop_cache[0]==key:return _component_loop_cache[1]
+    edges=component_loop(c.bm.edges[index])
+    plan={'edges':tuple(e.index for e in edges),'verts':tuple(sorted({v.index for e in edges for v in e.verts})),
+          'faces':tuple(sorted({f.index for e in edges for f in e.link_faces})),
+          'points':[tuple(c.co[v.index]) for e in edges for v in e.verts]}
+    _component_loop_cache=key,plan
+    return plan
+
 
 def reset_preview():
-    STATE['preview'] = None
+    STATE["preview"] = None
+    STATE["snap"] = []
+
+
+def topology_preview(context,ob):
+    """One geometry/view-independent correspondence; drawing the panel never walks the mesh."""
+    global _topology_preview
+    sym=context.scene.allset_symmetry
+    if not sym.on or sym.about!='TOPOLOGY':return None
+    c=next((c for candidate,c in preselect.caches(context) if candidate==ob),None)
+    if c is None:return None
+    active=c.bm.select_history.active
+    key=(c,getattr(c,'revision',0),sym.axis,sym.allow_partial,tuple(ob.data.get(quad_draw_symmetry.SEED,())),
+         active.index if isinstance(active,bmesh.types.BMEdge) else None)
+    if _topology_preview is not None and _topology_preview[0]==key:return _topology_preview[1]
+    try:
+        pairs=quad_draw_symmetry.topology_mapping(ob,c.bm,sym)
+        indices={v.index:other.index for v,other in pairs.items()}
+        seam_ids=[tuple(v.index for v in e.verts) for e in c.bm.edges if all(pairs.get(v) is v for v in e.verts)]
+        seam=[(c.co[a],c.co[b]) for a,b in seam_ids]
+        info={'object':ob.name,'pairs':indices,'seam':seam,'seam_ids':seam_ids,'paired':sum(a!=b for a,b in indices.items())//2,
+              'unmatched':len(c.co)-len(indices),'message':'' if pairs else 'Pick a seam edge on matching topology'}
+    except quad_draw_symmetry.SymmetryError as ex:
+        info={'object':ob.name,'pairs':{},'seam':[],'paired':0,'unmatched':len(c.co),'message':str(ex)}
+    _topology_preview=key,info;STATE['topology_info']=info
+    return info
+
+
+def clear_topology_preview():
+    global _topology_preview
+    _topology_preview=None;STATE['topology_info']=None;STATE['topology_hover']=None;STATE['topology_preview']=None
+    from . import quad_draw_overlay
+    quad_draw_overlay.clear_symmetry()
+
 
 def edit_object(context):
     ob = context.edit_object
     return ob if ob is not None and ob.type == 'MESH' else None
 
+
 def tool_active(context):
     return context.mode == 'EDIT_MESH' and preselect.tool_id(context) == TOOL
+
 
 def _ui_scale(context):
     return context.preferences.system.ui_scale or 1.0
 
+
 def _screen_xy(region, rv3d, w):
     p = view3d_utils.location_3d_to_region_2d(region, rv3d, w)
     return (p.x, p.y) if p is not None else None
+
 
 def dot_layer(bm, create=False):
     """The int vertex layer that marks Quad Draw dots (made first: a new layer invalidates element references)."""
@@ -456,12 +578,14 @@ def dot_layer(bm, create=False):
         lay = bm.verts.layers.int.new(DOT_LAYER)
     return lay
 
+
 def dots(bm):
     """Maya's dots: loose vertices Quad Draw placed (no edge yet). Being vertices, they undo with the mesh."""
     lay = dot_layer(bm)
     if lay is None:
         return []
-    return [v for v in bm.verts if v[lay] and (not v.link_edges)]
+    return [v for v in bm.verts if v[lay] and not v.link_edges]
+
 
 def add_dot(bm, co):
     """A dot at local ``co``; returns the vertex."""
@@ -472,6 +596,7 @@ def add_dot(bm, co):
     _indices(bm)
     return v
 
+
 def clear_dots(bm):
     """Remove every dot (Clear Dots, leaving the tool). Returns how many went."""
     gone = dots(bm)
@@ -481,36 +606,137 @@ def clear_dots(bm):
         _indices(bm)
     return len(gone)
 
+
+def _reference_visible(context, region, rv3d, point, refs, clearance=0):
+    """Reject the far sheet of a live reference, allowing coarse-face display sag."""
+    if not refs:
+        return True
+    from . import live
+    xy = _screen_xy(region, rv3d, point)
+    if xy is None:
+        return False
+    origin = view3d_utils.region_2d_to_origin_3d(region, rv3d, xy)
+    delta = point-origin
+    distance = delta.length
+    if distance < 1e-12:
+        return True
+    hit = live.ray_hit(context, origin, delta/distance, refs, True)
+    offset = abs(surface_offset(context))
+    return not hit or (hit[0]-origin).length >= distance-max(1e-5,distance*1e-7)-offset*1.1-clearance
+
+
 def component_at(context, region, rv3d, mouse, ob, edges_only=False):
     """('VERT', i) / ('EDGE', i, t) / ('FACE', i, local co) of ``ob`` under the mouse (dots are vertices), or None."""
-    hit = multi_cut.pick(context, region, rv3d, mouse, only=ob.name, edges_only=edges_only)
-    return hit[1] if hit is not None else None
+    global _pick_projection
+    c = next((c for candidate, c in preselect.caches(context) if candidate == ob), None)
+    if c is None:
+        return None
+    key = (region.width, region.height, tuple(map(tuple, rv3d.perspective_matrix)), _ui_scale(context),getattr(c,'revision',0))
+    if _pick_projection is None or _pick_projection[0] is not c or _pick_projection[1] != key:
+        xy, front = preselect.project(c.co, rv3d.perspective_matrix, region.width, region.height)
+        # A large vertex hit zone steals short edges and small faces. Compute a
+        # local radius once per view, retaining the wider Ctrl-loop edge zone.
+        import numpy as np
+        shortest = np.full(len(xy), np.inf)
+        if len(c.edges):
+            lengths = np.linalg.norm(xy[c.edges[:,0]]-xy[c.edges[:,1]], axis=1)
+            np.minimum.at(shortest, c.edges[:,0], lengths)
+            np.minimum.at(shortest, c.edges[:,1], lengths)
+        radius = np.minimum(8.0*_ui_scale(context), shortest*.22)
+        radius = np.maximum(3.0*_ui_scale(context), radius)
+        _pick_projection = c, key, xy, front, radius
+    _, _, xy, front, radius = _pick_projection
+    cs = [(ob, c)]
+    xray = preselect._xray(context.space_data)
+    scale = _ui_scale(context)
+    refs = reference_objects(context)
+    import numpy as np
+    if not edges_only:
+        distance2 = ((xy - mouse)**2).sum(axis=1)
+        near = np.flatnonzero(c.vok & front & (distance2 <= radius**2))
+        for j in near[np.argsort(distance2[near])]:
+            i = int(j)
+            point = Vector(c.co[i])
+            if not multi_cut._occluded(cs, region, rv3d, point, xray) and _reference_visible(context,region,rv3d,point,refs):
+                return 'VERT', i
+    if len(c.edges):
+        distance, ts = preselect.segment_distance(mouse, xy[c.edges[:, 0]], xy[c.edges[:, 1]])
+        ok = c.eok & front[c.edges[:, 0]] & front[c.edges[:, 1]]
+        tolerance = multi_cut.EDGE_PX*scale if edges_only else 5.0*scale
+        near = np.flatnonzero(ok & (distance <= tolerance))
+        for j in near[np.argsort(distance[near])]:
+            i = int(j)
+            a, b = (Vector(c.co[k]) for k in c.edges[i])
+            point = a.lerp(b,float(ts[i]))
+            if not multi_cut._occluded(cs, region, rv3d, point, xray) and _reference_visible(context,region,rv3d,point,refs,(a-b).length*.5):
+                return 'EDGE', i, multi_cut.ray_edge_t(region, rv3d, a, b, mouse)
+    if not edges_only:
+        origin = view3d_utils.region_2d_to_origin_3d(region, rv3d, mouse)
+        direction = view3d_utils.region_2d_to_vector_3d(region, rv3d, mouse)
+        hit = c.ray(origin, direction)
+        if hit is not None:
+            point = origin + direction.normalized()*hit[0]
+            f = c.bm.faces[hit[1]]
+            clearance = max(((Vector(c.co[e.verts[0].index])-Vector(c.co[e.verts[1].index])).length for e in f.edges),default=0)*.5
+            if _reference_visible(context,region,rv3d,point,refs,clearance):
+                return 'FACE', hit[1], tuple(c.inv @ point)
+    return None
+
 
 def fill_candidates(bm):
     """Vertices a fill can use: dots, border vertices and vertices on no face yet."""
     return [v for v in bm.verts if not v.hide and (v.is_boundary or not v.link_faces)]
 
+
 def fill_plan(context, region, rv3d, mouse, ob):
     """(ring of vertex indices, world points) for a Shift+click at ``mouse``, or None."""
-    bm = bmesh.from_edit_mesh(ob.data)
-    mw = ob.matrix_world
-    (idx, xy) = ([], [])
-    for v in fill_candidates(bm):
-        p = _screen_xy(region, rv3d, mw @ v.co)
-        if p is not None:
-            idx.append(v.index)
-            xy.append(p)
-    index_of = {i: k for (k, i) in enumerate(idx)}
-    banned = set()
-    for f in bm.faces:
-        ks = [index_of.get(v.index) for v in f.verts]
-        if None not in ks:
-            banned.add(frozenset(ks))
-    ring = fill_order(xy, mouse, banned=banned)
+    global _fill_projection
+    from .quad_draw_fill import ScreenFill
+    c = next((c for candidate,c in preselect.caches(context) if candidate==ob),None)
+    if c is None:
+        return None
+    key=(region.width,region.height,tuple(map(tuple,rv3d.perspective_matrix)),getattr(c,'revision',0))
+    if _fill_projection is None or _fill_projection[0] is not c or _fill_projection[1]!=key:
+        xy,front=preselect.project(c.co,rv3d.perspective_matrix,region.width,region.height)
+        if c.arrays is not None:
+            counts,candidates,shown,groups=c.arrays[4:]
+            allowed=c.vok&front&candidates
+            groups=[ids[shown[fi]&front[ids].all(axis=1)] for fi,ids in groups]
+            screen=ScreenFill(xy,allowed,c.edges,counts,(),world=c.co,groups=groups)
+        else:
+            allowed=[not v.hide and bool(front[v.index]) and (v.is_boundary or not v.link_faces) for v in c.bm.verts]
+            counts=[len(e.link_faces) for e in c.bm.edges]
+            faces=[tuple(v.index for v in f.verts) for f in c.bm.faces if not f.hide and all(front[v.index] for v in f.verts)]
+            screen=ScreenFill(xy,allowed,c.edges,counts,faces,world=c.co)
+        _fill_projection=c,key,screen
+    screen=_fill_projection[2]
+    refs=reference_objects(context)
+    def visible(i):
+        point=Vector(c.co[i])
+        if multi_cut._occluded([(ob,c)],region,rv3d,point,False):
+            return False
+        return _reference_visible(context,region,rv3d,point,refs)
+    ring=screen.plan(mouse,visible)
     if ring is None:
         return None
-    bm.verts.ensure_lookup_table()
-    return ([idx[k] for k in ring], [mw @ bm.verts[idx[k]].co for k in ring])
+    if context.scene.allset_symmetry.on and context.scene.allset_symmetry.about=='TOPOLOGY':
+        info=topology_preview(context,ob)
+        if info and any(c.bm.verts[i].link_faces and i not in info['pairs'] for i in ring):return None
+        from . import quad_draw_reference
+        points=[]
+        try:
+            for i in ring:
+                other=info['pairs'].get(i) if info else None
+                points.append(ob.matrix_world@c.bm.verts[other].co if other is not None else
+                              ob.matrix_world@quad_draw_reference.point(context,ob,c.bm.verts[i].co,'XYZ'.index(context.scene.allset_symmetry.axis)))
+        except quad_draw_symmetry.SymmetryError as ex:
+            if info:info['message']=str(ex)
+            STATE['topology_preview']=None
+            return None
+        STATE['topology_preview']=('FILL',points)
+
+    return list(ring),[Vector(c.co[i]) for i in ring]
+
 
 def apply_fill(ob, ring):
     """Make the fill face through vertex indices ``ring`` (``fill_plan``); its dots become plain vertices. Returns the
@@ -530,47 +756,132 @@ def apply_fill(ob, ring):
     bmesh.update_edit_mesh(ob.data)
     preselect.invalidate()
     return face
+
+
+def _begin_symmetry(operator,context,ob,coordinate_only=False):
+    bm=bmesh.from_edit_mesh(ob.data)
+    dot_layer(bm,create=True)  # adding custom data can invalidate BMesh wrappers
+    if context.scene.allset_symmetry.on:quad_draw_symmetry.ensure_identity(bm)
+    try:
+        info=topology_preview(context,ob)
+        operator._sym=quad_draw_symmetry.begin(context,ob,bm,coordinate_only=coordinate_only,mapping=info['pairs'] if info and info['pairs'] else None)
+        return True
+    except quad_draw_symmetry.SymmetryError as ex:
+        operator.report({'WARNING'},str(ex))
+        operator._sym=None
+        return False
+
+
+def _sync_symmetry(operator,context,finish=False):
+    sym=getattr(operator,'_sym',None)
+    if sym is None:return True
+    try:
+        sym.sync()
+    except (quad_draw_symmetry.SymmetryError,ValueError,ReferenceError) as ex:
+        sym.rollback();operator._sym=None
+        operator.report({'WARNING'},str(ex))
+        ob=bpy.data.objects.get(operator._ob)
+        if ob is not None:bmesh.update_edit_mesh(ob.data)
+        preselect.invalidate()
+        return False
+    _indices(sym.bm)
+    if getattr(sym,'disabled_reason',None):operator.report({'WARNING'},sym.disabled_reason)
+    if finish:
+        sym.close();operator._sym=None
+    return True
+
+
+def _close_symmetry(operator):
+    sym=getattr(operator,'_sym',None)
+    if sym is not None:sym.close()
+    operator._sym=None
+
+
+def _close_relax(operator):
+    session=getattr(operator,'_relax',None)
+    if session is not None:session.close()
+    operator._relax=None;STATE['relax_area']=None
+
+
+def _commit_weld(operator,bm,magnet,source):
+    sym=getattr(operator,'_sym',None)
+    if sym is None:return magnet.commit(bm,source)
+    bm.verts.ensure_lookup_table()
+    targets={source[i]:bm.verts[t] for i,t in magnet.pairs.items() if i in source}
+    targets.update(sym.seam_targets())
+    return sym.weld(targets) if targets else 0
+
+
+# --- drawing --------------------------------------------------------------------------------------------
+
 _handles = []
+
 
 def _lines(region, pts, rgb, px, alpha=1.0):
     if len(pts) < 2:
         return
     shader = gpu.shader.from_builtin('POLYLINE_UNIFORM_COLOR')
-    shader.uniform_float('viewportSize', (region.width, region.height))
-    shader.uniform_float('lineWidth', px)
-    shader.uniform_float('color', (*rgb, alpha))
-    batch_for_shader(shader, 'LINES', {'pos': pts}).draw(shader)
+    shader.uniform_float("viewportSize", (region.width, region.height))
+    shader.uniform_float("lineWidth", px)
+    shader.uniform_float("color", (*rgb, alpha))
+    batch_for_shader(shader, 'LINES', {"pos": pts}).draw(shader)
+
 
 def _points(pts, rgb, px):
     if not pts:
         return
     shader = gpu.shader.from_builtin('POINT_UNIFORM_COLOR')
     gpu.state.point_size_set(px)
-    shader.uniform_float('color', (*rgb, 1.0))
-    batch_for_shader(shader, 'POINTS', {'pos': pts}).draw(shader)
+    shader.uniform_float("color", (*rgb, 1.0))
+    batch_for_shader(shader, 'POINTS', {"pos": pts}).draw(shader)
+
 
 def _ring_lines(pts):
     pts = [tuple(p) for p in pts]
-    return [q for (a, b) in zip(pts, pts[1:] + pts[:1]) for q in (a, b)]
+    return [q for a, b in zip(pts, pts[1:] + pts[:1]) for q in (a, b)]
+
 
 def _draw_view():
     context = bpy.context
     try:
         if not tool_active(context):
+            # Give native shading back on the first inactive-view redraw, rather
+            # than waiting for the slower mesh/dot cleanup timer.
+            if not _overlay_saving and context.space_data is not None and context.space_data.type == 'VIEW_3D':
+                if _release_overlay(context.space_data) and context.area is not None:
+                    context.area.tag_redraw()
+            return
+        from ..ui import toolbox
+        if toolbox.is_toolbox(context.space_data):
             return
         region = context.region
         scale = _ui_scale(context)
+        from . import quad_draw_overlay
+        quad_draw_overlay.draw(context)
         gpu.state.blend_set('ALPHA')
         gpu.state.depth_test_set('NONE')
-        pv = STATE['preview']
-        if pv is not None:
-            (kind, data) = pv
+        pv = STATE["preview"]
+        _points([tuple(p) for p in STATE["snap"]], FILL_RGB, DOT_SIZE*1.5*scale)
+        previews=[pv] if pv is not None else []
+        if pv is not None and pv[0]=='FILL' and context.scene.allset_symmetry.on and context.scene.allset_symmetry.about=='TOPOLOGY':
+            mirrored=STATE.get('topology_preview')
+            if mirrored is not None:previews.append(mirrored)
+        ob=edit_object(context)
+        sym=context.scene.allset_symmetry
+        ob=edit_object(context)
+        if pv is not None and ob is not None and sym.on and sym.about!='TOPOLOGY' and pv[0] in {'FILL','LOOP','EXTEND','TAB','DELETE'}:
+            transform=ob.matrix_world@quad_draw_symmetry.reflection(ob,sym.about,'XYZ'.index(sym.axis))@ob.matrix_world.inverted_safe()
+            kind,data=pv
+            reflected=[tuple(transform@Vector(p)) for p in data] if kind!='LOOP' else [[tuple(transform@Vector(p)) for p in segment] for segment in data]
+            previews.append((kind,reflected))
+        for pv in previews:
+            kind, data = pv
             if kind == 'FILL':
                 _lines(region, _ring_lines(data), FILL_RGB, LINE_PX * scale)
             elif kind == 'LOOP':
                 _lines(region, [tuple(p) for s in data for p in s], LOOP_RGB, LINE_PX * scale)
-            elif kind in ('DELETE', 'HOVER', 'TAB'):
-                rgb = DELETE_RGB if kind == 'DELETE' else HOVER_RGB if kind == 'HOVER' else LOOP_RGB
+            elif kind in ('DELETE', 'TAB'):
+                rgb = DELETE_RGB if kind == 'DELETE' else LOOP_RGB
                 pts = [tuple(p) for p in data]
                 if len(pts) == 1:
                     _points(pts, rgb, DOT_SIZE * 1.5 * scale)
@@ -583,44 +894,63 @@ def _draw_view():
         ob = edit_object(context)
         if ob is not None:
             mw = ob.matrix_world
-            bm = bmesh.from_edit_mesh(ob.data)
+            bm = bmesh.from_edit_mesh(ob.data)     # keep the wrapper alive while its vertices are read
             _points([tuple(mw @ v.co) for v in dots(bm)], DOT_RGB, DOT_SIZE * scale)
         gpu.state.blend_set('NONE')
     except (ReferenceError, AttributeError, IndexError, ValueError, KeyError):
         pass
+
 
 def _draw_pixel():
     context = bpy.context
     try:
         if not tool_active(context):
             return
-        pv = STATE['preview']
+        from ..ui import toolbox
+        if toolbox.is_toolbox(context.space_data):
+            return
+        from . import quad_draw_overlay
+        quad_draw_overlay.draw_front(context)
+        pv = STATE["preview"]
+        if pv is not None and pv[0] == 'WIDTH':
+            width = poly_draw.settings(context).qd_strip_width * _ui_scale(context)
+            gpu.state.blend_set('ALPHA')
+            _lines(context.region, [(*p, 0.0) for p in width_preview(pv[1], width)], FILL_RGB,
+                   LINE_PX * _ui_scale(context))
+            gpu.state.blend_set('NONE')
+            return
         if pv is None or pv[0] != 'BRUSH':
             return
         region = context.region
-        (cx, cy, r) = pv[1]
+        cx, cy, r = pv[1]
         pts = [(cx + r * math.cos(a * math.tau / 48), cy + r * math.sin(a * math.tau / 48), 0.0) for a in range(48)]
         gpu.state.blend_set('ALPHA')
-        _lines(region, [q for (a, b) in zip(pts, pts[1:] + pts[:1]) for q in (a, b)], FILL_RGB, 1.5, 0.8)
+        _lines(region, [q for a, b in zip(pts, pts[1:] + pts[:1]) for q in (a, b)], FILL_RGB, 1.5, 0.8)
         gpu.state.blend_set('NONE')
     except (ReferenceError, AttributeError, IndexError, ValueError):
         pass
+
 
 def _redraw(context):
     if context.area is not None:
         context.area.tag_redraw()
 
+
 def _view_ok(context):
     r = context.region
-    return r is not None and r.type == 'WINDOW' and (context.region_data is not None)
+    return r is not None and r.type == 'WINDOW' and context.region_data is not None
+
 
 def _mouse(event):
     return (event.mouse_region_x, event.mouse_region_y)
 
+
+# --- hover --------------------------------------------------------------------------------------------
+
 def _component_points(ob, comp):
     bm = bmesh.from_edit_mesh(ob.data)
     mw = ob.matrix_world
-    (kind, i) = (comp[0], comp[1])
+    kind, i = comp[0], comp[1]
     if kind == 'VERT':
         bm.verts.ensure_lookup_table()
         return [mw @ bm.verts[i].co]
@@ -629,6 +959,7 @@ def _component_points(ob, comp):
         return [mw @ v.co for v in bm.edges[i].verts]
     bm.faces.ensure_lookup_table()
     return [mw @ v.co for v in bm.faces[i].verts]
+
 
 def corner_vertex_at(context, region, rv3d, mouse, ob):
     """Index of a border vertex of ``ob`` with two border edges under ``mouse`` (Tab+drag makes a quad there), or
@@ -642,6 +973,7 @@ def corner_vertex_at(context, region, rv3d, mouse, ob):
         return None
     return comp[1]
 
+
 def _corner_points(ob, vi):
     bm = bmesh.from_edit_mesh(ob.data)
     bm.verts.ensure_lookup_table()
@@ -649,35 +981,59 @@ def _corner_points(ob, vi):
     mw = ob.matrix_world
     return [(mw @ v.co, mw @ e.other_vert(v).co) for e in v.link_edges if e.is_boundary]
 
+
 def update_hover(context, region, rv3d, mouse, ctrl, shift, tab=False):
     ob = edit_object(context)
-    STATE['preview'] = None
+    STATE["preview"] = None
+    STATE['hover_component'] = None
+    STATE['topology_hover']=None;STATE['topology_preview']=None
+    STATE['delete_edges']=None;STATE['relax_area']=None
     if ob is None:
         return
+    info=topology_preview(context,ob)
+    if info is not None:info['hover_supported']=None
+    if context.scene.allset_soft_select and not ctrl and not tab:
+        from . import quad_draw_relax
+        quad_draw_relax.preview(context,ob,mouse)
     if tab:
         vi = corner_vertex_at(context, region, rv3d, mouse, ob)
         if vi is not None:
-            STATE['preview'] = ('EXTEND', [p for seg in _corner_points(ob, vi) for p in seg])
+            STATE["preview"] = ('EXTEND', [p for seg in _corner_points(ob, vi) for p in seg])
             return
         bm_edge = poly_draw.border_edge_at(context, region, rv3d, mouse, ob)
         if bm_edge is not None:
-            STATE['preview'] = ('TAB', _component_points(ob, ('EDGE', bm_edge)))
+            STATE["preview"] = ('TAB', _component_points(ob, ('EDGE', bm_edge)))
         return
-    if shift and (not ctrl):
+    if shift and not ctrl:
         plan = fill_plan(context, region, rv3d, mouse, ob)
         if plan is not None:
-            STATE['preview'] = ('FILL', plan[1])
+            STATE["preview"] = ('FILL', plan[1])
         return
-    if ctrl and (not shift):
+    if ctrl and not shift:
         comp = component_at(context, region, rv3d, mouse, ob, edges_only=True)
         if comp is not None:
-            segs = multi_cut.loop_segments(bmesh.from_edit_mesh(ob.data), comp[1], comp[2])
+            from . import quad_draw_cut
+            segs = quad_draw_cut.segments(bmesh.from_edit_mesh(ob.data), comp[1], comp[2])
             mw = ob.matrix_world
-            STATE['preview'] = ('LOOP', [(mw @ a, mw @ b) for (a, b) in segs])
+            STATE["preview"] = ('LOOP', [(mw @ a, mw @ b) for a, b in segs])
         return
     comp = component_at(context, region, rv3d, mouse, ob)
     if comp is not None:
-        STATE['preview'] = ('DELETE' if ctrl else 'HOVER', _component_points(ob, comp))
+        STATE["preview"] = ('DELETE' if ctrl else 'HOVER', _component_points(ob, comp))
+        if ctrl and comp[0]=='EDGE':
+            plan=loop_plan(context,ob,comp[1])
+            STATE['preview']=('DELETE_LOOP',plan['points']);STATE['delete_edges']=(ob.name,plan['edges'])
+        STATE['hover_component'] = (ob.name, *comp[:2])
+        if info is not None:
+            bm=bmesh.from_edit_mesh(ob.data);bm.verts.ensure_lookup_table();bm.edges.ensure_lookup_table();bm.faces.ensure_lookup_table()
+            kind,i=comp[:2]
+            indices=[i] if kind=='VERT' else [v.index for v in (bm.edges[i].verts if kind=='EDGE' else bm.faces[i].verts)]
+            if all(i in info['pairs'] for i in indices):
+                points=[ob.matrix_world@bm.verts[info['pairs'][i]].co for i in indices]
+                STATE['topology_hover']=points if len(points)<3 else _ring_lines(points)
+                info['hover_supported']=True
+            else:info['hover_supported']=False
+
 
 def _mods(event):
     ctrl = event.ctrl or (event.type in {'LEFT_CTRL', 'RIGHT_CTRL'} and event.value == 'PRESS')
@@ -686,14 +1042,13 @@ def _mods(event):
     shift = event.shift or (event.type in {'LEFT_SHIFT', 'RIGHT_SHIFT'} and event.value == 'PRESS')
     if event.type in {'LEFT_SHIFT', 'RIGHT_SHIFT'} and event.value == 'RELEASE':
         shift = False
-    return (bool(ctrl), bool(shift))
+    return bool(ctrl), bool(shift)
+
 
 class ALLSET_OT_quad_draw_hover(bpy.types.Operator):
     """Quad Draw hover preview (passes the event on)"""
-    bl_translation_context = 'MWK:operators/quad_draw.py:771'
-    bl_idname = 'allset.quad_draw_hover'
-    bl_label = _zh_native('Quad Draw Preview', 'MWK:operators/quad_draw.py:771')
-    bl_description = _zh_native('Quad Draw hover preview (passes the event on)', 'MWK:operators/quad_draw.py:771')
+    bl_idname = "allset.quad_draw_hover"
+    bl_label = "Quad Draw Preview"
     bl_options = {'INTERNAL'}
 
     @classmethod
@@ -702,54 +1057,35 @@ class ALLSET_OT_quad_draw_hover(bpy.types.Operator):
 
     def invoke(self, context, event):
         if _view_ok(context):
-            (ctrl, shift) = _mods(event)
+            ctrl, shift = _mods(event)
             try:
                 update_hover(context, context.region, context.region_data, _mouse(event), ctrl, shift)
             except (ReferenceError, ValueError, IndexError, KeyError):
-                STATE['preview'] = None
+                STATE["preview"] = None
             _redraw(context)
         return {'PASS_THROUGH'}
 
+
+# --- the main modal -------------------------------------------------------------------------------------
+
 def _weld_px(context):
     s = poly_draw.settings(context)
-    return s.qd_weld_px * _ui_scale(context) if s.qd_auto_weld else None
+    return float(s.qd_weld_px) if s.qd_auto_weld and not context.scene.allset_soft_select else None
 
-def auto_weld(context, region, rv3d, ob, moved):
-    """Merge each moved vertex with a vertex (not moved) within the Auto-weld distance on screen."""
-    radius = _weld_px(context)
-    if radius is None or not moved:
-        return 0
-    bm = bmesh.from_edit_mesh(ob.data)
-    bm.verts.ensure_lookup_table()
-    mw = ob.matrix_world
-    xy = [_screen_xy(region, rv3d, mw @ v.co) for v in bm.verts]
-    moved_idx = {v.index for v in moved if v.is_valid}
-    pairs = {}
-    for v in moved:
-        if not v.is_valid or xy[v.index] is None:
-            continue
-        neighbours = {e.other_vert(v).index for e in v.link_edges}
-        t = weld_target(xy, v.index, xy[v.index], radius, exclude=moved_idx | neighbours)
-        if t is not None and bm.verts[t] not in pairs.values():
-            pairs[v] = bm.verts[t]
-    if pairs:
-        bmesh.ops.weld_verts(bm, targetmap=pairs)
-        _indices(bm)
-    return len(pairs)
+
 
 class ALLSET_OT_quad_draw(bpy.types.Operator):
     """Maya Quad Draw: click = dot on the surface, drag = move a dot / vertex / edge / face along the surface,
     Shift+click = fill a polygon, Shift+drag = relax, Ctrl+click = edge loop, Ctrl+Shift+click = delete"""
-    bl_translation_context = 'MWK:operators/quad_draw.py:824'
-    bl_idname = 'allset.quad_draw'
-    bl_label = _zh_native('Quad Draw', 'MWK:operators/quad_draw.py:824')
-    bl_description = _zh_native('Maya Quad Draw: click = dot on the surface, drag = move a dot / vertex / edge / face along the surface,\nShift+click = fill a polygon, Shift+drag = relax, Ctrl+click = edge loop, Ctrl+Shift+click = delete', 'MWK:operators/quad_draw.py:824')
+    bl_idname = "allset.quad_draw"
+    bl_label = "Quad Draw"
     bl_options = {'REGISTER', 'UNDO'}
-    middle: BoolProperty(options={'SKIP_SAVE', 'HIDDEN'}, description=_zh_native('Middle-drag: only move what is under the mouse', 'MWK:operators/quad_draw.py:827'), translation_context='MWK:operators/quad_draw.py:827')
+
+    middle: BoolProperty(options={'SKIP_SAVE', 'HIDDEN'}, description="Middle-drag: only move what is under the mouse")
 
     @classmethod
     def poll(cls, context):
-        return context.mode == 'EDIT_MESH' and context.area is not None and (context.area.type == 'VIEW_3D')
+        return context.mode == 'EDIT_MESH' and context.area is not None and context.area.type == 'VIEW_3D'
 
     def invoke(self, context, event):
         if not _view_ok(context) or event.alt:
@@ -758,26 +1094,36 @@ class ALLSET_OT_quad_draw(bpy.types.Operator):
         if ob is None:
             return {'PASS_THROUGH'}
         self._ob = ob.name
-        (region, rv3d) = (context.region, context.region_data)
+        region, rv3d = context.region, context.region_data
         mouse = _mouse(event)
         self._press = mouse
         self._refs = reference_objects(context)
         self._moved = False
         self._grab = None
+        self._relax=None
+        if not _begin_symmetry(self,context,ob,coordinate_only=True):return {'CANCELLED'}
+        # Maya's Keyboard/Mouse Shortcuts
         if event.ctrl and event.shift and self.middle:
-            self._mode = 'MOVE'
+            self._mode = 'MOVE'                 # Ctrl+Shift+MMB: drag an edge = tweak its edge loop
             self._grab = self._grab_loop(context, mouse)
             if self._grab is None:
+                _close_symmetry(self)
                 return {'PASS_THROUGH'}
             self._new_dot = False
         elif event.ctrl and event.shift:
-            self._mode = 'DELETE'
+            self._mode = 'DELETE'               # click / drag across faces = delete; an edge = its edge loop
             if self._delete(context, mouse) is None:
+                _close_symmetry(self)
                 return {'CANCELLED'}
         elif event.ctrl:
-            return self._loop(context, mouse, center=self.middle)
+            return self._loop(context, mouse, center=self.middle)   # Ctrl+MMB = centred loop
         elif event.shift:
-            self._mode = 'SHIFT'
+            self._mode = 'SHIFT'                # click = fill (LMB), drag = relax (MMB: the highlighted points)
+            self._fill_plan=fill_plan(context,region,rv3d,mouse,ob) if not self.middle else None
+            from . import quad_draw_relax
+            try:self._relax=quad_draw_relax.Session(context,self,mouse)
+            except quad_draw_symmetry.SymmetryError as ex:
+                self.report({'WARNING'},str(ex));_close_symmetry(self);return {'CANCELLED'}
         else:
             self._mode = 'MOVE'
             self._grab = self._grab_at(context, mouse)
@@ -786,10 +1132,12 @@ class ALLSET_OT_quad_draw(bpy.types.Operator):
                     return {'PASS_THROUGH'}
                 w = place_point(context, region, rv3d, mouse, self._refs)
                 if w is None:
-                    self.report({'INFO'}, _zh('Quad Draw: click on the live surface', 'MWK:operators/quad_draw.py:869'))
+                    self.report({'INFO'}, "Quad Draw: click on the live surface")
                     return {'CANCELLED'}
                 bm = bmesh.from_edit_mesh(ob.data)
+                if self._sym is not None:self._sym.prepare_topology(local=True)
                 v = add_dot(bm, ob.matrix_world.inverted_safe() @ w)
+                if not _sync_symmetry(self,context):return {'CANCELLED'}
                 bmesh.update_edit_mesh(ob.data)
                 preselect.invalidate()
                 self._depth = w.copy()
@@ -797,12 +1145,24 @@ class ALLSET_OT_quad_draw(bpy.types.Operator):
                 self._new_dot = True
             else:
                 self._new_dot = False
+        # Hover owns a snapshot of the pre-press coordinates. The modal consumes mouse
+        # moves, so the hover operator cannot refresh that marker while dragging.
+        STATE["preview"] = None
+        STATE["snap"] = []
+        STATE['delete_edges']=None
+        STATE['topology_hover']=None
+        self._snap = None
+        if self._grab is not None and _weld_px(context) is not None:
+            from .quad_draw_weld import Magnet
+            excluded=self._sym.moving_mirrors(self._grab[1]) if self._sym else ()
+            self._snap = Magnet(context,ob,self._grab[1],exclude=excluded)
         context.window_manager.modal_handler_add(self)
         _redraw(context)
         return {'RUNNING_MODAL'}
 
+    # -- grabbing
     def _grab_at(self, context, mouse):
-        (region, rv3d) = (context.region, context.region_data)
+        region, rv3d = context.region, context.region_data
         ob = bpy.data.objects[self._ob]
         comp = component_at(context, region, rv3d, mouse, ob)
         if comp is None:
@@ -825,53 +1185,100 @@ class ALLSET_OT_quad_draw(bpy.types.Operator):
         return ('MESH', [v.index for v in verts], [mw @ v.co for v in verts], start)
 
     def _drag_to(self, context, mouse):
-        (region, rv3d) = (context.region, context.region_data)
-        (_k, idx, starts, start) = self._grab
-        hit = surface_hit(context, region, rv3d, mouse, self._refs) if self._refs else None
-        if hit is None:
-            hit = view3d_utils.region_2d_to_location_3d(region, rv3d, mouse, self._depth)
+        STATE["preview"] = None
+        STATE["snap"] = []
+        region, rv3d = context.region, context.region_data
+        _k, idx, starts, start = self._grab
         ob = bpy.data.objects[self._ob]
         bm = bmesh.from_edit_mesh(ob.data)
         bm.verts.ensure_lookup_table()
         inv = ob.matrix_world.inverted_safe()
-        if len(idx) == 1:
-            news = [hit]
+        if self._refs:
+            # Preserve the cursor-to-component offset. No screen-plane fallback when the
+            # cursor leaves a live surface: keep the last valid point until it re-enters.
+            delta = Vector(mouse) - Vector(self._press)
+            anchors = getattr(self, '_surface_anchors', None)
+            if anchors is None:
+                anchors = starts
+                if surface_offset(context):
+                    from . import live
+                    anchors = []
+                    for original in starts:
+                        hit = live.nearest(context, original, self._refs)
+                        anchors.append(hit[0] if hit is not None else original)
+                self._surface_anchors = anchors
+            news = []
+            for i, original in zip(idx, anchors):
+                xy = _screen_xy(region, rv3d, original)
+                hit = surface_hit(context, region, rv3d, Vector(xy)+delta, self._refs) if xy else None
+                news.append(hit if hit is not None else ob.matrix_world @ bm.verts[i].co)
         else:
+            hit = view3d_utils.region_2d_to_location_3d(region, rv3d, mouse, self._depth)
             delta = hit - start
-            news = [project_point(context, s + delta, self._refs) if self._refs else s + delta for s in starts]
-        for (i, w) in zip(idx, news):
+            news = [s + delta for s in starts]
+        snap=getattr(self,'_snap',None)
+        sym=getattr(self,'_sym',None)
+        if snap is not None:
+            proposed,pairs=snap.query(context,region,rv3d,dict(zip(idx,news)))
+            if sym is not None:
+                proposed,seam=sym.snap_seam(context,region,rv3d,proposed,snap)
+            else:seam=[]
+            news=[proposed[i] for i in idx]
+            STATE["snap"]=[snap.co[t] for t in pairs.values()]+seam
+        for i, w in zip(idx, news):
             bm.verts[i].co = inv @ w
+        changed=[bm.verts[i] for i in idx]
+        if sym is not None:
+            sym.move(changed)
+            changed += [sym.pairs[v] for v in changed if v in sym.pairs and sym.pairs[v].is_valid]
+        preselect.coordinates_changed(ob,changed)
         bmesh.update_edit_mesh(ob.data, loop_triangles=False, destructive=False)
 
+    # -- one-shot actions
     def _delete(self, context, mouse, faces_only=False):
         """Ctrl+Shift+LMB: the dot / vertex / face under the mouse; an edge = its edge loop. While dragging only faces
         go. Returns what went or None."""
-        (region, rv3d) = (context.region, context.region_data)
+        region, rv3d = context.region, context.region_data
         ob = bpy.data.objects[self._ob]
         comp = component_at(context, region, rv3d, mouse, ob)
         if comp is None or (faces_only and comp[0] != 'FACE'):
             return None
         bm = bmesh.from_edit_mesh(ob.data)
+        sym=getattr(self,'_sym',None)
+        if sym is not None:
+            bm.verts.ensure_lookup_table();bm.edges.ensure_lookup_table();bm.faces.ensure_lookup_table()
+            vertices=list(bm.verts[comp[1]].link_faces) if comp[0]=='VERT' else []
+            if comp[0]=='VERT':vertices={v for f in vertices for v in f.verts}|{bm.verts[comp[1]]}
+            elif comp[0]=='FACE':vertices=list(bm.faces[comp[1]].verts)
+            else:vertices={v for e in component_loop(bm.edges[comp[1]]) for f in e.link_faces for v in f.verts}
+            sym.prepare_topology(local=True,vertices=vertices)
+            try:sym.require(vertices)
+            except quad_draw_symmetry.SymmetryError as ex:
+                self.report({'WARNING'},str(ex));return None
         if comp[0] == 'EDGE':
-            delete_loop(bm, comp[1])
+            if not delete_loop(bm, comp[1]):
+                self.report({'INFO'},'Quad Draw: choose a visible manifold edge loop');return None
         else:
             delete_at(bm, comp[0], comp[1])
+        if not _sync_symmetry(self,context):return None
         bmesh.update_edit_mesh(ob.data)
         preselect.invalidate()
         self._deleted = True
-        STATE['preview'] = None
+        STATE["preview"] = None
         _redraw(context)
         return comp[0]
 
     def _grab_loop(self, context, mouse):
-        (region, rv3d) = (context.region, context.region_data)
+        region, rv3d = context.region, context.region_data
         ob = bpy.data.objects[self._ob]
         comp = component_at(context, region, rv3d, mouse, ob, edges_only=True)
         if comp is None:
             return None
         bm = bmesh.from_edit_mesh(ob.data)
         bm.edges.ensure_lookup_table()
-        verts = list({v for e in edge_loop(bm.edges[comp[1]]) for v in e.verts})
+        plan=loop_plan(context,ob,comp[1]);bm.verts.ensure_lookup_table()
+        if not plan or not plan['verts']:return None
+        verts = [bm.verts[i] for i in plan['verts']]
         mw = ob.matrix_world
         start = surface_hit(context, region, rv3d, mouse, self._refs) if self._refs else None
         if start is None:
@@ -880,73 +1287,75 @@ class ALLSET_OT_quad_draw(bpy.types.Operator):
         return ('MESH', [v.index for v in verts], [mw @ v.co for v in verts], start)
 
     def _loop(self, context, mouse, center=False):
-        (region, rv3d) = (context.region, context.region_data)
+        from . import quad_draw_cut
+        region, rv3d = context.region, context.region_data
         ob = bpy.data.objects[self._ob]
         comp = component_at(context, region, rv3d, mouse, ob, edges_only=True)
         if comp is None:
+            _close_symmetry(self)
             return {'CANCELLED'}
         bm = bmesh.from_edit_mesh(ob.data)
-        before = set(bm.verts)
         bm.edges.ensure_lookup_table()
         t = 0.5 if center else min(max(comp[2], 0.001), 0.999)
-        mesh_tools.insert_loop(bm, bm.edges[comp[1]], t)
-        if self._refs:
-            (mw, inv) = (ob.matrix_world, ob.matrix_world.inverted_safe())
-            for v in bm.verts:
-                if v not in before:
-                    v.co = inv @ project_point(context, mw @ v.co, self._refs)
+        backup=None
+        try:
+            plan=quad_draw_cut.Plan(bm,bm.edges[comp[1]],t,self._sym)
+            if self._sym is None:backup=bm.copy()
+            else:self._sym.prepare_backup()
+            mw=ob.matrix_world;inv=mw.inverted_safe()
+            project=(lambda co:inv@project_point(context,mw@co,self._refs,region,rv3d)) if self._refs else None
+            plan.apply(project)
+            if self._sym is not None:self._sym.check_seam()
+        except (quad_draw_symmetry.SymmetryError,ValueError,ReferenceError,RuntimeError) as ex:
+            if self._sym is not None:self._sym.rollback();self._sym=None
+            elif backup is not None:
+                mesh=bpy.data.meshes.new('_quad_draw_cut_rollback')
+                try:backup.to_mesh(mesh);bm.clear();bm.from_mesh(mesh)
+                finally:bpy.data.meshes.remove(mesh)
+            bmesh.update_edit_mesh(ob.data);_geometry_reset(None)
+            self.report({'WARNING'},str(ex));return {'CANCELLED'}
+        finally:
+            if backup is not None:backup.free()
         _indices(bm)
+        # Plan has already applied and validated both halves by exact edge pairs.
+        # Replaying a second global topology diff would only repeat that work.
+        if self._sym is not None and self._sym.disabled_reason:
+            self.report({'WARNING'},self._sym.disabled_reason)
+        _close_symmetry(self)
         bmesh.update_edit_mesh(ob.data)
         preselect.invalidate()
-        STATE['preview'] = None
+        STATE["preview"] = None
         _redraw(context)
         return {'FINISHED'}
 
     def _relax_at(self, context, mouse):
-        (region, rv3d) = (context.region, context.region_data)
-        ob = bpy.data.objects[self._ob]
-        bm = bmesh.from_edit_mesh(ob.data)
-        (mw, inv) = (ob.matrix_world, ob.matrix_world.inverted_safe())
-        r = BRUSH_PX * _ui_scale(context)
-        verts = []
-        if self.middle:
-            comp = component_at(context, region, rv3d, mouse, ob)
-            if comp is not None:
-                for (kind, seq) in (('VERT', bm.verts), ('EDGE', bm.edges), ('FACE', bm.faces)):
-                    if comp[0] == kind:
-                        seq.ensure_lookup_table()
-                        el = seq[comp[1]]
-                        verts = [el] if kind == 'VERT' else list(el.verts)
-        else:
-            for v in bm.verts:
-                xy = _screen_xy(region, rv3d, mw @ v.co)
-                if xy is not None and math.hypot(xy[0] - mouse[0], xy[1] - mouse[1]) <= r:
-                    verts.append(v)
-        refs = self._refs
+        from . import quad_draw_relax
+        session=getattr(self,'_relax',None)
+        if session is None:self._relax=session=quad_draw_relax.Session(context,self,getattr(self,'_press',mouse))
+        session.apply(context,mouse)
 
-        def project(co):
-            return inv @ project_point(context, mw @ co, refs) if refs else co
-        relax(bm, verts, poly_draw.settings(context).qd_relax, project=project)
-        bmesh.update_edit_mesh(ob.data, loop_triangles=False, destructive=False)
-        STATE['preview'] = ('BRUSH', (mouse[0], mouse[1], r))
-
+    # -- modal
     def modal(self, context, event):
         if not tool_active(context) or not _view_ok(context) or bpy.data.objects.get(self._ob) is None:
-            STATE['preview'] = None
+            STATE["preview"] = None
+            STATE["snap"] = []
+            self._snap = None
+            _close_relax(self)
+            _close_symmetry(self);preselect.invalidate()
             return {'CANCELLED'}
         mouse = _mouse(event)
         button = 'MIDDLEMOUSE' if self.middle else 'LEFTMOUSE'
         if event.type in {'MOUSEMOVE', 'INBETWEEN_MOUSEMOVE'}:
             if not self._moved and math.hypot(mouse[0] - self._press[0], mouse[1] - self._press[1]) >= DRAG_PX:
                 self._moved = True
-            if self._mode == 'DELETE':
-                self._delete(context, mouse, faces_only=True)
-            elif self._moved:
-                if self._mode == 'SHIFT':
-                    self._relax_at(context, mouse)
-                else:
-                    self._drag_to(context, mouse)
-                _redraw(context)
+            try:
+                if self._mode == 'DELETE':self._delete(context, mouse, faces_only=True)
+                elif self._moved:
+                    if self._mode == 'SHIFT':self._relax_at(context, mouse)
+                    else:self._drag_to(context, mouse)
+                    _redraw(context)
+            except quad_draw_symmetry.SymmetryError as ex:
+                self.report({'WARNING'},str(ex));return self._cancel(context)
             return {'RUNNING_MODAL'}
         if event.type == button and event.value == 'RELEASE':
             return self._release(context, mouse)
@@ -955,59 +1364,99 @@ class ALLSET_OT_quad_draw(bpy.types.Operator):
         return {'RUNNING_MODAL'}
 
     def _release(self, context, mouse):
-        (region, rv3d) = (context.region, context.region_data)
         ob = bpy.data.objects[self._ob]
-        STATE['preview'] = None
+        STATE["preview"] = None
         if self._mode == 'DELETE':
+            _close_symmetry(self)
             return {'FINISHED'}
         if self._mode == 'SHIFT':
+            _close_relax(self)
             if self._moved or self.middle:
                 if not self._moved:
+                    _close_symmetry(self)
                     return {'CANCELLED'}
                 preselect.invalidate()
+                _close_symmetry(self)
                 _redraw(context)
                 return {'FINISHED'}
-            plan = fill_plan(context, region, rv3d, mouse, ob)
+            plan = self._fill_plan
+            if plan is not None and self._sym is not None:self._sym.prepare_topology(local=True)
             if plan is None or apply_fill(ob, plan[0]) is None:
-                self.report({'INFO'}, _zh('Quad Draw: Shift+click between 3 or 4 dots / border vertices to fill', 'MWK:operators/quad_draw.py:1055'))
+                _close_symmetry(self)
+                self.report({'INFO'}, "Quad Draw: no valid local face; check overlap, folded corners and border connections")
                 _redraw(context)
                 return {'CANCELLED'}
+            if not _sync_symmetry(self,context,finish=True):return {'CANCELLED'}
+            bmesh.update_edit_mesh(ob.data)
+            preselect.invalidate()
             _redraw(context)
             return {'FINISHED'}
-        if not self._moved and (not self._new_dot):
+        if not self._moved and not self._new_dot:
+            _close_symmetry(self)
             return {'CANCELLED'}
+        if self._moved:
+            try:self._drag_to(context,mouse)
+            except quad_draw_symmetry.SymmetryError as ex:
+                self.report({'WARNING'},str(ex));return self._cancel(context)
         bm = bmesh.from_edit_mesh(ob.data)
         bm.verts.ensure_lookup_table()
-        auto_weld(context, region, rv3d, ob, [bm.verts[i] for i in self._grab[1]])
+        welded=0
+        if self._snap is not None:
+            if self._sym is not None and (self._snap.pairs or self._sym.seam_targets()):
+                self._sym.prepare_topology(local=True,vertices=[bm.verts[i] for i in self._grab[1]]+[bm.verts[t] for t in self._snap.pairs.values()])
+            try:welded=_commit_weld(self,bm,self._snap,{i:bm.verts[i] for i in self._grab[1]})
+            except quad_draw_symmetry.SymmetryError as ex:
+                self.report({'WARNING'},str(ex));return self._cancel(context)
+            self._snap = None
+            _indices(bm)
+        STATE["snap"] = []
+        self._surface_anchors = None
+        if welded or self._new_dot:
+            if not _sync_symmetry(self,context,finish=True):return {'CANCELLED'}
+        else:_close_symmetry(self)
         bmesh.update_edit_mesh(ob.data)
         preselect.invalidate()
         _redraw(context)
         return {'FINISHED'}
 
     def _cancel(self, context):
+        STATE["snap"] = []
+        self._snap = None
+        self._surface_anchors = None
         ob = bpy.data.objects.get(self._ob)
+        session=getattr(self,'_relax',None)
+        if session is not None:session.restore()
+        _close_relax(self)
+        sym=getattr(self,'_sym',None)
+        if sym is not None:
+            sym.rollback();self._sym=None
+            if ob is not None:bmesh.update_edit_mesh(ob.data)
+            preselect.invalidate();STATE['preview']=None;_redraw(context)
+            return {'CANCELLED'}
         if self._grab is not None and ob is not None:
             bm = bmesh.from_edit_mesh(ob.data)
             bm.verts.ensure_lookup_table()
-            if getattr(self, '_new_dot', False):
+            if getattr(self, "_new_dot", False):
                 bm.verts.remove(bm.verts[self._grab[1][0]])
                 _indices(bm)
             else:
                 inv = ob.matrix_world.inverted_safe()
-                for (i, w) in zip(self._grab[1], self._grab[2]):
+                for i, w in zip(self._grab[1], self._grab[2]):
                     bm.verts[i].co = inv @ w
             bmesh.update_edit_mesh(ob.data)
-        STATE['preview'] = None
+        STATE["preview"] = None
+        preselect.invalidate()
         _redraw(context)
         return {'CANCELLED'}
+
+
+# --- Tab: extend / quad strip ---------------------------------------------------------------------------
 
 class ALLSET_OT_quad_draw_tab(bpy.types.Operator):
     """Quad Draw Tab: while Tab is held, drag from a border edge to extend it, or in empty space to draw a strip of
     quads"""
-    bl_translation_context = 'MWK:operators/quad_draw.py:1094'
-    bl_idname = 'allset.quad_draw_tab'
-    bl_label = _zh_native('Quad Draw Extend', 'MWK:operators/quad_draw.py:1094')
-    bl_description = _zh_native('Quad Draw Tab: while Tab is held, drag from a border edge to extend it, or in empty space to draw a strip of\nquads', 'MWK:operators/quad_draw.py:1094')
+    bl_idname = "allset.quad_draw_tab"
+    bl_label = "Quad Draw Extend"
     bl_options = {'REGISTER', 'UNDO'}
 
     @classmethod
@@ -1019,16 +1468,22 @@ class ALLSET_OT_quad_draw_tab(bpy.types.Operator):
             return {'PASS_THROUGH'}
         self._ob = edit_object(context).name
         self._drag = None
+        self._snap = None
+        self._new_ids = {}
+        self._sym = None
         self._done = False
         self._refs = reference_objects(context)
         update_hover(context, context.region, context.region_data, _mouse(event), False, False, tab=True)
         context.window_manager.modal_handler_add(self)
-        context.workspace.status_text_set(_dcc_source('Quad Draw: hold Tab and drag a border edge to extend it, a corner vertex to fill the corner, or drag in empty space for a strip of quads'))
+        context.workspace.status_text_set(TAB_HINT)
         _redraw(context)
         return {'RUNNING_MODAL'}
 
     def _end(self, context, result):
-        STATE['preview'] = None
+        _close_symmetry(self)
+        STATE["preview"] = None
+        STATE["snap"] = []
+        self._snap = None
         context.workspace.status_text_set(None)
         _redraw(context)
         return result
@@ -1036,58 +1491,146 @@ class ALLSET_OT_quad_draw_tab(bpy.types.Operator):
     def modal(self, context, event):
         if not tool_active(context) or not _view_ok(context) or bpy.data.objects.get(self._ob) is None:
             return self._end(context, {'CANCELLED'})
-        (region, rv3d) = (context.region, context.region_data)
+        region, rv3d = context.region, context.region_data
         mouse = _mouse(event)
         if event.type == 'TAB':
             if event.value == 'RELEASE':
                 if self._drag is not None:
                     self._commit(context, mouse)
                 return self._end(context, {'FINISHED'} if self._done else {'CANCELLED'})
-            return {'RUNNING_MODAL'}
+            return {'RUNNING_MODAL'}      # key repeat
         if event.type in {'MOUSEMOVE', 'INBETWEEN_MOUSEMOVE'}:
             if self._drag is None:
                 update_hover(context, region, rv3d, mouse, False, False, tab=True)
+            elif self._drag[0]=='WIDTH':
+                width=self._drag[2]+(mouse[0]-self._drag[1][0])/_ui_scale(context)
+                poly_draw.settings(context).qd_strip_width=max(1,round(width))
+                STATE["preview"]=('WIDTH',self._drag[1])
+                context.workspace.status_text_set(f'Quad Strip Width: {poly_draw.settings(context).qd_strip_width:.1f} px — Esc to cancel')
             else:
                 self._update_drag(context, mouse)
             _redraw(context)
             return {'RUNNING_MODAL'}
-        if event.type in {'LEFTMOUSE', 'MIDDLEMOUSE'} and event.value == 'PRESS' and (self._drag is None):
+        if event.type in {'LEFTMOUSE', 'MIDDLEMOUSE'} and event.value == 'PRESS' and self._drag is None:
             ob = bpy.data.objects[self._ob]
-            vi = corner_vertex_at(context, region, rv3d, mouse, ob) if event.type == 'LEFTMOUSE' else None
+            mode = poly_draw.settings(context).qd_extend
+            vi = corner_vertex_at(context, region, rv3d, mouse, ob) if event.type == 'LEFTMOUSE' and mode == 'EDGE' else None
+            ei=poly_draw.border_edge_at(context,region,rv3d,mouse,ob) if vi is None else None
+            if vi is None and ei is None and event.type=='MIDDLEMOUSE':
+                self._button=event.type;self._drag=('WIDTH',mouse,poly_draw.settings(context).qd_strip_width)
+                STATE["preview"]=('WIDTH',mouse)     # a preview strip of the current width while dragging
+                _redraw(context)
+                return {'RUNNING_MODAL'}
+            if not _begin_symmetry(self,context,ob,coordinate_only=True):return {'RUNNING_MODAL'}
+            self._press_mouse=mouse
             if vi is not None:
+                # a border vertex: the quad of it, its two border neighbours and the mouse point (#180)
                 self._button = event.type
                 self._drag = ('CORNER', vi)
-                return {'RUNNING_MODAL'}
-            ei = poly_draw.border_edge_at(context, region, rv3d, mouse, ob)
-            if ei is None and event.type == 'MIDDLEMOUSE':
+                bm=bmesh.from_edit_mesh(ob.data)
+                bm.verts.ensure_lookup_table()
+                a,b=corner_neighbours(bm.verts[vi])
+                self._new_ids={None:len(bm.verts)}
+                self._start_snap(context,[ob.matrix_world@bm.verts[vi].co],[(a.index,vi,b.index,len(bm.verts))])
                 return {'RUNNING_MODAL'}
             self._button = event.type
             if ei is not None:
                 bm = bmesh.from_edit_mesh(ob.data)
                 bm.edges.ensure_lookup_table()
                 edge = bm.edges[ei]
-                whole = event.type == 'MIDDLEMOUSE' or poly_draw.settings(context).qd_extend == 'LOOP'
-                loop = border_loop(edge) if whole else [edge]
+                mode = 'LOOP' if event.type == 'MIDDLEMOUSE' else mode
+                loop = border_loop(edge) if mode == 'BORDER' else border_chain(edge) if mode == 'LOOP' else [edge]
                 start = surface_hit(context, region, rv3d, mouse, self._refs) if self._refs else None
                 if start is None:
                     mw = ob.matrix_world
                     start = mw @ ((edge.verts[0].co + edge.verts[1].co) / 2)
                 self._drag = ('EXTEND', [e.index for e in loop], start)
+                ids=sorted({v.index for e in loop for v in e.verts})
+                self._new_ids={i:len(bm.verts)+k for k,i in enumerate(ids)}
+                faces=[]
+                for e in loop:
+                    b,a=poly_draw.edge_start(e)
+                    faces.append((b.index,a.index,self._new_ids[a.index],self._new_ids[b.index]))
+                bm.verts.ensure_lookup_table()
+                self._start_snap(context,[ob.matrix_world@bm.verts[i].co for i in ids],faces)
             else:
                 self._drag = ('STRIP', [mouse])
             return {'RUNNING_MODAL'}
-        if event.type == getattr(self, '_button', 'LEFTMOUSE') and event.value == 'RELEASE' and (self._drag is not None):
+        if event.type == getattr(self, "_button", 'LEFTMOUSE') and event.value == 'RELEASE' \
+                and self._drag is not None:
             self._commit(context, mouse)
+            if self._drag[0]=='WIDTH':
+                STATE["preview"]=None
+                context.workspace.status_text_set(TAB_HINT)
+                _redraw(context)
             self._drag = None
+            self._snap = None
+            STATE["snap"] = []
             return {'RUNNING_MODAL'}
         if event.type == 'ESC' and event.value == 'PRESS':
+            if self._drag is not None and self._drag[0]=='WIDTH':
+                poly_draw.settings(context).qd_strip_width=self._drag[2]
             return self._end(context, {'FINISHED'} if self._done else {'CANCELLED'})
         return {'RUNNING_MODAL'} if self._drag is not None else {'PASS_THROUGH'}
 
+    def _start_snap(self,context,extra,faces):
+        self._snap=None
+        if _weld_px(context) is not None:
+            from .quad_draw_weld import Magnet
+            ob=bpy.data.objects[self._ob]
+            # Duplicated extension endpoints must not weld back into their
+            # source anchors on a short drag (which would collapse a quad).
+            anchors=self._new_ids.keys() if self._drag[0]=='EXTEND' else [self._drag[1]] if self._drag[0]=='CORNER' else ()
+            self._snap=Magnet(context,ob,self._new_ids.values(),extra,faces,exclude=anchors)
+            sym=getattr(self,'_sym',None)
+            if sym is not None and self._drag[0] in {'EXTEND','CORNER'}:
+                bm=bmesh.from_edit_mesh(ob.data);bm.verts.ensure_lookup_table()
+                sym.virtual_origins={new:bm.verts[old if old is not None else self._drag[1]] for old,new in self._new_ids.items()}
+
+    def _snap_points(self,context,points):
+        STATE["snap"]=[]
+        snap=getattr(self,'_snap',None)
+        if snap is None:
+            return points
+        proposed={self._new_ids[i]:p for i,p in points.items()}
+        raw=dict(proposed)
+        proposed,pairs=snap.query(context,context.region,context.region_data,proposed)
+        sym=getattr(self,'_sym',None)
+        if sym is not None:proposed,seam=sym.snap_virtual(context,context.region,context.region_data,proposed,snap,raw=raw)
+        else:seam=[]
+        STATE["snap"]=[snap.co[t] for t in snap.pairs.values()]+seam
+        return {i:proposed[self._new_ids[i]] for i in points}
+
+    def _strip_positions(self,context,mouse):
+        path=self._drag[1]+[mouse]
+        region,rv3d=context.region,context.region_data
+        pairs=strip_pairs(path,poly_draw.settings(context).qd_strip_width*_ui_scale(context))
+        points={}
+        for row,(left,right) in enumerate(pairs):
+            a=place_point(context,region,rv3d,left,self._refs);b=place_point(context,region,rv3d,right,self._refs)
+            if a is None or b is None:break
+            points[row*2]=a;points[row*2+1]=b
+        count=len(points)
+        ob=bpy.data.objects[self._ob];base=len(bmesh.from_edit_mesh(ob.data).verts)
+        self._new_ids={i:base+i for i in range(count)}
+        faces=[(base+i-1,base+i+1,base+i,base+i-2) for i in range(2,count,2)]
+        if _weld_px(context) is not None:
+            if self._snap is None:self._start_snap(context,list(points.values()),faces)
+            else:self._snap.set_virtual(list(points.values()),faces)
+        else:self._snap=None
+        return self._snap_points(context,points) if points else points
+
+    def _extend_positions(self,context,mouse):
+        ob=bpy.data.objects[self._ob]
+        bm=bmesh.from_edit_mesh(ob.data)
+        bm.verts.ensure_lookup_table()
+        offset=self._offset_fn(context,mouse)
+        return self._snap_points(context,{i:ob.matrix_world@offset(bm.verts[i].co) for i in self._new_ids})
+
     def _offset_fn(self, context, mouse):
-        (region, rv3d) = (context.region, context.region_data)
+        region, rv3d = context.region, context.region_data
         ob = bpy.data.objects[self._ob]
-        (mw, inv) = (ob.matrix_world, ob.matrix_world.inverted_safe())
+        mw, inv = ob.matrix_world, ob.matrix_world.inverted_safe()
         start = self._drag[2]
         hit = surface_hit(context, region, rv3d, mouse, self._refs) if self._refs else None
         if hit is None:
@@ -1097,38 +1640,37 @@ class ALLSET_OT_quad_draw_tab(bpy.types.Operator):
 
         def offset(co):
             w = mw @ co + delta
-            return inv @ (project_point(context, w, refs) if refs else w)
+            return inv @ (project_point(context, w, refs, region, rv3d) if refs else w)
         return offset
 
     def _corner_point(self, context, mouse):
         """World point under the mouse for a corner quad: on the reference surface, else in the view plane through
         the vertex."""
-        (region, rv3d) = (context.region, context.region_data)
+        region, rv3d = context.region, context.region_data
         ob = bpy.data.objects[self._ob]
         bm = bmesh.from_edit_mesh(ob.data)
         bm.verts.ensure_lookup_table()
         at = ob.matrix_world @ bm.verts[self._drag[1]].co
         hit = place_point(context, region, rv3d, mouse, self._refs) if self._refs else None
-        return hit if hit is not None else view3d_utils.region_2d_to_location_3d(region, rv3d, mouse, at)
+        point=hit if hit is not None else view3d_utils.region_2d_to_location_3d(region, rv3d, mouse, at)
+        return self._snap_points(context,{None:point})[None]
 
     def _update_drag(self, context, mouse):
         if self._drag[0] == 'CORNER':
             ob = bpy.data.objects[self._ob]
             p = self._corner_point(context, mouse)
-            STATE['preview'] = ('EXTEND', [q for (a, b) in _corner_points(ob, self._drag[1]) for q in (b, p)])
+            STATE["preview"] = ('EXTEND', [q for a, b in _corner_points(ob, self._drag[1]) for q in (b, p)])
             return
         if self._drag[0] == 'STRIP':
             self._drag[1].append(mouse)
-            pairs = strip_pairs(self._drag[1], poly_draw.settings(context).qd_strip_width * _ui_scale(context))
-            (region, rv3d) = (context.region, context.region_data)
-            pts = []
-            for (left, right) in pairs:
-                a = view3d_utils.region_2d_to_location_3d(region, rv3d, left, self._depth(context))
-                b = view3d_utils.region_2d_to_location_3d(region, rv3d, right, self._depth(context))
-                pts += [a, b]
-            STATE['preview'] = ('EXTEND', pts)
+            positions=self._strip_positions(context,mouse)
+            pts=[]
+            for i in range(0,len(positions),2):
+                pts += [positions[i],positions[i+1]]
+                if i:pts += [positions[i-2],positions[i],positions[i-1],positions[i+1]]
+            STATE["preview"] = ('EXTEND', pts)
             return
-        offset = self._offset_fn(context, mouse)
+        positions = self._extend_positions(context, mouse)
         ob = bpy.data.objects[self._ob]
         bm = bmesh.from_edit_mesh(ob.data)
         bm.edges.ensure_lookup_table()
@@ -1136,17 +1678,33 @@ class ALLSET_OT_quad_draw_tab(bpy.types.Operator):
         segs = []
         for i in self._drag[1]:
             if i < len(bm.edges):
-                (b, a) = poly_draw.edge_start(bm.edges[i])
-                (pa, pb) = (mw @ offset(a.co.copy()), mw @ offset(b.co.copy()))
+                b, a = poly_draw.edge_start(bm.edges[i])
+                pa, pb = positions[a.index], positions[b.index]
                 segs += [mw @ a.co, pa, pa, pb, pb, mw @ b.co]
-        STATE['preview'] = ('EXTEND', segs)
+        STATE["preview"] = ('EXTEND', segs)
 
     def _depth(self, context):
-        hit = surface_hit(context, context.region, context.region_data, self._drag[1][0], self._refs) if self._refs else None
+        hit = surface_hit(context, context.region, context.region_data, self._drag[1][0], self._refs) \
+            if self._refs else None
         return hit if hit is not None else context.scene.cursor.location
 
     def _commit(self, context, mouse):
-        (region, rv3d) = (context.region, context.region_data)
+        if self._drag[0]=='WIDTH':return
+        ob = bpy.data.objects[self._ob]
+        press=getattr(self,'_press_mouse',None)
+        if press is not None and (Vector(mouse)-Vector(press)).length<DRAG_PX:
+            _close_symmetry(self);return
+        try:
+            if self._sym is not None:self._sym.prepare_topology(local=True)
+            self._commit_geometry(context,mouse)
+        except (quad_draw_symmetry.SymmetryError,ValueError,ReferenceError) as ex:
+            sym=getattr(self,'_sym',None)
+            if sym is not None:sym.rollback();self._sym=None
+            bmesh.update_edit_mesh(ob.data);preselect.invalidate()
+            self.report({'WARNING'},str(ex))
+        finally:_close_symmetry(self)
+
+    def _commit_geometry(self,context,mouse):
         ob = bpy.data.objects[self._ob]
         bm = bmesh.from_edit_mesh(ob.data)
         inv = ob.matrix_world.inverted_safe()
@@ -1155,36 +1713,38 @@ class ALLSET_OT_quad_draw_tab(bpy.types.Operator):
             before = set(bm.verts)
             face = corner_quad(bm, bm.verts[self._drag[1]], inv @ self._corner_point(context, mouse))
             faces = [face] if face is not None else []
-            if faces:
-                auto_weld(context, region, rv3d, ob, [vv for vv in face.verts if vv not in before])
+            if faces and self._snap is not None:
+                new=next(v for v in face.verts if v not in before)
+                _commit_weld(self,bm,self._snap,{self._new_ids[None]:new})
+                _indices(bm)
         elif self._drag[0] == 'EXTEND':
             bm.edges.ensure_lookup_table()
             edges = [bm.edges[i] for i in self._drag[1] if i < len(bm.edges)]
-            before = set(bm.verts)
-            faces = extend_edges(bm, edges, self._offset_fn(context, mouse))
-            if faces:
-                auto_weld(context, region, rv3d, ob, [v for v in bm.verts if v not in before])
+            positions=self._extend_positions(context,mouse)
+            created={}
+            faces = extend_edges(bm,edges,None,{i:inv@p for i,p in positions.items()},created)
+            if faces and self._snap is not None:
+                _commit_weld(self,bm,self._snap,{self._new_ids[i]:v for i,v in created.items()})
+                _indices(bm)
         else:
-            path = self._drag[1] + [mouse]
-            pairs = strip_pairs(path, poly_draw.settings(context).qd_strip_width * _ui_scale(context))
-            local = []
-            for (left, right) in pairs:
-                a = place_point(context, region, rv3d, left, self._refs)
-                b = place_point(context, region, rv3d, right, self._refs)
-                if a is None or b is None:
-                    break
-                local.append((inv @ a, inv @ b))
+            points=self._strip_positions(context,mouse)
+            local=[(inv@points[i],inv@points[i+1]) for i in range(0,len(points),2)]
+            start=len(bm.verts)
             faces = strip_faces(bm, local) if len(local) >= 2 else []
+            if faces and self._snap is not None:
+                bm.verts.ensure_lookup_table()
+                _commit_weld(self,bm,self._snap,{start+i:bm.verts[start+i] for i in range(len(points))})
+                _indices(bm)
+        if not _sync_symmetry(self,context,finish=True):return
         bmesh.update_edit_mesh(ob.data)
         preselect.invalidate()
         self._done = self._done or bool(faces)
 
+
 class ALLSET_OT_quad_draw_clear_dots(bpy.types.Operator):
     """Remove every Quad Draw dot (Maya Tool Settings: Clear Dots)"""
-    bl_translation_context = 'MWK:operators/quad_draw.py:1274'
-    bl_idname = 'allset.quad_draw_clear_dots'
-    bl_label = _zh_native('Clear Dots', 'MWK:operators/quad_draw.py:1274')
-    bl_description = _zh_native('Remove every Quad Draw dot (Maya Tool Settings: Clear Dots)', 'MWK:operators/quad_draw.py:1274')
+    bl_idname = "allset.quad_draw_clear_dots"
+    bl_label = "Clear Dots"
     bl_options = {'REGISTER', 'UNDO', 'INTERNAL'}
 
     @classmethod
@@ -1198,17 +1758,79 @@ class ALLSET_OT_quad_draw_clear_dots(bpy.types.Operator):
             return {'CANCELLED'}
         bmesh.update_edit_mesh(ob.data)
         preselect.invalidate()
-        STATE['preview'] = None
+        STATE["preview"] = None
         for area in context.screen.areas if context.screen else ():
             area.tag_redraw()
         return {'FINISHED'}
 
+
+class ALLSET_OT_quad_draw_pick_seam(bpy.types.Operator):
+    """Choose an existing center edge to establish topology correspondence"""
+    bl_idname='allset.quad_draw_pick_seam'
+    bl_label='Pick Topology Seam'
+    bl_options={'REGISTER','UNDO'}
+    reference: BoolProperty(default=False,options={'HIDDEN','SKIP_SAVE'})
+
+    @classmethod
+    def poll(cls,context):return tool_active(context)
+
+    def invoke(self,context,event):
+        self._ob=context.edit_object.name
+        context.workspace.status_text_set('Topology symmetry: click a manifold '+('live reference' if self.reference else 'retopology')+' seam edge; Esc cancels')
+        context.window_manager.modal_handler_add(self)
+        return {'RUNNING_MODAL'}
+
+    def _end(self,context,result):
+        STATE['preview']=None;context.workspace.status_text_set(None)
+        _redraw(context);return result
+
+    def modal(self,context,event):
+        if event.type in {'ESC','RIGHTMOUSE'} and event.value=='PRESS':return self._end(context,{'CANCELLED'})
+        ob=bpy.data.objects.get(self._ob)
+        if ob is None or ob.mode!='EDIT':return self._end(context,{'CANCELLED'})
+        if event.alt:return {'PASS_THROUGH'}
+        area=next((a for a in context.window.screen.areas if a.type=='VIEW_3D' and a.x<=event.mouse_x<a.x+a.width and a.y<=event.mouse_y<a.y+a.height),None)
+        region=next((r for r in area.regions if r.type=='WINDOW'),None) if area else None
+        if region is None:return {'RUNNING_MODAL'}
+        with context.temp_override(area=area,region=region):
+            ctx=bpy.context;mouse=(event.mouse_x-region.x,event.mouse_y-region.y)
+            if self.reference:
+                from . import quad_draw_reference
+                picked=quad_draw_reference.pick(ctx,region,ctx.region_data,mouse)
+                STATE['preview']=('TAB',picked[2]) if picked else None
+                _redraw(ctx)
+                if event.type=='LEFTMOUSE' and event.value=='PRESS' and picked:
+                    reference,edge,_points=picked
+                    try:quad_draw_reference.bind(ctx,reference,edge,'XYZ'.index(ctx.scene.allset_symmetry.axis),ctx.scene.allset_symmetry.allow_partial)
+                    except quad_draw_symmetry.SymmetryError as ex:
+                        self.report({'WARNING'},str(ex));return {'RUNNING_MODAL'}
+                    from . import symmetry
+                    sym=symmetry.state(ctx.scene);sym.on=True;sym.about='TOPOLOGY';sym.last='TOPOLOGY';symmetry.apply(sym,[ob])
+                    _geometry_reset(None);results.result(self, 'Reference seam bound: '+reference.name)
+                    return self._end(ctx,{'FINISHED'})
+                return {'RUNNING_MODAL'}
+            comp=component_at(ctx,region,ctx.region_data,mouse,ob,edges_only=True)
+            STATE['preview']=('TAB',_component_points(ob,comp)) if comp else None
+            _redraw(ctx)
+            if event.type=='LEFTMOUSE' and event.value=='PRESS':
+                if comp is None:return {'RUNNING_MODAL'}
+                bm=bmesh.from_edit_mesh(ob.data);bm.edges.ensure_lookup_table()
+                from . import symmetry
+                sym=symmetry.state(ctx.scene)
+                try:quad_draw_symmetry.bind_seam(ob,bm,bm.edges[comp[1]],sym)
+                except quad_draw_symmetry.SymmetryError as ex:
+                    self.report({'WARNING'},str(ex));return {'RUNNING_MODAL'}
+                sym.on=True;sym.about='TOPOLOGY';sym.last='TOPOLOGY';symmetry.apply(sym,[ob])
+                bmesh.update_edit_mesh(ob.data,loop_triangles=False,destructive=False)
+                _geometry_reset(None);topology_preview(ctx,ob)
+                return self._end(ctx,{'FINISHED'})
+        return {'RUNNING_MODAL'}
+
+
 class ALLSET_OT_quad_draw_exit(bpy.types.Operator):
     """Leave Quad Draw for the Select tool (Maya Esc / Q)"""
-    bl_translation_context = 'MWK:operators/quad_draw.py:1297'
-    bl_idname = 'allset.quad_draw_exit'
-    bl_label = _zh_native('Exit Quad Draw', 'MWK:operators/quad_draw.py:1297')
-    bl_description = _zh_native('Leave Quad Draw for the Select tool (Maya Esc / Q)', 'MWK:operators/quad_draw.py:1297')
+    bl_idname = "allset.quad_draw_exit"
+    bl_label = "Exit Quad Draw"
     bl_options = {'INTERNAL'}
 
     @classmethod
@@ -1216,69 +1838,248 @@ class ALLSET_OT_quad_draw_exit(bpy.types.Operator):
         return tool_active(context)
 
     def execute(self, context):
-        STATE['preview'] = None
-        bpy.ops.wm.tool_set_by_id(name='builtin.select_box', space_type='VIEW_3D')
+        STATE["preview"] = None
+        bpy.ops.wm.tool_set_by_id(name="builtin.select_box", space_type='VIEW_3D')
+        _restore_inactive_overlays()
         return {'FINISHED'}
 
+
+class ALLSET_OT_restore_modeling_display(bpy.types.Operator):
+    """Turn off a persisted Retopology overlay in this viewport to restore ordinary component shading"""
+    bl_idname = 'allset.restore_modeling_display'
+    bl_label = 'Restore Modeling Display'
+    bl_options = {'INTERNAL'}
+
+    @classmethod
+    def poll(cls, context):
+        from ..ui import toolbox
+        return context.space_data is not None and context.space_data.type == 'VIEW_3D' and not toolbox.is_toolbox(context.space_data)
+
+    def execute(self, context):
+        if tool_active(context):
+            bpy.ops.wm.tool_set_by_id(name='builtin.select_box', space_type='VIEW_3D')
+        space = context.space_data
+        ptr = space.as_pointer()
+        original = STATE['overlays'].pop(ptr, _overlay_values(space))
+        _overlay_save_runtime.pop(ptr, None)
+        _set_overlay_values(space, (False, original[1], original[2]))
+        context.area.tag_redraw()
+        return {'FINISHED'}
+
+
+# --- start: the mesh to edit, the view, the watcher -----------------------------------------------------
+
+# Save the user's overlay values, never the tool's temporary display in a .blend.
+_overlay_saving = False
+_overlay_save_runtime = {}
+
+
+def _overlay_values(space):
+    ov = space.overlay
+    return ov.show_retopology, ov.show_faces, ov.retopology_offset
+
+
+def _set_overlay_values(space, values):
+    ov = space.overlay
+    for name, value in zip(('show_retopology', 'show_faces', 'retopology_offset'), values):
+        if getattr(ov, name) != value:
+            setattr(ov, name, value)
+
+
+def _release_overlay(space):
+    ptr = space.as_pointer()
+    original = STATE['overlays'].pop(ptr, None)
+    _overlay_save_runtime.pop(ptr, None)
+    if original is None:
+        return False
+    _set_overlay_values(space, original)
+    return True
+
+
+def _overlay_space(ptr):
+    # A workspace may have become inactive since the snapshot was captured.
+    # Resolve pointers again; retaining RNA references across file/window changes is unsafe.
+    for screen in bpy.data.screens:
+        for area in screen.areas:
+            for space in area.spaces:
+                if space.type == 'VIEW_3D' and space.as_pointer() == ptr:
+                    return space
+    return None
+
+
+def _window_uses_quad_draw(win):
+    ob = win.view_layer.objects.active
+    if ob is None or ob.type != 'MESH' or ob.mode != 'EDIT':
+        return False
+    tool = win.workspace.tools.from_space_view3d_mode('EDIT_MESH', create=False)
+    return tool is not None and tool.idname == TOOL
+
+
+def _overlay_owner_active(ptr):
+    from ..ui import toolbox
+    for win in bpy.context.window_manager.windows:
+        if not _window_uses_quad_draw(win):
+            continue
+        for area in win.screen.areas:
+            space = area.spaces.active
+            if area.type == 'VIEW_3D' and space.as_pointer() == ptr and not toolbox.is_toolbox(space):
+                return True
+    return False
+
+
+def _apply_overlay(space, original):
+    faces = original[1] and not poly_draw.settings().qd_mesh_color_on
+    _set_overlay_values(space, (True, faces, 0.0))
+
+
 def _retopology_on(context):
-    """Show the edited mesh over the surface (Blender's Retopology overlay) in this window's 3D views; the previous
-    value comes back when the tool is left (``_watch``)."""
-    from .. import live_refs
+    """Own only the real 3D views in this window, preserving their native settings."""
+    from ..ui import toolbox
     screen = context.window.screen if context.window else None
     for area in screen.areas if screen else ():
-        if area.type != 'VIEW_3D':
+        if area.type != 'VIEW_3D' or toolbox.is_toolbox(area.spaces.active):
             continue
         space = area.spaces.active
-        ov = space.overlay
-        if not hasattr(ov, 'show_retopology'):
-            return
-        ptr = live_refs.pointer(space)
+        ptr = space.as_pointer()
         if ptr not in STATE['overlays']:
-            STATE['overlays'][ptr] = ov.show_retopology
-        ov.show_retopology = True
+            STATE['overlays'][ptr] = _overlay_values(space)
+    sync_overlays()
+
+
+def sync_overlays(context=None):
+    """Apply display overrides only while drawing; save handlers suspend them."""
+    if _overlay_saving:
+        return
+    if context is not None:
+        from ..ui import toolbox
+        if not tool_active(context) or toolbox.is_toolbox(context.space_data):
+            return
+        space = context.space_data
+        ptr = space.as_pointer()
+        if ptr not in STATE['overlays']:
+            # A saved workspace can resume Quad Draw without invoking Start.
+            STATE['overlays'][ptr] = _overlay_values(space)
+            ob = edit_object(context)
+            name = ob.name if ob else None
+            if STATE['ob'] != name:
+                STATE['created'] = None
+            STATE.update(ob=name, timer=True)
+            if not bpy.app.timers.is_registered(_watch):
+                bpy.app.timers.register(_watch, first_interval=0.5)
+        _apply_overlay(space, STATE['overlays'][ptr])
+        return
+    for ptr, original in STATE['overlays'].items():
+        space = _overlay_space(ptr)
+        if space is not None:
+            _apply_overlay(space, original)
+
+
+@bpy.app.handlers.persistent
+def _overlay_save_pre(*_args):
+    global _overlay_saving
+    if _overlay_saving:
+        return
+    _overlay_saving = True
+    _overlay_save_runtime.clear()
+    for ptr, original in STATE['overlays'].items():
+        space = _overlay_space(ptr)
+        if space is not None:
+            _overlay_save_runtime[ptr] = _overlay_values(space)
+            _set_overlay_values(space, original)
+
+
+@bpy.app.handlers.persistent
+def _overlay_save_post(*_args):
+    """Resume the visible tool after successful saves and save failures alike."""
+    global _overlay_saving
+    pending = dict(_overlay_save_runtime)
+    _overlay_save_runtime.clear()
+    _overlay_saving = False
+    for ptr, runtime in pending.items():
+        space = _overlay_space(ptr)
+        original = STATE['overlays'].get(ptr)
+        if space is None or original is None:
+            continue
+        if _overlay_owner_active(ptr):
+            _set_overlay_values(space, runtime)
+        else:
+            _set_overlay_values(space, original)
+            STATE['overlays'].pop(ptr, None)
+
+
+def _restore_inactive_overlays():
+    for ptr, original in list(STATE['overlays'].items()):
+        if _overlay_owner_active(ptr):
+            continue
+        space = _overlay_space(ptr)
+        if space is not None:
+            _set_overlay_values(space, original)
+        STATE['overlays'].pop(ptr, None)
+        _overlay_save_runtime.pop(ptr, None)
+
 
 def _restore_overlays():
-    from .. import live_refs
-    for (ptr, shown) in list(STATE['overlays'].items()):
-        (_w, _a, space) = live_refs.find_space(ptr)
+    global _overlay_saving
+    for ptr, original in list(STATE['overlays'].items()):
+        space = _overlay_space(ptr)
         if space is not None:
-            space.overlay.show_retopology = shown
+            _set_overlay_values(space, original)
     STATE['overlays'].clear()
+    _overlay_save_runtime.clear()
+    _overlay_saving = False
+    global _pick_projection, _fill_projection, _topology_preview,_component_loop_cache
+    _component_loop_cache=None
+    _pick_projection = None
+    _fill_projection = None
+    _topology_preview=None;STATE['topology_info']=None;STATE['topology_hover']=None;STATE['topology_preview']=None
+    STATE["snap"] = []
+    from . import quad_draw_overlay
+    quad_draw_overlay.clear()
+    from . import quad_draw_relax
+    quad_draw_relax.clear();STATE['relax_area']=None;STATE['delete_edges']=None
+    from . import quad_draw_reference
+    quad_draw_reference.clear()
+    preselect.invalidate()
+
 
 def _active_anywhere():
+    from ..ui import toolbox
     wm = bpy.context.window_manager
     for win in wm.windows if wm else ():
-        try:
-            tool = win.workspace.tools.from_space_view3d_mode('EDIT_MESH', create=False)
-        except (AttributeError, TypeError, RuntimeError):
-            continue
-        if tool is not None and tool.idname == TOOL and (bpy.context.mode == 'EDIT_MESH'):
+        if _window_uses_quad_draw(win) and any(
+                area.type == 'VIEW_3D' and not toolbox.is_toolbox(area.spaces.active)
+                for area in win.screen.areas):
             return True
     return False
 
+
 def _watch():
     """While Quad Draw is the tool, nothing; once left: overlays back, an untouched new mesh removed, dots gone."""
+    if _overlay_saving:
+        return 0.5
     try:
+        _restore_inactive_overlays()
         if _active_anywhere():
             return 0.5
     except (ReferenceError, AttributeError):
         pass
     _restore_overlays()
-    STATE['preview'] = None
-    _drop_dots(STATE['ob'])
-    name = STATE['created']
-    STATE['created'] = None
+    STATE["preview"] = None
+    _drop_dots(STATE["ob"])
+    name = STATE["created"]
+    STATE["created"] = None
     ob = bpy.data.objects.get(name) if name else None
-    if ob is not None and ob.mode != 'EDIT' and (ob.type == 'MESH') and (not ob.data.vertices):
+    if ob is not None and ob.mode != 'EDIT' and ob.type == 'MESH' and not ob.data.vertices:
         me = ob.data
         bpy.data.objects.remove(ob)
         if me.users == 0:
             bpy.data.meshes.remove(me)
-    STATE['timer'] = False
+    STATE["timer"] = False
     return None
 
+
 def _drop_dots(name):
-    """Leaving Quad Draw clears its dots and the dot layer (Maya's dots live only in the tool) [K]."""
+    """Leaving Quad Draw clears its dots and the dot layer (Maya's dots live only in the tool)."""
     ob = bpy.data.objects.get(name) if name else None
     if ob is None or ob.type != 'MESH':
         return
@@ -1286,21 +2087,22 @@ def _drop_dots(name):
     if ob.mode == 'EDIT':
         bm = bmesh.from_edit_mesh(me)
         clear_dots(bm)
-        lay = dot_layer(bm)
-        if lay is not None:
-            bm.verts.layers.int.remove(lay)
+        for name in (DOT_LAYER,)+( () if quad_draw_symmetry.SEED in me else (quad_draw_symmetry.IDENTITY,)):
+            lay=bm.verts.layers.int.get(name)
+            if lay is not None:bm.verts.layers.int.remove(lay)
         bmesh.update_edit_mesh(me)
         return
-    if DOT_LAYER not in me.attributes:
+    if DOT_LAYER not in me.attributes and quad_draw_symmetry.IDENTITY not in me.attributes:
         return
     bm = bmesh.new()
     bm.from_mesh(me)
     if clear_dots(bm):
         bm.to_mesh(me)
     bm.free()
-    attr = me.attributes.get(DOT_LAYER)
-    if attr is not None:
-        me.attributes.remove(attr)
+    for name in (DOT_LAYER,)+( () if quad_draw_symmetry.SEED in me else (quad_draw_symmetry.IDENTITY,)):
+        attr = me.attributes.get(name)
+        if attr is not None:me.attributes.remove(attr)
+
 
 def new_target(context):
     """A new empty mesh ``polySurfaceN`` at the origin, selected and in edit mode (Quad Draw with nothing to edit)."""
@@ -1317,72 +2119,142 @@ def new_target(context):
     context.view_layer.objects.active = ob
     return ob
 
+
 def pick_target(context):
     """The mesh Quad Draw edits: the edited / selected mesh unless it is the live surface; else None (make one)."""
-    live = getattr(context.scene, 'allset_live', None)
+    from . import live
     ob = context.active_object
-    if ob is not None and ob.type == 'MESH' and (ob is not live) and (ob.mode == 'EDIT' or ob.select_get()):
+    if ob is not None and ob.type == 'MESH' and not live.contains(context.scene, ob) and (ob.mode == 'EDIT' or ob.select_get()):
         return ob
     return None
 
+
 class ALLSET_OT_quad_draw_start(bpy.types.Operator):
     """Maya Mesh Tools > Quad Draw: draw a new mesh on the live surface (or edit the selected mesh)"""
-    bl_translation_context = 'MWK:operators/quad_draw.py:1427'
-    bl_idname = 'allset.quad_draw_start'
-    bl_label = _zh_native('Quad Draw Tool', 'MWK:operators/quad_draw.py:1427')
-    bl_description = _zh_native('Maya Mesh Tools > Quad Draw: draw a new mesh on the live surface (or edit the selected mesh)', 'MWK:operators/quad_draw.py:1427')
+    bl_idname = "allset.quad_draw_start"
+    bl_label = "Quad Draw Tool"
     bl_options = {'REGISTER', 'UNDO'}
-    option_box: BoolProperty(options={'SKIP_SAVE', 'HIDDEN'}, translation_context='MWK:operators/quad_draw.py:1430')
+
+    option_box: BoolProperty(options={'SKIP_SAVE', 'HIDDEN'})
 
     def execute(self, context):
         from . import material
         ob = pick_target(context)
+        from . import maya_errors
+        if maya_errors.refuse_hidden(self, ob):        # Blender can't edit a hidden mesh (#187)
+            return {'CANCELLED'}
         if ob is None:
             ob = new_target(context)
             material.give_default(ob)
-            STATE['created'] = ob.name
+            STATE["created"] = ob.name
         if context.mode != 'EDIT_MESH' or context.edit_object is not ob:
             if context.mode != 'OBJECT':
                 bpy.ops.object.mode_set(mode='OBJECT')
-            live = getattr(context.scene, 'allset_live', None)
+            from . import live
             for other in context.selected_objects:
                 if other is not ob:
                     other.select_set(False)
-            if live is not None:
-                live.select_set(False)
+            for reference in live.objects(context.scene):
+                reference.select_set(False)
             ob.select_set(True)
             context.view_layer.objects.active = ob
             bpy.ops.object.mode_set(mode='EDIT')
-        STATE['ob'] = ob.name
+        STATE["ob"] = ob.name
+        sym=context.scene.allset_symmetry
+        if sym.on and sym.about=='TOPOLOGY' and quad_draw_symmetry.SEED not in ob.data:
+            bm=bmesh.from_edit_mesh(ob.data);edge=bm.select_history.active
+            if isinstance(edge,bmesh.types.BMEdge) and len(edge.link_faces)==2:
+                try:quad_draw_symmetry.bind_seam(ob,bm,edge,sym)
+                except quad_draw_symmetry.SymmetryError as ex:self.report({'WARNING'},str(ex))
         try:
             bpy.ops.wm.tool_set_by_id(name=TOOL, space_type='VIEW_3D')
         except RuntimeError as ex:
-            self.report({'ERROR'}, _zh(str(ex).strip(), 'MWK:operators/quad_draw.py:1455'))
+            self.report({'ERROR'}, str(ex).strip())
             return {'CANCELLED'}
         if context.window is not None:
             _retopology_on(context)
-        if not STATE['timer']:
-            STATE['timer'] = True
+            if not bpy.app.background:
+                from ..ui import maya_dock
+                maya_dock.show(context, 'MODELING_TOOLKIT')
+        if not STATE["timer"]:
+            STATE["timer"] = True
             bpy.app.timers.register(_watch, first_interval=0.5)
         if self.option_box:
             poly_draw._open_tool_settings()
         return {'FINISHED'}
-classes = (ALLSET_OT_quad_draw_hover, ALLSET_OT_quad_draw, ALLSET_OT_quad_draw_tab, ALLSET_OT_quad_draw_clear_dots, ALLSET_OT_quad_draw_exit, ALLSET_OT_quad_draw_start)
+
+
+classes = (ALLSET_OT_quad_draw_hover, ALLSET_OT_quad_draw, ALLSET_OT_quad_draw_tab, ALLSET_OT_quad_draw_clear_dots,
+           ALLSET_OT_quad_draw_exit, ALLSET_OT_restore_modeling_display, ALLSET_OT_quad_draw_start,ALLSET_OT_quad_draw_pick_seam)
+
 
 def register_handlers():
     if not _handles:
         _handles.append(bpy.types.SpaceView3D.draw_handler_add(_draw_view, (), 'WINDOW', 'POST_VIEW'))
         _handles.append(bpy.types.SpaceView3D.draw_handler_add(_draw_pixel, (), 'WINDOW', 'POST_PIXEL'))
-    if _forget not in bpy.app.handlers.depsgraph_update_post:
-        bpy.app.handlers.depsgraph_update_post.append(_forget)
+    if _geometry_reset not in bpy.app.handlers.undo_pre:bpy.app.handlers.undo_pre.append(_geometry_reset)
+    if _geometry_reset not in bpy.app.handlers.redo_pre:bpy.app.handlers.redo_pre.append(_geometry_reset)
+    if _file_reset not in bpy.app.handlers.load_pre:bpy.app.handlers.load_pre.append(_file_reset)
+    for name, fn in (('save_pre', _overlay_save_pre), ('save_post', _overlay_save_post), ('save_post_fail', _overlay_save_post)):
+        handlers = getattr(bpy.app.handlers, name, None)
+        if handlers is not None and fn not in handlers:
+            handlers.append(fn)
+    for handlers in (bpy.app.handlers.undo_post,bpy.app.handlers.redo_post):
+        if _restore_topology_state not in handlers:handlers.append(_restore_topology_state)
+
 
 def unregister_handlers():
+    for name, fn in (('save_pre', _overlay_save_pre), ('save_post', _overlay_save_post), ('save_post_fail', _overlay_save_post)):
+        handlers = getattr(bpy.app.handlers, name, ())
+        if fn in handlers:
+            handlers.remove(fn)
+    for handlers,fn in ((bpy.app.handlers.undo_pre,_geometry_reset),(bpy.app.handlers.redo_pre,_geometry_reset),(bpy.app.handlers.load_pre,_file_reset)):
+        if fn in handlers:handlers.remove(fn)
+    for handlers in (bpy.app.handlers.undo_post,bpy.app.handlers.redo_post):
+        if _restore_topology_state in handlers:handlers.remove(_restore_topology_state)
     while _handles:
         bpy.types.SpaceView3D.draw_handler_remove(_handles.pop(), 'WINDOW')
-    if _forget in bpy.app.handlers.depsgraph_update_post:
-        bpy.app.handlers.depsgraph_update_post.remove(_forget)
     if bpy.app.timers.is_registered(_watch):
         bpy.app.timers.unregister(_watch)
     STATE.update(ob=None, preview=None, created=None, timer=False)
     _restore_overlays()
-    _bvh.clear()
+
+
+@bpy.app.handlers.persistent
+def _geometry_reset(_dummy):
+    global _pick_projection,_fill_projection,_topology_preview,_component_loop_cache
+    _component_loop_cache=None
+    _pick_projection=_fill_projection=None
+    _topology_preview=None;STATE['topology_info']=None;STATE['topology_hover']=None;STATE['topology_preview']=None
+    STATE['preview']=None;STATE['snap']=[]
+    from . import quad_draw_overlay
+    quad_draw_overlay.clear();preselect.invalidate()
+    from . import quad_draw_relax
+    quad_draw_relax.clear();STATE['relax_area']=None;STATE['delete_edges']=None
+    from . import quad_draw_reference
+    quad_draw_reference.clear()
+
+
+@bpy.app.handlers.persistent
+def _file_reset(_dummy):
+    _restore_overlays();_geometry_reset(None)
+    STATE.update(ob=None,created=None,timer=False)
+    if bpy.app.timers.is_registered(_watch):bpy.app.timers.unregister(_watch)
+
+
+@bpy.app.handlers.persistent
+def _restore_topology_state(_dummy):
+    """Edit Undo restores custom data, but does not restore Scene/ID properties."""
+    ob=edit_object(bpy.context)
+    if ob is None:return
+    state=bpy.context.scene.allset_symmetry
+    if state.about!='TOPOLOGY':return
+    bm=bmesh.from_edit_mesh(ob.data);flags=bm.verts.layers.int.get(quad_draw_symmetry.SEED_LAYER)
+    if flags is None:return
+    ids=quad_draw_symmetry.seed_ids(ob,bm)
+    enabled=len(ids)==2 and any(v[flags]&2 for v in bm.verts)
+    if len(ids)==2:ob.data[quad_draw_symmetry.SEED]=list(ids)
+    elif quad_draw_symmetry.SEED in ob.data:del ob.data[quad_draw_symmetry.SEED]
+    state.on=enabled
+    from . import symmetry
+    symmetry.apply(state,[ob]);clear_topology_preview()

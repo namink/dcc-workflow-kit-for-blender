@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Simplified Chinese localization by namink; additional display integration 2026-10-31.
-"""One undo step per Maya command, and no Blender redo panel (step 147, #88 #92 #86; docs/steps/step_147.md).
+"""One undo step per Maya command, and no Blender redo panel (#88 #92 #86).
 
 A Python ``bpy.ops`` call without ``undo=True`` raises Blender's undo depth (wm_event_system.cc WM_operator_call_py),
 so every operator a menu / shelf / marking-menu item runs pushes no undo step and is not registered. ``command``
@@ -11,23 +10,28 @@ Blender opens Adjust Last Operation for the last registered REGISTER + UNDO oper
 draw method (interface_region_hud.cc last_redo_poll, WM_operator_ui_poll). Maya has no such panel: ``no_redo_panel``
 hides a class's properties (keymap items and Repeat Last still set them) for commands that stay registered.
 """
-from .i18n import source_message as _dcc_source, display_message as _dcc_display, format_message as _dcc_format
+
 from contextlib import contextmanager
+
 import bpy
+
 _depth = [0]
-_pushed = [False]
+_pushed = [False]          # the command's operator already pushed its own step (option box "redo" runs)
+
 
 def push(label):
     try:
-        bpy.ops.ed.undo_push(message=label or _dcc_source('Maya Command'))
-    except RuntimeError:
+        bpy.ops.ed.undo_push(message=label or "Maya Command")
+    except RuntimeError:          # no window manager context (a timer in a closing window)
         return
-    from .command_line import undo_text
-    undo_text.pushed(label or _dcc_source('Maya Command'))
+    from .command_line import undo_text       # Maya's "Undo: <command>" after Ctrl+Z names this step
+    undo_text.pushed(label or "Maya Command")
+
 
 def mark_pushed():
     """The operator was called with undo=True: it made its own step (and is registered for Adjust Last Operation)."""
     _pushed[0] = True
+
 
 @contextmanager
 def nested():
@@ -37,6 +41,7 @@ def nested():
         yield
     finally:
         _depth[0] -= 1
+
 
 def command(label, fn):
     """Run ``fn`` (a Maya command) and make it one undo step when it finished."""
@@ -48,21 +53,34 @@ def command(label, fn):
         res = fn()
     finally:
         _depth[0] -= 1
-    if outer and (not _pushed[0]) and isinstance(res, set) and ('FINISHED' in res):
+    if outer and not _pushed[0] and isinstance(res, set) and 'FINISHED' in res:
+        _follow_lead()
         push(label)
     return res
+
+
+def _follow_lead():
+    """A command that picked objects (Select All, the Select menu ...): the last pick is the lead, in this step."""
+    try:
+        from .operators import pick_order
+        pick_order.follow(bpy.context)
+    except (ImportError, ReferenceError, RuntimeError, AttributeError):
+        pass
+
 
 def depth():
     return _depth[0]
 
+
 def _hidden(deferred):
-    fn = getattr(deferred, 'function', None)
-    kw = getattr(deferred, 'keywords', None)
+    fn = getattr(deferred, "function", None)
+    kw = getattr(deferred, "keywords", None)
     if fn is None or kw is None:
         return deferred
     kw = dict(kw)
-    kw['options'] = set(kw.get('options', set())) | {'HIDDEN'}
+    kw["options"] = set(kw.get("options", set())) | {'HIDDEN'}
     return fn(**kw)
+
 
 def no_redo_panel(cls):
     """Class decorator: every property hidden (inherited ones too), so Blender's redo panel has nothing to show; the
@@ -73,5 +91,5 @@ def no_redo_panel(cls):
         if base is object:
             continue
         merged.update(compat.own_annotations(base))
-    cls.__annotations__ = {k: _hidden(v) for (k, v) in merged.items()}
+    cls.__annotations__ = {k: _hidden(v) for k, v in merged.items()}
     return cls

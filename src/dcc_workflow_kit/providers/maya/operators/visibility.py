@@ -1,46 +1,54 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Simplified Chinese localization by namink; additional display integration 2026-10-31.
 """Maya object visibility keys: h, Ctrl+H, Alt+H, Shift+H, Ctrl+Shift+H.
 
-Maya default hotkeys: h toggles the visibility of the
+Maya hotkeys: h toggles the visibility of the
 selection and keeps it selected; Ctrl+H hides the selection, Alt+H the rest;
 Shift+H shows the selected hidden objects; Ctrl+Shift+H shows what was hidden last.
 
 Maya's ``visibility`` attribute is ``Object.hide_viewport`` (per object, keyable; the Channel
 Box Visibility row reads the same flag): h, Display > Hide / Show and the Channel Box write one
-attribute (docs/steps/step_129_cb.md 「계획」 #26). A display layer's V uses the view-layer flag
+attribute (#26). A display layer's V uses the view-layer flag
 (``hide_set``) instead, so it never changes this attribute.
 
 A hidden object can't stay selected in Blender, so Maya's "hidden but still selected" is kept
-as an ID property on the object (``KEPT``). ``LAST`` marks what the latest hide of this
-operator hid. Plan: docs/steps/step_16.md 2.
+as an ID property on the object (``KEPT`` = the visible selection left at that moment, as text). ``LAST`` marks
+what the latest hide of this operator hid.
 
-Step 162: Toggle Show/Hide (h) follows Maya's "Toggle Visibility Options" (optionVar
-toggleVisibilityAndKeepSelectionBehaviour): the toggled set is
+Toggle Show/Hide (h) follows Maya's "Toggle Visibility Options": the toggled set is
 the selection = the visible selected objects plus the hidden-but-selected ones (``KEPT``). First Selection Independent
-(factory, 1) flips each object; Dependent (2) gives every one the opposite of the first selected object's visibility.
+(default, 1) flips each object; Dependent (2) gives every one the opposite of the first selected object's visibility.
 The saved window value (option_windows.saved("toggle_show_hide")) applies to h and the menu click alike.
 """
-from ..i18n import source_message as _dcc_source, display_message as _dcc_display, format_message as _dcc_format
-from ..i18n import tr as _zh, enum_items as _zh_enum, native as _zh_native
+
 import bpy
 from bpy.props import EnumProperty
+
 from .. import undo_steps
-TOGGLE_KEY = 'toggle_show_hide'
-KEPT = 'allset_kept'
-LAST = 'allset_last_hidden'
-ACTIONS = (('TOGGLE', _dcc_source('Toggle Visibility'), _dcc_source('Maya h: hide the selection and keep it selected, or show it again')), ('HIDE', _dcc_source('Hide Selection'), 'Maya Ctrl+H'), ('HIDE_UNSELECTED', _dcc_source('Hide Unselected Objects'), 'Maya Alt+H'), ('SHOW_SELECTED', _dcc_source('Show Selected Objects'), 'Maya Shift+H'), ('SHOW_LAST', _dcc_source('Show Last Hidden'), 'Maya Ctrl+Shift+H'), ('SHOW_ALL', _dcc_source('Show All'), _dcc_source('Maya Display > Show > All: every object whose visibility is off')))
+from .. import i18n
+
+TOGGLE_KEY = "toggle_show_hide"   # option window key (operators/option_windows_display.py)
+KEPT = "allset_kept"              # hidden by h while selected: h / Shift+H bring it back
+LAST = "allset_last_hidden"       # hidden by the latest hide: Ctrl+Shift+H brings it back
+
+ACTIONS = (
+    ('TOGGLE', "Toggle Visibility", "Maya h: hide the selection and keep it selected, or show it again"),
+    ('HIDE', "Hide Selection", "Maya Ctrl+H"),
+    ('HIDE_UNSELECTED', "Hide Unselected Objects", "Maya Alt+H"),
+    ('SHOW_SELECTED', "Show Selected Objects", "Maya Shift+H"),
+    ('SHOW_LAST', "Show Last Hidden", "Maya Ctrl+Shift+H"),
+    ('SHOW_ALL', "Show All", "Maya Display > Show > All: every object whose visibility is off"),
+)
+
 
 def _clear(objects, key):
     for ob in objects:
         if key in ob:
             del ob[key]
 
-def _hide(objects, all_objects, kept=False):
-    """Hide ``objects``; they become the "last hidden" set (and the kept selection)."""
+
+def _hide(objects, all_objects):
+    """Hide ``objects``; they become the "last hidden" set."""
     _clear(all_objects, LAST)
-    if kept:
-        _clear(all_objects, KEPT)
     for ob in objects:
         ob.hide_viewport = True
         try:
@@ -48,9 +56,54 @@ def _hide(objects, all_objects, kept=False):
         except RuntimeError:
             pass
         ob[LAST] = True
-        if kept:
-            ob[KEPT] = True
     return len(objects)
+
+
+def _signature(view_layer):
+    """The visible selection as text: a kept (hidden but selected) object belongs to the selection only
+    while the visible selection is still the one left when it was hidden."""
+    return "\n".join(sorted(ob.name for ob in view_layer.objects if ob.visible_get() and ob.select_get()))
+
+
+def _kept(ob, signature):
+    value = ob.get(KEPT)
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return value == signature
+    # a flag from a file saved by an earlier version of the kit records no selection: it belongs to the empty
+    # selection only, so h with nothing selected brings the object back and h on another object never does (#336)
+    return signature == ""
+
+
+def _outliner_pick(context, view_layer):
+    """Objects picked in the Outliner (a collection row = its objects), or None outside the Outliner."""
+    from ..ui import outliner_tree
+    if outliner_tree.is_tree(getattr(context, "space_data", None)):
+        # the kit's rows: the visible selection and the selection-locked rows picked there (hidden ones are kept)
+        locked = [ob for ob in outliner_tree.picked_unselectable(context) if not ob.hide_viewport]
+        if not locked:
+            return None
+        sel = [ob for ob in view_layer.objects if ob is not None and ob.visible_get() and ob.select_get()]
+        return sel + [ob for ob in locked if ob not in sel]
+    ids = getattr(context, "selected_ids", None)
+    if not ids:
+        return None
+    in_layer = {ob.session_uid for ob in view_layer.objects}
+    out, seen = [], set()
+    for item in ids:
+        if isinstance(item, bpy.types.Object):
+            obs = (item,)
+        elif isinstance(item, bpy.types.Collection):
+            obs = item.all_objects
+        else:
+            continue
+        for ob in obs:
+            if ob.session_uid in in_layer and ob.session_uid not in seen:
+                seen.add(ob.session_uid)
+                out.append(ob)
+    return out or None
+
 
 def _show(objects, view_layer, select=True):
     shown = 0
@@ -64,44 +117,57 @@ def _show(objects, view_layer, select=True):
             continue
         try:
             ob.select_set(True)
-        except RuntimeError:
+        except RuntimeError:   # not selectable in this view layer
             continue
         view_layer.objects.active = view_layer.objects.active or ob
         shown += 1
     return shown
 
+
 def toggle_dependent():
     """The saved First Selection of Maya's Toggle Visibility Options: True = Dependent (factory Independent)."""
     from . import option_windows
     v = option_windows.saved(TOGGLE_KEY) or {}
-    return v.get('first_selection') == _dcc_source('Dependent')
+    return v.get("first_selection") == "Dependent"
+
 
 def _first(objects, active):
     from .mesh_maya import _first_selected
     return _first_selected(objects, active)
 
+
 def toggle(context, dependent=False):
-    """Maya Toggle Visibility (h) on the selection (visible selected + hidden kept). Returns the count."""
+    """Maya Toggle Visibility (h) on the selection (visible selected + hidden kept, or the rows picked in
+    the Outliner). Returns the count."""
     vl = context.view_layer
     objs = list(vl.objects)
-    selected = [ob for ob in objs if ob.visible_get() and ob.select_get()]
-    kept = [ob for ob in objs if ob.hide_viewport and KEPT in ob]
-    members = selected + [ob for ob in kept if ob not in selected]
+    members = _outliner_pick(context, vl)
+    if members is None:
+        selected = [ob for ob in objs if ob.visible_get() and ob.select_get()]
+        signature = _signature(vl)
+        kept = [ob for ob in objs if ob.hide_viewport and _kept(ob, signature)]
+        members = selected + [ob for ob in kept if ob not in selected]
     if not members:
         return 0
     if dependent:
         first = _first(members, vl.objects.active if vl.objects.active in members else None)
-        show = first.hide_viewport
+        show = first.hide_viewport            # every member gets the opposite of the first one's visibility
         to_hide = [] if show else members
         to_show = members if show else []
     else:
         to_hide = [ob for ob in members if not ob.hide_viewport]
         to_show = [ob for ob in members if ob.hide_viewport]
+    _clear(objs, KEPT)                        # the selection is now ``members``
     if to_hide:
-        _hide(to_hide, objs, kept=True)
-    if to_show:
+        _hide(to_hide, objs)
+    if to_show:                               # hidden by h while selected: they come back still selected
         _show([ob for ob in to_show if ob.hide_viewport], vl)
+    signature = _signature(vl)
+    for ob in members:                        # hidden members stay selected (Maya)
+        if ob.hide_viewport:
+            ob[KEPT] = signature
     return len(members)
+
 
 def apply(context, action, dependent=None):
     """Run ``action`` on the view layer; returns the number of objects changed."""
@@ -114,6 +180,8 @@ def apply(context, action, dependent=None):
     if action == 'HIDE':
         return _hide(selected, objs)
     if action == 'HIDE_UNSELECTED':
+        # the selection's own hierarchy stays (its children aren't "unselected" objects, and hiding a
+        # selected object's parent would hide the selection: Maya draws a node only under visible parents)
         from .dag import hierarchy
         keep = {o.session_uid for o in hierarchy(selected)}
         for ob in selected:
@@ -121,7 +189,8 @@ def apply(context, action, dependent=None):
             while p is not None:
                 keep.add(p.session_uid)
                 p = p.parent
-        return _hide([ob for ob in objs if ob.visible_get() and (not ob.select_get()) and (ob.session_uid not in keep)], objs)
+        return _hide([ob for ob in objs if ob.visible_get() and not ob.select_get() and ob.session_uid not in keep],
+                     objs)
     if action == 'SHOW_SELECTED':
         act = vl.objects.active
         return _show([ob for ob in hidden if KEPT in ob or ob == act], vl)
@@ -131,20 +200,23 @@ def apply(context, action, dependent=None):
         return _show(hidden, vl, select=False)
     raise ValueError(action)
 
-@undo_steps.no_redo_panel
+
+@undo_steps.no_redo_panel      # no Adjust Last Operation (Maya has none)
 class ALLSET_OT_visibility(bpy.types.Operator):
     """Maya object visibility (h, Ctrl+H, Alt+H, Shift+H, Ctrl+Shift+H)"""
-    bl_translation_context = 'MWK:operators/visibility.py:159'
-    bl_idname = 'allset.visibility'
-    bl_label = _zh_native('Maya Visibility', 'MWK:operators/visibility.py:159')
-    bl_description = _zh_native('Maya object visibility (h, Ctrl+H, Alt+H, Shift+H, Ctrl+Shift+H)', 'MWK:operators/visibility.py:159')
+    bl_idname = "allset.visibility"
+    bl_label = "Maya Visibility"
     bl_options = {'REGISTER', 'UNDO'}
-    action: EnumProperty(name=_zh_native('Action', 'MWK:operators/visibility.py:162'), items=_zh_enum(ACTIONS, 'MWK:operators/visibility.py:162'), default='TOGGLE', translation_context='MWK:operators/visibility.py:162')
-    behaviour: EnumProperty(name=_zh_native('First Selection', 'MWK:operators/visibility.py:164'), options={'SKIP_SAVE', 'HIDDEN'}, default='SAVED', items=_zh_enum((('SAVED', 'Saved', ''), ('INDEPENDENT', 'Independent', ''), ('DEPENDENT', 'Dependent', '')), 'MWK:operators/visibility.py:164'), translation_context='MWK:operators/visibility.py:164')
+
+    action: EnumProperty(name="Action", items=ACTIONS, default='TOGGLE')
+    # Toggle: Maya's First Selection; SAVED = the Toggle Visibility Options window's value
+    behaviour: EnumProperty(name="First Selection", options={'SKIP_SAVE', 'HIDDEN'}, default='SAVED', items=(
+        ('SAVED', "Saved", ""), ('INDEPENDENT', "Independent", ""), ('DEPENDENT', "Dependent", "")))
 
     @classmethod
+    @i18n.translated
     def description(cls, context, props):
-        return _zh(dict(((a[0], a[2]) for a in ACTIONS))[props.action], 'MWK:operators/visibility.py:169')
+        return dict((a[0], a[2]) for a in ACTIONS)[props.action]
 
     @classmethod
     def poll(cls, context):
@@ -152,28 +224,34 @@ class ALLSET_OT_visibility(bpy.types.Operator):
 
     def execute(self, context):
         vl = context.view_layer
-        had_selection = any((ob.visible_get() and ob.select_get() for ob in vl.objects))
-        changed = apply(context, self.action, None if self.behaviour == 'SAVED' else self.behaviour == 'DEPENDENT')
+        had_selection = any(ob.visible_get() and ob.select_get() for ob in vl.objects)
+        changed = apply(context, self.action,
+                        None if self.behaviour == 'SAVED' else self.behaviour == 'DEPENDENT')
         from . import dag
-        dag.sync(context.scene, vl)
+        dag.sync(context.scene, vl)          # a hidden parent hides its children (Maya)
         text = message(self.action, had_selection, changed)
         if text:
             from ..ui import view_message
             view_message.show(context, text)
         return {'FINISHED'}
 
+
 def message(action, had_selection, changed):
     """Maya's in-view message for a visibility action, or None (Maya's Hide / Toggle
     Visibility messages)."""
     if action == 'HIDE':
         if had_selection:
-            return 'Selection <hl>hidden</hl>.\nTo show it again, select it in the Outliner and press <hl>Shift+H</hl>.'
-        return _dcc_source('Nothing is selected to hide.')
+            return ("Selection <hl>hidden</hl>.\n"
+                    "To show it again, select it in the Outliner and press <hl>Shift+H</hl>.")
+        return "Nothing is selected to hide."
     if action == 'HIDE_UNSELECTED':
         if changed:
-            return 'Unselected objects <hl>hidden</hl>.\nTo show them, select them in the Outliner and press <hl>Shift+H</hl>.'
-        return _dcc_source('No unselected objects to hide.')
-    if action == 'TOGGLE' and (not changed):
-        return _dcc_source('Nothing selected to toggle.')
+            return ("Unselected objects <hl>hidden</hl>.\n"
+                    "To show them, select them in the Outliner and press <hl>Shift+H</hl>.")
+        return "No unselected objects to hide."
+    if action == 'TOGGLE' and not changed:
+        return "Nothing selected to toggle."
     return None
+
+
 classes = (ALLSET_OT_visibility,)

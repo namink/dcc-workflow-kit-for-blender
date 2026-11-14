@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Simplified Chinese localization by namink; additional display integration 2026-10-31.
-"""Maya Insert Edge Loop, Offset Edge Loop and Slide Edge (docs/steps/step_144_loop.md 「계획」, GitHub #31).
+"""Maya Insert Edge Loop, Offset Edge Loop and Slide Edge (GitHub #31).
 
 Maya behaviour:
 - Insert Edge Loop (polySplitRing): the press on an edge inserts the loop at that point at once, dragging slides it
@@ -10,79 +9,125 @@ Maya behaviour:
   N loops at k/(N+1), wherever the click was.
 - Offset Edge Loop (polyDuplicateEdge): press-drag on an edge = a new loop on each side of its edge loop. Relative =
   offset × each side edge's own length, Equal = offset × the shortest side edge; inside the mesh a path end cuts the
-  faces beyond it into two triangles that Delete edge merges into one quad. A click without a drag uses Maya's offset
-  0.5 (optionVar polyDuplicateEdgeOffset).
+  faces beyond it into two triangles that Delete edge merges into one quad. A click without a drag uses an offset
+  of 0.5.
 - Slide Edge (polySlideEdge): middle-drag slides the selected edges along their side edges; Relative = a fraction of
   each vertex's side edge, Absolute = one distance (fraction × the shortest side edge of that side); Use Snapping
   catches the fraction at k/(points+1) within the tolerance.
-Tool Settings / window values live in ``Scene.allset_loop_tools`` (Maya factory values).
+Tool Settings / window values live in ``Scene.allset_loop_tools`` (default values).
 The bmesh parts are tested headless (tests/test_step144_loop.py).
 """
-from ..i18n import source_message as _dcc_source, display_message as _dcc_display, format_message as _dcc_format
-from ..i18n import tr as _zh, enum_items as _zh_enum, native as _zh_native
+
 import math
+
 import bmesh
 import bpy
 from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty, StringProperty
 from bpy_extras import view3d_utils
 from mathutils import Vector
+
 from . import mesh_tools
 from .menu_items import edge_flow
 from .select_convert import loop_next
-INSERT_TOOL = 'allset.insert_edge_loop_tool'
-OFFSET_TOOL = 'allset.offset_edge_loop_tool'
-SLIDE_TOOL = 'allset.slide_edge_tool'
-EPS = 1e-06
-DRAG_PX = 3
-PRE_MESH = '.allset_loop_pre'
-INSERT_POSITIONS = (('RELATIVE', _dcc_source('Relative distance from edge'), _dcc_source('The loop cuts every ring edge at the same fraction')), ('EQUAL', _dcc_source('Equal distance from edge'), _dcc_source('The loop keeps the same distance from one side of the ring')), ('MULTIPLE', _dcc_source('Multiple edge loops'), _dcc_source('Several loops, evenly spaced')))
+
+INSERT_TOOL = "allset.insert_edge_loop_tool"
+OFFSET_TOOL = "allset.offset_edge_loop_tool"
+SLIDE_TOOL = "allset.slide_edge_tool"
+EPS = 1e-6
+DRAG_PX = 3              # a press that moves less than this is a click (Offset: offset 0.5)
+PRE_MESH = ".allset_loop_pre"
+
+INSERT_POSITIONS = (('RELATIVE', "Relative distance from edge", "The loop cuts every ring edge at the same fraction"),
+                    ('EQUAL', "Equal distance from edge", "The loop keeps the same distance from one side of the ring"),
+                    ('MULTIPLE', "Multiple edge loops", "Several loops, evenly spaced"))
 OFFSET_POSITIONS = INSERT_POSITIONS[:2]
-SLIDE_MODES = (('RELATIVE', _dcc_source('Relative'), _dcc_source('Each vertex slides the same fraction of its own side edge')), ('ABSOLUTE', _dcc_source('Absolute'), _dcc_source('Every vertex slides the same distance')))
+SLIDE_MODES = (('RELATIVE', "Relative", "Each vertex slides the same fraction of its own side edge"),
+               ('ABSOLUTE', "Absolute", "Every vertex slides the same distance"))
+CONNECT_MODES = (('SLIDE', "Slide", "A middle-drag moves the connection along the edges"),
+                 ('SEGMENTS', "Segments", "A middle-drag changes how many edges the connection makes"),
+                 ('PINCH', "Pinch", "A middle-drag pulls the connection's segments together or apart"))
+
 
 class ALLSET_PG_loop_tools(bpy.types.PropertyGroup):
-    """Maya Tool Settings of Insert Edge Loop / Offset Edge Loop / Slide Edge (factory values)."""
-    iel_position: EnumProperty(name=_zh_native('Maintain position', 'MWK:operators/edge_loops.py:53'), items=_zh_enum(INSERT_POSITIONS, 'MWK:operators/edge_loops.py:53'), default='RELATIVE', translation_context='MWK:operators/edge_loops.py:53')
-    iel_loops: IntProperty(name=_zh_native('Number of edge loops', 'MWK:operators/edge_loops.py:54'), default=2, min=1, soft_max=10, max=100, description=_zh_native('How many loops Multiple edge loops inserts', 'MWK:operators/edge_loops.py:54'), translation_context='MWK:operators/edge_loops.py:54')
-    iel_edge_flow: BoolProperty(name=_zh_native('Insert with edge flow', 'MWK:operators/edge_loops.py:56'), default=False, description=_zh_native('The new loop follows the curvature of the surrounding surface', 'MWK:operators/edge_loops.py:56'), translation_context='MWK:operators/edge_loops.py:56')
-    iel_adjust_flow: FloatProperty(name=_zh_native('Adjust Edge Flow', 'MWK:operators/edge_loops.py:58'), default=1.0, min=-1.0, max=2.0, soft_min=0.0, soft_max=1.0, precision=4, translation_context='MWK:operators/edge_loops.py:58')
-    iel_smoothing: FloatProperty(name=_zh_native('Smoothing angle', 'MWK:operators/edge_loops.py:60'), default=30.0, min=0.0, max=180.0, precision=4, description=_zh_native('New edges between faces at more than this angle are hard', 'MWK:operators/edge_loops.py:60'), translation_context='MWK:operators/edge_loops.py:60')
-    oel_position: EnumProperty(name=_zh_native('Maintain position', 'MWK:operators/edge_loops.py:63'), items=_zh_enum(OFFSET_POSITIONS, 'MWK:operators/edge_loops.py:63'), default='RELATIVE', translation_context='MWK:operators/edge_loops.py:63')
-    oel_delete_edge: BoolProperty(name=_zh_native('Delete edge (maintain 4-sided polygons)', 'MWK:operators/edge_loops.py:64'), default=True, description=_zh_native('Where a loop ends inside the mesh, merge the two triangles there', 'MWK:operators/edge_loops.py:64'), translation_context='MWK:operators/edge_loops.py:64')
-    oel_edge_flow: BoolProperty(name=_zh_native('Insert with edge flow', 'MWK:operators/edge_loops.py:66'), default=False, description=_zh_native('The new loops follow the curvature of the surrounding surface', 'MWK:operators/edge_loops.py:66'), translation_context='MWK:operators/edge_loops.py:66')
-    oel_adjust_flow: FloatProperty(name=_zh_native('Adjust Edge Flow', 'MWK:operators/edge_loops.py:68'), default=1.0, min=-1.0, max=2.0, soft_min=0.0, soft_max=1.0, precision=4, translation_context='MWK:operators/edge_loops.py:68')
-    oel_smoothing: FloatProperty(name=_zh_native('Smoothing angle', 'MWK:operators/edge_loops.py:70'), default=180.0, min=0.0, max=180.0, precision=4, description=_zh_native('New edges between faces at more than this angle are hard', 'MWK:operators/edge_loops.py:70'), translation_context='MWK:operators/edge_loops.py:70')
-    oel_offset: FloatProperty(name=_zh_native('Offset', 'MWK:operators/edge_loops.py:72'), default=0.5, min=0.001, max=0.999, precision=4, description=_zh_native('Offset of a click without a drag (Maya polyDuplicateEdgeOffset)', 'MWK:operators/edge_loops.py:72'), translation_context='MWK:operators/edge_loops.py:72')
-    slide_mode: EnumProperty(name=_zh_native('Mode', 'MWK:operators/edge_loops.py:75'), items=_zh_enum(SLIDE_MODES, 'MWK:operators/edge_loops.py:75'), default='RELATIVE', translation_context='MWK:operators/edge_loops.py:75')
-    slide_snap: BoolProperty(name=_zh_native('Use Snapping', 'MWK:operators/edge_loops.py:76'), default=True, description=_zh_native('Catch the slide at the snapping points', 'MWK:operators/edge_loops.py:76'), translation_context='MWK:operators/edge_loops.py:76')
-    slide_snap_points: IntProperty(name=_zh_native('Snapping Points', 'MWK:operators/edge_loops.py:78'), default=1, min=1, soft_max=10, max=100, description=_zh_native('Snapping points along each side edge (1 = the middle)', 'MWK:operators/edge_loops.py:78'), translation_context='MWK:operators/edge_loops.py:78')
-    slide_snap_tolerance: FloatProperty(name=_zh_native('Snapping Tolerance', 'MWK:operators/edge_loops.py:80'), default=0.1, min=0.0, max=1.0, precision=4, description=_zh_native('How near (fraction of the edge) a snapping point catches', 'MWK:operators/edge_loops.py:80'), translation_context='MWK:operators/edge_loops.py:80')
-SETTINGS = {'INSERT': ('iel_position', 'iel_loops', 'iel_edge_flow', 'iel_adjust_flow', 'iel_smoothing'), 'OFFSET': ('oel_position', 'oel_delete_edge', 'oel_edge_flow', 'oel_adjust_flow', 'oel_smoothing', 'oel_offset'), 'SLIDE': ('slide_mode', 'slide_snap', 'slide_snap_points', 'slide_snap_tolerance')}
+    """Maya Tool Settings of Insert Edge Loop / Offset Edge Loop / Slide Edge (default values)."""
+    # Insert Edge Loop (SplitEdgeRingTool)
+    iel_position: EnumProperty(name="Maintain position", items=INSERT_POSITIONS, default='RELATIVE')
+    iel_loops: IntProperty(name="Number of edge loops", default=2, min=1, soft_max=10, max=100,
+                           description="How many loops Multiple edge loops inserts")
+    iel_edge_flow: BoolProperty(name="Insert with edge flow", default=False,
+                                description="The new loop follows the curvature of the surrounding surface")
+    iel_adjust_flow: FloatProperty(name="Adjust Edge Flow", default=1.0, min=-1.0, max=2.0, soft_min=0.0,
+                                   soft_max=1.0, precision=4)
+    iel_smoothing: FloatProperty(name="Smoothing angle", default=30.0, min=0.0, max=180.0, precision=4,
+                                 description="New edges between faces at more than this angle are hard")
+    # Offset Edge Loop (polyDuplicateEdge window)
+    oel_position: EnumProperty(name="Maintain position", items=OFFSET_POSITIONS, default='RELATIVE')
+    oel_delete_edge: BoolProperty(name="Delete edge (maintain 4-sided polygons)", default=True,
+                                  description="Where a loop ends inside the mesh, merge the two triangles there")
+    oel_edge_flow: BoolProperty(name="Insert with edge flow", default=False,
+                                description="The new loops follow the curvature of the surrounding surface")
+    oel_adjust_flow: FloatProperty(name="Adjust Edge Flow", default=1.0, min=-1.0, max=2.0, soft_min=0.0,
+                                   soft_max=1.0, precision=4)
+    oel_smoothing: FloatProperty(name="Smoothing angle", default=180.0, min=0.0, max=180.0, precision=4,
+                                 description="New edges between faces at more than this angle are hard")
+    oel_offset: FloatProperty(name="Offset", default=0.5, min=0.001, max=0.999, precision=4,
+                              description="Offset of a click without a drag")
+    # Slide Edge
+    slide_mode: EnumProperty(name="Mode", items=SLIDE_MODES, default='RELATIVE')
+    slide_snap: BoolProperty(name="Use Snapping", default=True,
+                             description="Catch the slide at the snapping points")
+    slide_snap_points: IntProperty(name="Snapping Points", default=1, min=1, soft_max=10, max=100,
+                                   description="Snapping points along each side edge (1 = the middle)")
+    slide_snap_tolerance: FloatProperty(name="Snapping Tolerance", default=0.1, min=0.0, max=1.0, precision=4,
+                                        description="How near (fraction of the edge) a snapping point catches")
+    # Connect Tool (operators/connect_tool.py): Maya's Tool Settings, the radio picks what a middle-drag changes
+    ct_mode: EnumProperty(name="Middle-drag changes", items=CONNECT_MODES, default='SEGMENTS',
+                          description="The value a middle-drag in the Connect Tool changes")
+    ct_slide: FloatProperty(name="Slide", default=0.5, min=0.0, max=1.0, precision=4,
+                            description="Where a connection cuts an edge (0 = its first end, 1 = the other)")
+    ct_segments: IntProperty(name="Segments", default=1, min=1, soft_max=10, max=100,
+                             description="New edges a connection makes between two edges (loops through a ring)")
+    ct_pinch: FloatProperty(name="Pinch", default=0.0, min=-100.0, max=100.0, precision=2,
+                            description="Pulls a connection's segments together (positive) or apart (negative)")
+
+
+SETTINGS = {'INSERT': ("iel_position", "iel_loops", "iel_edge_flow", "iel_adjust_flow", "iel_smoothing"),
+            'OFFSET': ("oel_position", "oel_delete_edge", "oel_edge_flow", "oel_adjust_flow", "oel_smoothing",
+                       "oel_offset"),
+            'SLIDE': ("slide_mode", "slide_snap", "slide_snap_points", "slide_snap_tolerance"),
+            'CONNECT': ("ct_mode", "ct_slide", "ct_segments", "ct_pinch")}
+
 
 def settings(context=None):
     return (context or bpy.context).scene.allset_loop_tools
+
 
 def reset_settings(s, kind):
     for name in SETTINGS[kind]:
         s.property_unset(name)
 
+
+# --- pure: rings and loops ------------------------------------------------------------------------------
+
 def _walk(root, vert, loop):
     """One direction of the quad ring from ``root``: ([(edge, side vertex)], [faces], closed)."""
-    (items, faces, a) = ([], [], vert)
+    items, faces, a = [], [], vert
     while True:
         face = loop.face
         if len(face.verts) != 4:
-            return (items, faces, False)
+            return items, faces, False
         opposite = loop.link_loop_next.link_loop_next
         e2 = opposite.edge
         a2 = opposite.link_loop_next.vert if loop.vert is a else opposite.vert
         faces.append(face)
         if e2 is root:
-            return (items, faces, True)
+            return items, faces, True
         items.append((e2, a2))
         others = [lo for lo in e2.link_loops if lo.face is not face]
         if len(others) != 1:
-            return (items, faces, False)
-        (loop, a) = (others[0], a2)
+            return items, faces, False
+        loop, a = others[0], a2
+
 
 def ring(edge, vert):
     """The quad edge ring through ``edge`` in ring order: (items, faces, closed). ``items`` = [(edge, side vertex)],
@@ -91,22 +136,25 @@ def ring(edge, vert):
     borders."""
     loops = list(edge.link_loops)
     if not loops:
-        return ([(edge, vert)], [], False)
-    (fwd, fwd_faces, closed) = _walk(edge, vert, loops[0])
+        return [(edge, vert)], [], False
+    fwd, fwd_faces, closed = _walk(edge, vert, loops[0])
     if closed:
-        return ([(edge, vert)] + fwd, fwd_faces, True)
-    (back, back_faces) = ([], [])
+        return [(edge, vert)] + fwd, fwd_faces, True
+    back, back_faces = [], []
     if len(loops) > 1:
-        (back, back_faces, _c) = _walk(edge, vert, loops[1])
-    return (back[::-1] + [(edge, vert)] + fwd, back_faces[::-1] + fwd_faces, False)
+        back, back_faces, _c = _walk(edge, vert, loops[1])
+    return back[::-1] + [(edge, vert)] + fwd, back_faces[::-1] + fwd_faces, False
+
 
 def _shares_edge(a, b):
-    return any((b in e.verts for e in a.link_edges))
+    return any(b in e.verts for e in a.link_edges)
+
 
 def _smooth(edges, limit):
     for e in edges:
         if e.is_valid and len(e.link_faces) == 2:
-            e.smooth = e.calc_face_angle(0.0) <= limit + 1e-06
+            e.smooth = e.calc_face_angle(0.0) <= limit + 1e-6
+
 
 def _select_only(bm, edges):
     for f in bm.faces:
@@ -122,13 +170,14 @@ def _select_only(bm, edges):
                 v.select = True
     bm.select_history.clear()
 
+
 def _cut_points(bm, items, fractions):
     """Split each ring edge at its fractions (ascending, from the side vertex); a fraction at an end is that vertex.
     Returns [[vertex per fraction] per item]."""
     points = []
-    for ((e, side), fracs) in zip(items, fractions):
+    for (e, side), fracs in zip(items, fractions):
         far = e.other_vert(side)
-        (pts, cur, cur_v, done) = ([], e, side, 0.0)
+        pts, cur, cur_v, done = [], e, side, 0.0
         for u in fracs:
             if u >= 1.0 - EPS:
                 pts.append(far)
@@ -136,12 +185,13 @@ def _cut_points(bm, items, fractions):
             if u <= EPS:
                 pts.append(side)
                 continue
-            (new_edge, nv) = bmesh.utils.edge_split(cur, cur_v, (u - done) / (1.0 - done))
+            new_edge, nv = bmesh.utils.edge_split(cur, cur_v, (u - done) / (1.0 - done))
             pts.append(nv)
             cur = new_edge if far in new_edge.verts else cur
-            (cur_v, done) = (nv, u)
+            cur_v, done = nv, u
         points.append(pts)
     return points
+
 
 def _connect(bm, points, n_faces, closed):
     new = []
@@ -150,16 +200,17 @@ def _connect(bm, points, n_faces, closed):
         j = (i + 1) % count if closed else i + 1
         if j >= count:
             break
-        for (a, b) in zip(points[i], points[j]):
+        for a, b in zip(points[i], points[j]):
             if a is b or _shares_edge(a, b):
                 continue
             res = bmesh.ops.connect_verts(bm, verts=[a, b])
-            new += res['edges']
+            new += res["edges"]
     return new
+
 
 def insert_fractions(lengths, root_length, t, from_far, position='RELATIVE', count=2):
     """Per ring edge (``lengths``), the fractions from its side vertex where the new loops cut it. ``t`` = the click
-    on the root edge from its side vertex. Equal distance measures ``t``'s distance from the side the click was
+    on the root edge from its side vertex. Equal distance takes ``t``'s distance from the side the click was
     nearer to (``from_far``: the far side), clamped to the shortest ring edge."""
     if position == 'MULTIPLE':
         n = max(1, int(count))
@@ -174,11 +225,12 @@ def insert_fractions(lengths, root_length, t, from_far, position='RELATIVE', cou
         out.append([1.0 - u if from_far else u])
     return out
 
+
 def insert_loops(bm, edge, t, position='RELATIVE', count=2, smoothing=math.radians(30.0), flow=None):
     """Insert Maya's edge loop(s) through ``edge``; ``t`` = the click on it from ``edge.verts[0]`` (Maya polySplitRing
     weight). Returns the new edges (selected), or [] when nothing could be cut."""
-    (items, faces, closed) = ring(edge, edge.verts[0])
-    lengths = [e.calc_length() for (e, _s) in items]
+    items, faces, closed = ring(edge, edge.verts[0])
+    lengths = [e.calc_length() for e, _s in items]
     fractions = [sorted(f) for f in insert_fractions(lengths, edge.calc_length(), t, t > 0.5, position, count)]
     points = _cut_points(bm, items, fractions)
     new = _connect(bm, points, len(faces), closed)
@@ -188,10 +240,11 @@ def insert_loops(bm, edge, t, position='RELATIVE', count=2, smoothing=math.radia
     _select_only(bm, new)
     return new
 
+
 def loop_path(edge):
     """The edge loop through ``edge`` as a vertex chain: (vertices, edges, closed); edges[i] joins vertices i, i+1."""
-    (fwd_e, fwd_v) = ([], [])
-    (e, v) = (edge, edge.verts[1])
+    fwd_e, fwd_v = [], []
+    e, v = edge, edge.verts[1]
     closed = False
     while True:
         nxt = loop_next(e, v)
@@ -204,9 +257,9 @@ def loop_path(edge):
         v = nxt.other_vert(v)
         fwd_v.append(v)
         e = nxt
-    (back_e, back_v) = ([], [])
+    back_e, back_v = [], []
     if not closed:
-        (e, v) = (edge, edge.verts[0])
+        e, v = edge, edge.verts[0]
         while True:
             nxt = loop_next(e, v)
             if nxt is None or nxt is edge:
@@ -219,20 +272,21 @@ def loop_path(edge):
     edges = back_e[::-1] + [edge] + fwd_e
     if closed:
         verts = verts[:-1] if verts[-1] is verts[0] else verts
-    return (verts, edges, closed)
+    return verts, edges, closed
+
 
 def chains(edges):
     """The connected paths of ``edges`` as (vertices, edges, closed); branched groups are left out."""
     edges = [e for e in edges if e.is_valid]
     eset = set(edges)
-    (seen, out) = (set(), [])
+    seen, out = set(), []
 
     def links(v):
         return [x for x in v.link_edges if x in eset]
     for start_edge in edges:
         if start_edge in seen:
             continue
-        (group, todo) = (set(), [start_edge])
+        group, todo = set(), [start_edge]
         while todo:
             e = todo.pop()
             if e in group:
@@ -243,12 +297,12 @@ def chains(edges):
         seen |= group
         gverts = {v for e in group for v in e.verts}
         degree = {v: len(links(v)) for v in gverts}
-        if any((d > 2 for d in degree.values())):
+        if any(d > 2 for d in degree.values()):
             continue
         ends = [v for v in gverts if degree[v] == 1]
         closed = not ends
         v = ends[0] if ends else next(iter(gverts))
-        (verts, path, prev) = ([v], [], None)
+        verts, path, prev = [v], [], None
         while True:
             nxt = [x for x in links(v) if x is not prev and x not in path]
             if not nxt:
@@ -262,12 +316,14 @@ def chains(edges):
         out.append((verts, path, closed))
     return out
 
+
 def _other_edge(face, v, e):
     for lo in face.loops:
         if lo.vert is v:
-            (a, b) = (lo.edge, lo.link_loop_prev.edge)
+            a, b = lo.edge, lo.link_loop_prev.edge
             return b if a is e else a
     return None
+
 
 def path_sides(verts, edges, closed):
     """For each vertex of the chain its side edge on side A and side B (None where that side has no face), and the
@@ -280,7 +336,7 @@ def path_sides(verts, edges, closed):
     fb[0] = faces[0][1] if len(faces[0]) > 1 else None
     for i in range(1, n):
         v = verts[i]
-        for (side, src) in ((fa, fa), (fb, fb)):
+        for side, src in ((fa, fa), (fb, fb)):
             prev_face = src[i - 1]
             if prev_face is None:
                 continue
@@ -294,11 +350,11 @@ def path_sides(verts, edges, closed):
         if fb[i] is None:
             fb[i] = next((f for f in faces[i] if f is not fa[i]), None)
     sides = []
-    for (k, v) in enumerate(verts):
+    for k, v in enumerate(verts):
         if closed:
-            (before, after) = ((k - 1) % n, k % n)
+            before, after = (k - 1) % n, k % n
         else:
-            (before, after) = (k - 1 if k > 0 else None, k if k < n else None)
+            before, after = (k - 1 if k > 0 else None), (k if k < n else None)
         out = []
         for side in (fa, fb):
             s = None
@@ -309,7 +365,10 @@ def path_sides(verts, edges, closed):
                         break
             out.append(s)
         sides.append(tuple(out))
-    return (sides, fa, fb)
+    return sides, fa, fb
+
+
+# --- Offset Edge Loop ------------------------------------------------------------------------------------
 
 def offset_loops(bm, edges, offset=0.5, position='RELATIVE', delete_edge=True, smoothing=math.pi, flow=None):
     """Maya polyDuplicateEdge on the edge path ``edges`` (one chain): a new loop on each side. Returns the new loop
@@ -317,20 +376,21 @@ def offset_loops(bm, edges, offset=0.5, position='RELATIVE', delete_edge=True, s
     found = chains(edges)
     if len(found) != 1:
         return None
-    (verts, path, closed) = found[0]
-    if any((len(e.link_faces) != 2 for e in path)):
+    verts, path, closed = found[0]
+    if any(len(e.link_faces) != 2 for e in path):
         return None
     got = path_sides(verts, path, closed)
     if got is None:
         return None
-    (sides, fa, fb) = got
-    if any((sa is None or sb is None for (sa, sb) in sides)):
+    sides, fa, fb = got
+    if any(sa is None or sb is None for sa, sb in sides):
         return None
     offset = min(max(offset, 0.001), 0.999)
-    shortest = min((s.calc_length() for pair in sides for s in pair))
+    shortest = min(s.calc_length() for pair in sides for s in pair)
+    # path ends inside the mesh: the continuation edge and the faces beyond the side edges (before any split)
     ends = []
     if not closed:
-        for (k, e) in ((0, path[0]), (len(verts) - 1, path[-1])):
+        for k, e in ((0, path[0]), (len(verts) - 1, path[-1])):
             v = verts[k]
             if v.is_boundary:
                 continue
@@ -339,13 +399,13 @@ def offset_loops(bm, edges, offset=0.5, position='RELATIVE', delete_edge=True, s
                 continue
             ends.append((k, cont, cont.other_vert(v)))
     new_points = []
-    for (k, v) in enumerate(verts):
+    for k, v in enumerate(verts):
         row = []
         for s in sides[k]:
             length = s.calc_length()
             dist = offset * length if position != 'EQUAL' else offset * shortest
             frac = min(dist / length, 0.999) if length > EPS else 0.5
-            (_ne, nv) = bmesh.utils.edge_split(s, v, frac)
+            _ne, nv = bmesh.utils.edge_split(s, v, frac)
             row.append(nv)
         new_points.append(row)
     new = []
@@ -353,15 +413,15 @@ def offset_loops(bm, edges, offset=0.5, position='RELATIVE', delete_edge=True, s
     for i in range(len(path)):
         j = (i + 1) % count
         for side in (0, 1):
-            (a, b) = (new_points[i][side], new_points[j][side])
+            a, b = new_points[i][side], new_points[j][side]
             if not _shares_edge(a, b):
-                new += bmesh.ops.connect_verts(bm, verts=[a, b])['edges']
+                new += bmesh.ops.connect_verts(bm, verts=[a, b])["edges"]
     loops_only = list(new)
-    for (k, cont, far) in ends:
+    for k, cont, far in ends:
         for side in (0, 1):
             x = new_points[k][side]
-            if not _shares_edge(x, far) and any((far in f.verts for f in x.link_faces)):
-                new += bmesh.ops.connect_verts(bm, verts=[x, far])['edges']
+            if not _shares_edge(x, far) and any(far in f.verts for f in x.link_faces):
+                new += bmesh.ops.connect_verts(bm, verts=[x, far])["edges"]
         if delete_edge and cont.is_valid:
             bmesh.ops.dissolve_edges(bm, edges=[cont], use_verts=False, use_face_split=False)
     new = [e for e in new if e.is_valid]
@@ -371,49 +431,58 @@ def offset_loops(bm, edges, offset=0.5, position='RELATIVE', delete_edge=True, s
     _select_only(bm, loops_only)
     return [e for e in loops_only if e.is_valid]
 
+
+# --- Slide Edge ------------------------------------------------------------------------------------------
+
 def slide_frame(edges):
     """{vertex: (side-A neighbour, side-B neighbour)} of the vertices of ``edges`` (None where a side is missing)."""
     out = {}
-    for (verts, path, closed) in chains(edges):
+    for verts, path, closed in chains(edges):
         got = path_sides(verts, path, closed)
         if got is None:
             continue
         sides = got[0]
-        for (v, (sa, sb)) in zip(verts, sides):
+        for v, (sa, sb) in zip(verts, sides):
             out[v] = (sa.other_vert(v) if sa is not None else None, sb.other_vert(v) if sb is not None else None)
     return out
+
 
 def snap(f, points=1, tolerance=0.1):
     """Maya Use Snapping: ``f`` (0..1 along the side edge) caught at k/(points+1) or the ends within ``tolerance``."""
     n = max(1, int(points))
     targets = [k / (n + 1) for k in range(0, n + 2)]
     best = min(targets, key=lambda x: abs(x - f))
-    return best if abs(best - f) <= tolerance + 1e-09 else f
+    return best if abs(best - f) <= tolerance + 1e-9 else f
+
 
 def slide_positions(frame, origins, side, f, absolute=False):
     """New positions {vertex: co} for a slide of ``f`` (0..1) towards side 0 (A) or 1 (B). ``origins`` = the
     positions before the slide (of the slid vertices and their neighbours)."""
     f = min(max(f, 0.0), 1.0)
-    pairs = [(v, ws[side]) for (v, ws) in frame.items() if ws[side] is not None]
+    pairs = [(v, ws[side]) for v, ws in frame.items() if ws[side] is not None]
     if not pairs:
         return {}
     out = {}
     if absolute:
-        dist = f * min(((origins[w] - origins[v]).length for (v, w) in pairs))
-        for (v, w) in pairs:
+        dist = f * min((origins[w] - origins[v]).length for v, w in pairs)
+        for v, w in pairs:
             d = origins[w] - origins[v]
             out[v] = origins[v] + (d.normalized() * min(dist, d.length) if d.length > EPS else d)
     else:
-        for (v, w) in pairs:
+        for v, w in pairs:
             out[v] = origins[v].lerp(origins[w], f)
     return out
+
+
+# --- operators -------------------------------------------------------------------------------------------
 
 def _region_xy(region, rv3d, world):
     p = view3d_utils.location_3d_to_region_2d(region, rv3d, world)
     return Vector(p) if p is not None else None
 
+
 class _PreMesh:
-    """The mesh as it was at the press: every drag step rebuilds from it (step 65 restore_pre pattern)."""
+    """The mesh as it was at the press: every drag step rebuilds from it (the extrude record's restore_pre pattern)."""
 
     def __init__(self, bm):
         self.me = bpy.data.meshes.new(PRE_MESH)
@@ -431,20 +500,22 @@ class _PreMesh:
             bpy.data.meshes.remove(self.me)
             self.me = None
 
+
 def _status(context, text):
     if context.workspace is not None:
         context.workspace.status_text_set(text)
 
+
 class ALLSET_OT_insert_edge_loop(bpy.types.Operator):
     """Click an edge to insert an edge loop at that point, drag to slide it along the ring (Maya Insert Edge Loop)"""
-    bl_translation_context = 'MWK:operators/edge_loops.py:501'
-    bl_idname = 'allset.insert_edge_loop'
-    bl_label = _zh_native('Insert Edge Loop', 'MWK:operators/edge_loops.py:501')
-    bl_description = _zh_native('Click an edge to insert an edge loop at that point, drag to slide it along the ring (Maya Insert Edge Loop)', 'MWK:operators/edge_loops.py:501')
+    bl_idname = "allset.insert_edge_loop"
+    bl_label = "Insert Edge Loop"
     bl_options = {'UNDO'}
-    object: StringProperty(name=_zh_native('Object', 'MWK:operators/edge_loops.py:504'), options={'SKIP_SAVE', 'HIDDEN'}, translation_context='MWK:operators/edge_loops.py:504')
-    edge: IntProperty(name=_zh_native('Edge', 'MWK:operators/edge_loops.py:505'), default=-1, options={'SKIP_SAVE', 'HIDDEN'}, translation_context='MWK:operators/edge_loops.py:505')
-    weight: FloatProperty(name=_zh_native('Weight', 'MWK:operators/edge_loops.py:506'), default=0.5, min=0.0, max=1.0, subtype='FACTOR', description=_zh_native('Where the loop cuts the clicked edge (from its first vertex)', 'MWK:operators/edge_loops.py:506'), translation_context='MWK:operators/edge_loops.py:506')
+
+    object: StringProperty(name="Object", options={'SKIP_SAVE', 'HIDDEN'})
+    edge: IntProperty(name="Edge", default=-1, options={'SKIP_SAVE', 'HIDDEN'})
+    weight: FloatProperty(name="Weight", default=0.5, min=0.0, max=1.0, subtype='FACTOR',
+                          description="Where the loop cuts the clicked edge (from its first vertex)")
 
     @classmethod
     def poll(cls, context):
@@ -455,7 +526,8 @@ class ALLSET_OT_insert_edge_loop(bpy.types.Operator):
         bm.edges.ensure_lookup_table()
         if not 0 <= self.edge < len(bm.edges):
             return []
-        return insert_loops(bm, bm.edges[self.edge], self.weight, s.iel_position, s.iel_loops, math.radians(s.iel_smoothing), s.iel_adjust_flow if s.iel_edge_flow else None)
+        return insert_loops(bm, bm.edges[self.edge], self.weight, s.iel_position, s.iel_loops,
+                            math.radians(s.iel_smoothing), s.iel_adjust_flow if s.iel_edge_flow else None)
 
     def execute(self, context):
         ob = bpy.data.objects.get(self.object) if self.object else context.edit_object
@@ -472,17 +544,18 @@ class ALLSET_OT_insert_edge_loop(bpy.types.Operator):
         if view is None:
             return {'PASS_THROUGH'}
         mouse = (event.mouse_region_x, event.mouse_region_y)
-        (ob, index) = mesh_tools.pick(view, mesh_tools._mesh_objects(context), mouse, 'EDGE', mesh_tools.PICK_RADIUS * mesh_tools._ui_scale())
+        ob, index = mesh_tools.pick(view, mesh_tools._mesh_objects(context), mouse, 'EDGE',
+                                    mesh_tools.PICK_RADIUS * mesh_tools._ui_scale())
         if ob is None:
             return {'PASS_THROUGH'}
-        (self._view, self._ob) = (view, ob)
-        (self.object, self.edge) = (ob.name, index)
+        self._view, self._ob = view, ob
+        self.object, self.edge = ob.name, index
         bm = bmesh.from_edit_mesh(ob.data)
         bm.edges.ensure_lookup_table()
         self._pre = _PreMesh(bm)
         self._update(context, mouse)
         context.window_manager.modal_handler_add(self)
-        _status(context, _dcc_source('Insert Edge Loop: drag to slide the loop, release to keep it, Esc / right-click to cancel'))
+        _status(context, "Insert Edge Loop: drag to slide the loop, release to keep it, Esc / right-click to cancel")
         return {'RUNNING_MODAL'}
 
     def _update(self, context, mouse):
@@ -513,17 +586,19 @@ class ALLSET_OT_insert_edge_loop(bpy.types.Operator):
             return self._end(context, False)
         return {'RUNNING_MODAL'}
 
+
 class ALLSET_OT_offset_edge_loop(bpy.types.Operator):
     """Click an edge and drag: an edge loop on each side of its edge loop (Maya Offset Edge Loop). Without a click:
     the selected edges"""
-    bl_translation_context = 'MWK:operators/edge_loops.py:583'
-    bl_idname = 'allset.offset_edge_loop'
-    bl_label = _zh_native('Offset Edge Loop', 'MWK:operators/edge_loops.py:583')
-    bl_description = _zh_native('Click an edge and drag: an edge loop on each side of its edge loop (Maya Offset Edge Loop). Without a click:\nthe selected edges', 'MWK:operators/edge_loops.py:583')
+    bl_idname = "allset.offset_edge_loop"
+    bl_label = "Offset Edge Loop"
     bl_options = {'UNDO'}
-    object: StringProperty(name=_zh_native('Object', 'MWK:operators/edge_loops.py:586'), options={'SKIP_SAVE', 'HIDDEN'}, translation_context='MWK:operators/edge_loops.py:586')
-    edge: IntProperty(name=_zh_native('Edge', 'MWK:operators/edge_loops.py:587'), default=-1, options={'SKIP_SAVE', 'HIDDEN'}, description=_zh_native('Clicked edge (its edge loop); -1 = the selected edges', 'MWK:operators/edge_loops.py:587'), translation_context='MWK:operators/edge_loops.py:587')
-    offset: FloatProperty(name=_zh_native('Offset', 'MWK:operators/edge_loops.py:589'), default=0.5, min=0.001, max=0.999, precision=4, description=_zh_native('Distance of the new loops (fraction of the side edges)', 'MWK:operators/edge_loops.py:589'), translation_context='MWK:operators/edge_loops.py:589')
+
+    object: StringProperty(name="Object", options={'SKIP_SAVE', 'HIDDEN'})
+    edge: IntProperty(name="Edge", default=-1, options={'SKIP_SAVE', 'HIDDEN'},
+                      description="Clicked edge (its edge loop); -1 = the selected edges")
+    offset: FloatProperty(name="Offset", default=0.5, min=0.001, max=0.999, precision=4,
+                          description="Distance of the new loops (fraction of the side edges)")
 
     @classmethod
     def poll(cls, context):
@@ -539,7 +614,8 @@ class ALLSET_OT_offset_edge_loop(bpy.types.Operator):
 
     def _build(self, context, bm, path):
         s = settings(context)
-        return offset_loops(bm, path, self.offset, s.oel_position, s.oel_delete_edge, math.radians(s.oel_smoothing), s.oel_adjust_flow if s.oel_edge_flow else None)
+        return offset_loops(bm, path, self.offset, s.oel_position, s.oel_delete_edge, math.radians(s.oel_smoothing),
+                            s.oel_adjust_flow if s.oel_edge_flow else None)
 
     def execute(self, context):
         objects = [bpy.data.objects.get(self.object)] if self.object else mesh_tools._mesh_objects(context)
@@ -551,13 +627,13 @@ class ALLSET_OT_offset_edge_loop(bpy.types.Operator):
             if self.edge >= 0:
                 paths = [self._path(bm)]
             else:
-                paths = [p for (_v, p, _c) in chains([e for e in bm.edges if e.select])]
+                paths = [p for _v, p, _c in chains([e for e in bm.edges if e.select])]
             for path in paths:
                 if path and self._build(context, bm, path):
                     done = True
             bmesh.update_edit_mesh(ob.data)
         if not done:
-            self.report({'WARNING'}, _zh("Can't perform Offset Edge Loop: pick edges with a face on both sides.", 'MWK:operators/edge_loops.py:625'))
+            self.report({'WARNING'}, "Can't perform Offset Edge Loop: pick edges with a face on both sides.")
             return {'CANCELLED'}
         return {'FINISHED'}
 
@@ -566,17 +642,18 @@ class ALLSET_OT_offset_edge_loop(bpy.types.Operator):
         if view is None:
             return self.execute(context)
         mouse = Vector((event.mouse_region_x, event.mouse_region_y))
-        (ob, index) = mesh_tools.pick(view, mesh_tools._mesh_objects(context), mouse, 'EDGE', mesh_tools.PICK_RADIUS * mesh_tools._ui_scale())
+        ob, index = mesh_tools.pick(view, mesh_tools._mesh_objects(context), mouse, 'EDGE',
+                                    mesh_tools.PICK_RADIUS * mesh_tools._ui_scale())
         if ob is None:
             return {'PASS_THROUGH'}
         bm = bmesh.from_edit_mesh(ob.data)
         bm.edges.ensure_lookup_table()
         edge = bm.edges[index]
         path = loop_path(edge)[1]
-        if any((len(e.link_faces) != 2 for e in path)):
-            self.report({'WARNING'}, _zh("Can't perform Offset Edge Loop on a border edge.", 'MWK:operators/edge_loops.py:643'))
+        if any(len(e.link_faces) != 2 for e in path):
+            self.report({'WARNING'}, "Can't perform Offset Edge Loop on a border edge.")
             return {'CANCELLED'}
-        (region, rv3d) = view
+        region, rv3d = view
         mw = ob.matrix_world
         lengths = []
         for v in edge.verts:
@@ -588,11 +665,11 @@ class ALLSET_OT_offset_edge_loop(bpy.types.Operator):
                 if a is not None and b is not None:
                     lengths.append((b - a).length)
         self._px = max(min(lengths) if lengths else 50.0, 4.0)
-        (self._view, self._ob, self._press, self._moved) = (view, ob, mouse, False)
-        (self.object, self.edge) = (ob.name, index)
+        self._view, self._ob, self._press, self._moved = view, ob, mouse, False
+        self.object, self.edge = ob.name, index
         self._pre = _PreMesh(bm)
         context.window_manager.modal_handler_add(self)
-        _status(context, _dcc_source('Offset Edge Loop: drag to set the offset, release to keep it, Esc / right-click to cancel'))
+        _status(context, "Offset Edge Loop: drag to set the offset, release to keep it, Esc / right-click to cancel")
         return {'RUNNING_MODAL'}
 
     def _update(self, context):
@@ -628,15 +705,16 @@ class ALLSET_OT_offset_edge_loop(bpy.types.Operator):
             return self._end(context, False)
         return {'RUNNING_MODAL'}
 
+
 class ALLSET_OT_slide_edge(bpy.types.Operator):
     """Middle-drag: slide the selected edges along their neighbouring edges (Maya Slide Edge)"""
-    bl_translation_context = 'MWK:operators/edge_loops.py:701'
-    bl_idname = 'allset.slide_edge'
-    bl_label = _zh_native('Slide Edge', 'MWK:operators/edge_loops.py:701')
-    bl_description = _zh_native('Middle-drag: slide the selected edges along their neighbouring edges (Maya Slide Edge)', 'MWK:operators/edge_loops.py:701')
+    bl_idname = "allset.slide_edge"
+    bl_label = "Slide Edge"
     bl_options = {'UNDO'}
-    side: IntProperty(name=_zh_native('Side', 'MWK:operators/edge_loops.py:704'), default=0, min=0, max=1, options={'SKIP_SAVE'}, translation_context='MWK:operators/edge_loops.py:704')
-    factor: FloatProperty(name=_zh_native('Slide', 'MWK:operators/edge_loops.py:705'), default=0.0, min=0.0, max=1.0, subtype='FACTOR', options={'SKIP_SAVE'}, description=_zh_native('How far along the side edges (fraction)', 'MWK:operators/edge_loops.py:705'), translation_context='MWK:operators/edge_loops.py:705')
+
+    side: IntProperty(name="Side", default=0, min=0, max=1, options={'SKIP_SAVE'})
+    factor: FloatProperty(name="Slide", default=0.0, min=0.0, max=1.0, subtype='FACTOR', options={'SKIP_SAVE'},
+                          description="How far along the side edges (fraction)")
 
     @classmethod
     def poll(cls, context):
@@ -649,7 +727,7 @@ class ALLSET_OT_slide_edge(bpy.types.Operator):
             frame = slide_frame([e for e in bm.edges if e.select])
             if frame:
                 origins = {}
-                for (v, ws) in frame.items():
+                for v, ws in frame.items():
                     origins[v] = v.co.copy()
                     for w in ws:
                         if w is not None:
@@ -660,17 +738,17 @@ class ALLSET_OT_slide_edge(bpy.types.Operator):
     def _apply(self, context, frames):
         s = settings(context)
         f = snap(self.factor, s.slide_snap_points, s.slide_snap_tolerance) if s.slide_snap else self.factor
-        for (ob, bm, frame, origins) in frames:
-            for (v, co) in origins.items():
+        for ob, bm, frame, origins in frames:
+            for v, co in origins.items():
                 v.co = co
-            for (v, co) in slide_positions(frame, origins, self.side, f, s.slide_mode == 'ABSOLUTE').items():
+            for v, co in slide_positions(frame, origins, self.side, f, s.slide_mode == 'ABSOLUTE').items():
                 v.co = co
             bmesh.update_edit_mesh(ob.data, loop_triangles=True, destructive=False)
 
     def execute(self, context):
         frames = self._frames(context)
         if not frames:
-            self.report({'WARNING'}, _zh('Select edges to slide.', 'MWK:operators/edge_loops.py:740'))
+            self.report({'WARNING'}, "Select edges to slide.")
             return {'CANCELLED'}
         self._apply(context, frames)
         return {'FINISHED'}
@@ -679,16 +757,16 @@ class ALLSET_OT_slide_edge(bpy.types.Operator):
         view = mesh_tools._view(context)
         frames = self._frames(context)
         if not frames:
-            self.report({'WARNING'}, _zh('Select edges to slide.', 'MWK:operators/edge_loops.py:749'))
+            self.report({'WARNING'}, "Select edges to slide.")
             return {'CANCELLED'}
         if view is None:
             return self.execute(context)
-        (region, rv3d) = view
+        region, rv3d = view
         mouse = Vector((event.mouse_region_x, event.mouse_region_y))
         best = None
-        for (ob, _bm, frame, _o) in frames:
+        for ob, _bm, frame, _o in frames:
             mw = ob.matrix_world
-            for (v, ws) in frame.items():
+            for v, ws in frame.items():
                 p = _region_xy(region, rv3d, mw @ v.co)
                 if p is None:
                     continue
@@ -697,30 +775,30 @@ class ALLSET_OT_slide_edge(bpy.types.Operator):
                     q = _region_xy(region, rv3d, mw @ w.co) if w is not None else None
                     dirs.append(q - p if q is not None and (q - p).length > 1.0 else None)
                 d = (p - mouse).length
-                if any((x is not None for x in dirs)) and (best is None or d < best[0]):
+                if any(x is not None for x in dirs) and (best is None or d < best[0]):
                     best = (d, dirs)
         if best is None:
             return {'CANCELLED'}
-        (self._dirs, self._press, self._frames_) = (best[1], mouse, frames)
+        self._dirs, self._press, self._frames_ = best[1], mouse, frames
         context.window_manager.modal_handler_add(self)
-        _status(context, _dcc_source('Slide Edge: drag to slide, release to keep, Esc / right-click to cancel'))
+        _status(context, "Slide Edge: drag to slide, release to keep, Esc / right-click to cancel")
         return {'RUNNING_MODAL'}
 
     def _from_mouse(self, mouse):
         delta = mouse - self._press
         best = (0, 0.0)
-        for (side, d) in enumerate(self._dirs):
+        for side, d in enumerate(self._dirs):
             if d is None:
                 continue
             f = delta.dot(d) / d.length_squared
             if f > best[1]:
                 best = (side, f)
-        (self.side, self.factor) = (best[0], min(best[1], 1.0))
+        self.side, self.factor = best[0], min(best[1], 1.0)
 
     def _end(self, context, keep):
         if not keep:
-            for (ob, _bm, _frame, origins) in self._frames_:
-                for (v, co) in origins.items():
+            for ob, _bm, _frame, origins in self._frames_:
+                for v, co in origins.items():
                     v.co = co
                 bmesh.update_edit_mesh(ob.data, loop_triangles=True, destructive=False)
         _status(context, None)
@@ -736,13 +814,18 @@ class ALLSET_OT_slide_edge(bpy.types.Operator):
         if event.type in {'ESC', 'RIGHTMOUSE'} and event.value == 'PRESS':
             return self._end(context, False)
         return {'RUNNING_MODAL'}
+
+
 classes = (ALLSET_PG_loop_tools, ALLSET_OT_insert_edge_loop, ALLSET_OT_offset_edge_loop, ALLSET_OT_slide_edge)
 
+
 def register_props():
-    bpy.types.Scene.allset_loop_tools = bpy.props.PointerProperty(type=ALLSET_PG_loop_tools, translation_context='MWK:operators/edge_loops.py:812')
+    bpy.types.Scene.allset_loop_tools = bpy.props.PointerProperty(type=ALLSET_PG_loop_tools)
+
 
 def unregister_props():
     del bpy.types.Scene.allset_loop_tools
+
 
 def clear():
     """Remove pre-press meshes a modal left behind (add-on disabled mid-drag)."""

@@ -2650,5 +2650,19 @@
   "Sets Blender's interpolation and handle type for new keys (Preferences > Animation)": "设置新关键点的 Blender 插值与控制柄类型（偏好设置 > 动画）",
   "Xref": "外部参照",
   "Grid = ": "栅格 = ",
-  "FOV:": "视野："
+  "FOV:": "视野：",
+  "Attribute": "属性",
+  "Blender Extensions": "Blender 扩展",
+  "filepath": "文件路径",
+  "Attach: return to the Edit Poly top level first": "附加：请先返回编辑多边形的顶层",
+  "Edit Poly Mode": "编辑多边形模式",
+  "Edit Poly keeps moves: the added or deleted vertices went to the base object": "编辑多边形层只保存移动；新增或删除的顶点已写入基础对象",
+  "Edit Poly layers keep moves only: use this on the base Editable Poly": "编辑多边形层只保存移动；请在基础可编辑多边形上使用此操作",
+  "MaxFlow Edit Poly": "MaxFlow 编辑多边形",
+  "MaxFlow Edit Poly layer: moves each vertex by the offset stored in the mesh attribute named by Layer": "MaxFlow 编辑多边形层：按“层”所指定的网格属性中的偏移量移动各个顶点",
+  "Select an Edit Poly modifier": "选择一个编辑多边形修改器",
+  "{0} applies to Editable Poly objects": "{0} 适用于可编辑多边形对象",
+  "{0}: an Edit Poly layer can't be edited on an object with shape keys (Morpher) yet": "{0}：暂不支持编辑带形态键（Morpher）对象的编辑多边形层",
+  "{0}: another Edit Poly layer of this object is still open": "{0}：该对象的另一个编辑多边形层仍处于编辑状态",
+  "Start in MaxFlow": "启动时进入 MaxFlow"
 }

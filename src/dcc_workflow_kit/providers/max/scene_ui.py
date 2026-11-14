@@ -12,7 +12,7 @@ TEXT = (0.81, 0.81, 0.81, 1)
 DIM = (0.58, 0.58, 0.58, 1)
 BG = (0.265, 0.265, 0.265, 1)
 BLUE = (0.27, 0.43, 0.61, 1)
-TYPES = (('MESH', _msg('Geometry'), 'geometry'), ('CURVE', _msg('Shapes'), 'shapes'), ('LIGHT', _msg('Lights'), 'lights'), ('CAMERA', _msg('Cameras'), 'cameras'), ('EMPTY', _msg('Helpers'), 'helpers'), ('ARMATURE', _msg('Bones'), 'hierarchy'), ('OTHER', _msg('Other Objects'), 'systems'))
+TYPES = (('MESH', _msg('Geometry'), 'geometry'), ('CURVE', _msg('Shapes'), 'shapes'), ('LIGHT', _msg('Lights'), _msg('lights')), ('CAMERA', _msg('Cameras'), _msg('cameras')), ('EMPTY', _msg('Helpers'), 'helpers'), ('ARMATURE', _msg('Bones'), 'hierarchy'), ('OTHER', _msg('Other Objects'), 'systems'))
 COLUMNS = (('NAME', _msg('Name')), ('TYPE', _msg('Type')), ('LAYER', _msg('Layer')), ('FROZEN', _msg('Frozen')), ('HIDDEN', _msg('Hidden')), ('RENDERABLE', _msg('Renderable')))
 
 @dataclass
@@ -429,7 +429,7 @@ def active_event(context, event):
         if d['kind'] == 'PARENT' and d['moving']:
             target = _row_at(context, state, region, y)
             if 32 <= x < region.width / u - 15:
-                reparent(context, d['objects'], target)
+                reparent(context, d[_msg('objects')], target)
         _drag = None
         runtime.redraw()
         return {'RUNNING_MODAL'}
@@ -540,7 +540,7 @@ class BSM_OT_scene_rename(bpy.types.Operator):
         return context.window_manager.invoke_props_dialog(self, width=330)
 
     def draw(self, context):
-        self.layout.prop(self, 'name')
+        self.layout.prop(self, _msg('name'))
 
     def execute(self, context):
         obj = context.view_layer.objects.get(self.object_name)

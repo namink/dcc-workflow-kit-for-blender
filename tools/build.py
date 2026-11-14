@@ -33,7 +33,7 @@ def main():
                 data = ''.join(lines).encode('utf-8')
             archive.writestr(rel.as_posix(), data)
             paths.append(rel.as_posix())
-        for name in ('LICENSE', 'THIRD_PARTY.md', 'README.md', 'LOCALIZATION_REPORT.md', 'MAYA_LOCALIZATION.md', 'MAYA_UPSTREAM.json'):
+        for name in ('LICENSE', 'THIRD_PARTY.md', 'README.md', 'LOCALIZATION_REPORT.md', 'MAYA_LOCALIZATION.md', 'MAYA_UPSTREAM.json', 'MAX_UPSTREAM.json'):
             archive.write(ROOT / name, name)
     with zipfile.ZipFile(DEST) as archive:
         assert archive.testzip() is None

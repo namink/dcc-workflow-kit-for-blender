@@ -67,9 +67,13 @@ class DCC_Preferences(bpy.types.AddonPreferences):
                          'maya_toolbox', 'maya_viewcube', 'maya_selection_wire',
                          'maya_component_colors', 'maya_dock_colors', 'project_root'):
                 box.prop(self.maya_settings, name)
+            for op in ('allset.settings_export', 'allset.settings_import'):
+                box.operator(op)
+            from .providers.maya import translations
+            translations.draw(box)
             if core.current() == 'MAYA':
                 box.operator('allset.new_maya_scene', icon='FILE_NEW')
-        layout.label(text='DCC Workflow Kit 0.1.1 · Blender Max 0.6.8 · Maya Workflow Kit 0.6.2+zh.2')
+        layout.label(text='DCC Workflow Kit 0.2.0 · MaxFlow 0.8.3 · Maya Workflow Kit 0.16.0')
 
 
 CLASSES = (BSM_Preferences, ALLSET_AddonPreferences, DCC_Preferences)

@@ -1,8 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Simplified Chinese localization by namink; additional display integration 2026-10-31.
-"""The Maya pivot concept on top of Blender's origin (docs/steps/step_59.md 「계획」 1-3).
+"""The Maya pivot concept on top of Blender's origin.
 
-Maya 2022:
+Maya:
 
 - P1/P3: moving the pivot (D hold / Insert, ``cmds.xform(pivots=...)``) changes neither translate nor
   the vertices nor the children; snapping applies while editing.
@@ -14,43 +13,73 @@ Maya 2022:
   of a component selection.
 
 The kit's pivot is the Blender origin and ``delta_location`` is Maya's pivot offset
-(step 10, ``freeze.shift_pivot``). D / Insert turn on Blender's Affect Only Origins (and
+(``freeze.shift_pivot``). D / Insert turn on Blender's Affect Only Origins (and
 Affect Only Parents, so children stay); Blender then writes the new origin into the
 location / rotation channels. ``watch()`` waits for each such transform to end and
 rewrites the result the Maya way: channels back, the new pivot position into
 ``delta_location``, a new pivot orientation into the "Maya Pivot" transform orientation
-(the Move tool's Custom axis), geometry and children where they are.
+(the Move and Rotate tools' Custom axes), geometry and children where they are.
 """
-from ..i18n import source_message as _dcc_source, display_message as _dcc_display, format_message as _dcc_format
-from ..i18n import tr as _zh, enum_items as _zh_enum, native as _zh_native
+
 import bpy
 from bpy.props import BoolProperty
 from mathutils import Matrix, Quaternion, Vector
+
 from .. import results
 from . import freeze
-ORIENT_NAME = _dcc_source('Maya Pivot')
-PROP = 'allset_pivot_orient'
+from .manip_scale import TRANSFORM_MODALS
+
+ORIENT_NAME = "Maya Pivot"
+# Object-space orientation (quaternion w, x, y, z) of the object's custom pivot (Bake Pivot input).
+PROP = "allset_pivot_orient"
 MOVE_SLOT = 1
-EPS = 1e-06
+ROTATE_SLOT = 2
+PIVOT_SLOTS = (MOVE_SLOT, ROTATE_SLOT)
+EPS = 1e-6
 POLL = 0.1
+
+# Maya manipulator position (P10/P11): Blender pivot point per mode. Only switched when the
+# current value is one of these two, so a user's cursor / individual-origins choice stays.
 MAYA_PIVOT_POINT = {'OBJECT': 'ACTIVE_ELEMENT', 'EDIT_MESH': 'BOUNDING_BOX_CENTER'}
+
+
+def axes_for(ob):
+    """Orthonormal world axes of an object's pivot, including its saved custom rotation."""
+    rotation = ob.matrix_world.to_quaternion()
+    if PROP in ob:
+        rotation = rotation @ Quaternion(ob[PROP])
+    return rotation.to_matrix()
+
+
+# --- pure helpers (headless-testable) ---------------------------------------------------------
 
 def snapshot(ob):
     """Channels and basis of ``ob`` before a pivot edit."""
-    return {'basis': ob.matrix_basis.copy(), 'location': Vector(ob.location), 'delta_location': Vector(ob.delta_location), 'rotation_euler': ob.rotation_euler.copy(), 'rotation_quaternion': ob.rotation_quaternion.copy(), 'rotation_axis_angle': tuple(ob.rotation_axis_angle), 'delta_rotation_euler': ob.delta_rotation_euler.copy(), 'delta_rotation_quaternion': ob.delta_rotation_quaternion.copy(), 'scale': Vector(ob.scale), 'delta_scale': Vector(ob.delta_scale)}
+    return {
+        "basis": ob.matrix_basis.copy(),
+        "location": Vector(ob.location), "delta_location": Vector(ob.delta_location),
+        "rotation_euler": ob.rotation_euler.copy(), "rotation_quaternion": ob.rotation_quaternion.copy(),
+        "rotation_axis_angle": tuple(ob.rotation_axis_angle),
+        "delta_rotation_euler": ob.delta_rotation_euler.copy(),
+        "delta_rotation_quaternion": ob.delta_rotation_quaternion.copy(),
+        "scale": Vector(ob.scale), "delta_scale": Vector(ob.delta_scale),
+    }
+
 
 def _restore_channels(ob, snap):
-    ob.location = snap['location']
-    ob.rotation_euler = snap['rotation_euler']
-    ob.rotation_quaternion = snap['rotation_quaternion']
-    ob.rotation_axis_angle = snap['rotation_axis_angle']
-    ob.delta_rotation_euler = snap['delta_rotation_euler']
-    ob.delta_rotation_quaternion = snap['delta_rotation_quaternion']
-    ob.scale = snap['scale']
-    ob.delta_scale = snap['delta_scale']
+    ob.location = snap["location"]
+    ob.rotation_euler = snap["rotation_euler"]
+    ob.rotation_quaternion = snap["rotation_quaternion"]
+    ob.rotation_axis_angle = snap["rotation_axis_angle"]
+    ob.delta_rotation_euler = snap["delta_rotation_euler"]
+    ob.delta_rotation_quaternion = snap["delta_rotation_quaternion"]
+    ob.scale = snap["scale"]
+    ob.delta_scale = snap["delta_scale"]
+
 
 def _close(a, b):
-    return all((abs(a[i][j] - b[i][j]) < EPS for i in range(4) for j in range(4)))
+    return all(abs(a[i][j] - b[i][j]) < EPS for i in range(4) for j in range(4))
+
 
 def _keep_children(ob, w_old, b_new_world):
     """Children keep their world matrix when ``ob``'s world becomes ``b_new_world``."""
@@ -59,25 +88,28 @@ def _keep_children(ob, w_old, b_new_world):
         frame = freeze.parent_frame(ch, w_old, w_new)
         ch.matrix_basis = frame.inverted_safe() @ w_old[ch]
 
+
 def rewrite(ob, snap):
     """Turn an origin-only transform of ``ob`` (made after ``snap``) into a Maya pivot edit.
 
     Returns the new world orientation of the pivot (a 3x3) if the pivot was turned, else None."""
     b1 = ob.matrix_basis.copy()
-    b0 = snap['basis']
+    b0 = snap["basis"]
     if _close(b0, b1):
         return None
     w_old = {ob: ob.matrix_world.copy()}
     for ch in ob.children:
         w_old[ch] = ch.matrix_world.copy()
-    frame = w_old[ob] @ b1.inverted_safe()
-    turned = b1.to_3x3().normalized().to_quaternion().rotation_difference(b0.to_3x3().normalized().to_quaternion()).angle > 1e-05
+    frame = w_old[ob] @ b1.inverted_safe()           # parent space -> world
+    turned = (b1.to_3x3().normalized().to_quaternion().rotation_difference(
+        b0.to_3x3().normalized().to_quaternion()).angle > 1e-5)
     world_axes = (frame @ b1).to_3x3().normalized() if turned else None
+
     _restore_channels(ob, snap)
-    ob.delta_location = snap['delta_location'] + (b1.translation - b0.translation)
+    ob.delta_location = snap["delta_location"] + (b1.translation - b0.translation)
     b_final = ob.matrix_basis.copy()
     d = b_final.inverted_safe() @ b1
-    if ob.type in freeze.BAKE_TYPES and ob.data is not None and (not _close(d, Matrix.Identity(4))):
+    if ob.type in freeze.BAKE_TYPES and ob.data is not None and not _close(d, Matrix.Identity(4)):
         freeze.bake_into_data(ob, d)
     if not _close(b_final, b1):
         _keep_children(ob, w_old, frame @ b_final)
@@ -85,6 +117,7 @@ def rewrite(ob, snap):
         obj_rot = (frame @ b_final).to_3x3().normalized().to_quaternion()
         ob[PROP] = tuple(obj_rot.inverted() @ world_axes.to_quaternion())
     return world_axes
+
 
 def reset_pivot(ob, position=True, orientation=True):
     """Maya Reset Pivot (P6): pivot back to the object's own origin (delta_location 0)."""
@@ -99,6 +132,7 @@ def reset_pivot(ob, position=True, orientation=True):
         done = True
     return done
 
+
 def bake_pivot(ob):
     """Maya Bake Pivot (P8): the custom pivot orientation becomes the rotation; geometry and
     children stay. Returns True if something was baked."""
@@ -106,14 +140,14 @@ def bake_pivot(ob):
         return False
     q = Quaternion(ob[PROP])
     del ob[PROP]
-    if q.angle < 1e-06:
+    if q.angle < 1e-6:
         return False
     w_old = {ob: ob.matrix_world.copy()}
     for ch in ob.children:
         w_old[ch] = ch.matrix_world.copy()
     b_old = ob.matrix_basis.copy()
     frame = w_old[ob] @ b_old.inverted_safe()
-    (t, r, s) = b_old.decompose()
+    t, r, s = b_old.decompose()
     freeze.set_rotation(ob, r @ q)
     ob.location = t - Vector(ob.delta_location)
     b_new = ob.matrix_basis.copy()
@@ -121,6 +155,7 @@ def bake_pivot(ob):
         freeze.bake_into_data(ob, b_new.inverted_safe() @ b_old)
     _keep_children(ob, w_old, frame @ b_new)
     return True
+
 
 def match_pivot(ob, world_point):
     """Maya Match Pivots (P7): ``ob``'s pivot moves to ``world_point``; nothing else moves."""
@@ -130,31 +165,49 @@ def match_pivot(ob, world_point):
     freeze.shift_pivot(ob, c)
     return True
 
+
+def match_pivot_orient(ob, world_rotation):
+    """Maya Match Pivots > Orientation: ``ob`` turns about its pivot to ``world_rotation`` (a Quaternion) while its
+    geometry and children stay where they are (its Rotate channels take the new orientation, like Bake Pivot).
+    Returns True if it turned."""
+    turn = ob.matrix_world.to_quaternion().inverted() @ world_rotation
+    if turn.angle < 1e-6:
+        return False
+    ob[PROP] = tuple(turn)
+    return bake_pivot(ob)
+
+
+# --- the "Maya Pivot" transform orientation (Move and Rotate Custom axes) --------------------
+
 def _find_view3d(context):
     for window in context.window_manager.windows:
         for area in window.screen.areas:
             if area.type == 'VIEW_3D':
                 for region in area.regions:
                     if region.type == 'WINDOW':
-                        return (window, area, region)
-    return (None, None, None)
+                        return window, area, region
+    return None, None, None
+
 
 def set_custom_orientation(context, axes):
-    """Create / update the "Maya Pivot" orientation with world ``axes`` and use it for Move."""
+    """Create / update the picked pivot axes for both Move and Rotate."""
     scene = context.scene
     slots = scene.transform_orientation_slots
     orient = _orientation(scene)
     if orient is None:
-        (window, area, region) = _find_view3d(context)
-        kw = {'window': window, 'area': area, 'region': region} if area is not None else {}
+        window, area, region = _find_view3d(context)
+        kw = {"window": window, "area": area, "region": region} if area is not None else {}
         prev = slots[0].type
         try:
             with context.temp_override(**kw):
                 bpy.ops.transform.create_orientation(name=ORIENT_NAME, use=True, overwrite=True)
         except RuntimeError:
+            # edit mode builds it from the selection, which can fail (nothing / a closed shell selected);
+            # the view's axes always work (the matrix is replaced below)
             try:
                 with context.temp_override(**kw):
-                    bpy.ops.transform.create_orientation(name=ORIENT_NAME, use=True, use_view=True, overwrite=True)
+                    bpy.ops.transform.create_orientation(name=ORIENT_NAME, use=True, use_view=True,
+                                                         overwrite=True)
             except RuntimeError:
                 return False
         orient = _orientation(scene)
@@ -162,8 +215,10 @@ def set_custom_orientation(context, axes):
         if orient is None:
             return False
     orient.matrix = axes
-    slots[MOVE_SLOT].type = ORIENT_NAME
+    for index in PIVOT_SLOTS:
+        slots[index].type = ORIENT_NAME
     return True
+
 
 def _orientation(scene):
     for slot in scene.transform_orientation_slots:
@@ -180,11 +235,18 @@ def _orientation(scene):
     except TypeError:
         return None
 
+
 def leave_custom_orientation(scene, to='GLOBAL'):
-    slot = scene.transform_orientation_slots[MOVE_SLOT]
-    if slot.type == ORIENT_NAME:
-        slot.type = to
-_watch = {'running': False, 'snaps': {}, 'last_op': None}
+    for index in PIVOT_SLOTS:
+        slot = scene.transform_orientation_slots[index]
+        if slot.type == ORIENT_NAME:
+            slot.type = to
+
+
+# --- watcher ---------------------------------------------------------------------------------
+
+_watch = {"running": False, "snaps": {}, "last_op": None}
+
 
 def _op_key():
     ops = bpy.context.window_manager.operators
@@ -192,27 +254,63 @@ def _op_key():
         return None
     return (ops[-1].as_pointer(), len(ops), ops[-1].bl_idname)
 
+
 def _transform_running():
     for window in bpy.context.window_manager.windows:
-        if any((op.bl_idname.startswith('TRANSFORM_OT_') for op in window.modal_operators)):
+        if any(op.bl_idname.startswith(TRANSFORM_MODALS) for op in window.modal_operators):
             return True
     return False
 
+
 def pivot_mode(context=None):
     context = context or bpy.context
-    scene = getattr(context, 'scene', None)
+    scene = getattr(context, "scene", None)
     return scene is not None and context.mode == 'OBJECT' and scene.tool_settings.use_transform_data_origin
+
+
+def origins_for_groups(context):
+    """Before Blender's own Move in pivot mode: Affect Only Origins skips objects without data, so a group (an
+    Empty) would not move and V / X / C snapping its pivot did nothing. When no selected object has
+    data, that one transform runs with Affect Only Origins off: Affect Only Parents keeps the children in place
+    (and snappable), ``process`` turns the move into a pivot edit, and ``_tick`` turns the flag back on after it.
+    Returns True when it did."""
+    ts = context.scene.tool_settings
+    objects = context.selected_objects
+    if not pivot_mode(context) or not ts.use_transform_skip_children or not objects:
+        return False
+    if any(ob.data is not None for ob in objects):
+        return False
+    from . import hold
+    ts.use_transform_data_origin = False
+    _watch["origins_off"] = "pivot" in hold._state or hold._object_toggle_saved is not None
+    watch()
+    return True
+
+
+def _origins_back(context):
+    """Affect Only Origins back on after ``origins_for_groups``, unless the pivot edit ended meanwhile (D released)."""
+    held = _watch.pop("origins_off", None)
+    if held is None:
+        return
+    from . import hold
+    ts = context.scene.tool_settings
+    if held and "pivot" not in hold._state and hold._object_toggle_saved is None:
+        return
+    if not ts.use_transform_data_origin and ts.use_transform_skip_children:
+        ts.use_transform_data_origin = True
+
 
 def _selected(context):
     return [ob for ob in context.selected_objects]
+
 
 def process(context=None):
     """Rewrite the selected objects if a transform registered since the last call; re-snapshot."""
     context = context or bpy.context
     key = _op_key()
-    snaps = _watch['snaps']
+    snaps = _watch["snaps"]
     turned = None
-    if key != _watch['last_op'] and key is not None and key[2].startswith('TRANSFORM_OT_') and (context.mode == 'OBJECT'):
+    if key != _watch["last_op"] and key is not None and key[2].startswith("TRANSFORM_OT_") and context.mode == 'OBJECT':
         for ob in _selected(context):
             snap = snaps.get(ob.name)
             if snap is not None:
@@ -222,41 +320,51 @@ def process(context=None):
         if turned is not None:
             set_custom_orientation(context, turned)
         context.view_layer.update()
-    _watch['last_op'] = key
-    _watch['snaps'] = {ob.name: snapshot(ob) for ob in _selected(context)}
+    _watch["last_op"] = key
+    _watch["snaps"] = {ob.name: snapshot(ob) for ob in _selected(context)}
     return turned
+
 
 def _tick():
     try:
         if _transform_running():
             return POLL / 2
         context = bpy.context
+        _origins_back(context)
         if context.mode == 'OBJECT':
             process(context)
         if pivot_mode(context):
             return POLL
     except (ReferenceError, AttributeError, RuntimeError):
         pass
-    _watch['running'] = False
+    _watch["running"] = False
     return None
+
 
 def watch():
     """Start watching origin-only transforms (idempotent)."""
-    if _watch['running']:
+    if _watch["running"]:
         return
-    _watch['running'] = True
-    _watch['last_op'] = _op_key()
+    _watch["running"] = True
+    _watch["last_op"] = _op_key()
     try:
-        _watch['snaps'] = {ob.name: snapshot(ob) for ob in _selected(bpy.context)}
+        _watch["snaps"] = {ob.name: snapshot(ob) for ob in _selected(bpy.context)}
     except AttributeError:
-        _watch['snaps'] = {}
+        _watch["snaps"] = {}
     bpy.app.timers.register(_tick, first_interval=POLL)
+
 
 def stop():
     if bpy.app.timers.is_registered(_tick):
         bpy.app.timers.unregister(_tick)
     _watch.update(running=False, snaps={}, last_op=None)
+    _watch.pop("origins_off", None)
+
+
+# --- pivot point per mode (P10/P11) ------------------------------------------------------------
+
 _last_mode = [None]
+
 
 def maya_pivot_point(ts, mode):
     """Switch Blender's pivot point to the Maya one of ``mode`` (only from the other Maya value)."""
@@ -267,18 +375,21 @@ def maya_pivot_point(ts, mode):
         ts.transform_pivot_point = want
         return True
     return False
+
+
 _last_lead = [None]
 
+
 def follow_lead(context, scene):
-    """The "Maya Pivot" Move axis belongs to the object whose pivot was turned (Maya keeps pivot axes per object):
-    a new lead with a turned pivot gets its own axes, one without goes back to Object axes (step 97: the next
+    """The "Maya Pivot" axes belong to the object whose pivot was turned (Maya keeps pivot axes per object):
+    a new lead with a turned pivot gets its own axes, one without goes back to Object axes (the next
     object was moved along the previous object's pivot axes)."""
     ob = context.view_layer.objects.active if context.mode == 'OBJECT' else None
     key = ob.as_pointer() if ob is not None else None
     if key == _last_lead[0]:
         return
     _last_lead[0] = key
-    if ob is None or scene.transform_orientation_slots[MOVE_SLOT].type != ORIENT_NAME:
+    if ob is None or not any(scene.transform_orientation_slots[index].type == ORIENT_NAME for index in PIVOT_SLOTS):
         return
     if PROP in ob:
         orient = _orientation(scene)
@@ -287,6 +398,7 @@ def follow_lead(context, scene):
             orient.matrix = rot.to_matrix()
     else:
         leave_custom_orientation(scene, 'LOCAL')
+
 
 @bpy.app.handlers.persistent
 def _on_depsgraph(scene, _depsgraph):
@@ -303,6 +415,9 @@ def _on_depsgraph(scene, _depsgraph):
     except (AttributeError, ReferenceError, TypeError):
         pass
 
+
+# --- operators -------------------------------------------------------------------------------
+
 class _PivotOp:
     bl_options = {'REGISTER', 'UNDO'}
 
@@ -310,15 +425,15 @@ class _PivotOp:
     def poll(cls, context):
         return context.mode == 'OBJECT' and bool(context.selected_objects)
 
+
 class ALLSET_OT_reset_pivot(_PivotOp, bpy.types.Operator):
     """Put the pivot back on the object's own origin and reset its orientation, without moving
     the geometry (Maya pivot edit RMB > Reset Pivot)"""
-    bl_translation_context = 'MWK:operators/pivot.py:377'
-    bl_idname = 'allset.reset_pivot'
-    bl_label = _zh_native('Reset Pivot', 'MWK:operators/pivot.py:377')
-    bl_description = _zh_native("Put the pivot back on the object's own origin and reset its orientation, without moving\nthe geometry (Maya pivot edit RMB > Reset Pivot)", 'MWK:operators/pivot.py:377')
-    position: BoolProperty(name=_zh_native('Position', 'MWK:operators/pivot.py:379'), default=True, translation_context='MWK:operators/pivot.py:379')
-    orientation: BoolProperty(name=_zh_native('Orientation', 'MWK:operators/pivot.py:380'), default=True, translation_context='MWK:operators/pivot.py:380')
+    bl_idname = "allset.reset_pivot"
+    bl_label = "Reset Pivot"
+
+    position: BoolProperty(name="Position", default=True)
+    orientation: BoolProperty(name="Orientation", default=True)
 
     def execute(self, context):
         for ob in freeze.parents_first(_selected(context)):
@@ -326,56 +441,83 @@ class ALLSET_OT_reset_pivot(_PivotOp, bpy.types.Operator):
             reset_pivot(ob, self.position, self.orientation)
         if self.orientation:
             leave_custom_orientation(context.scene)
-        if _watch['running']:
+        if _watch["running"]:
             process(context)
         return {'FINISHED'}
+
 
 class ALLSET_OT_bake_pivot(_PivotOp, bpy.types.Operator):
     """Put the custom pivot orientation into the object's rotation; the geometry stays
     (Maya Modify > Bake Pivot)"""
-    bl_translation_context = 'MWK:operators/pivot.py:397'
-    bl_idname = 'allset.bake_pivot'
-    bl_label = _zh_native('Bake Pivot', 'MWK:operators/pivot.py:397')
-    bl_description = _zh_native("Put the custom pivot orientation into the object's rotation; the geometry stays\n(Maya Modify > Bake Pivot)", 'MWK:operators/pivot.py:397')
+    bl_idname = "allset.bake_pivot"
+    bl_label = "Bake Pivot"
 
     def execute(self, context):
         n = 0
         for ob in freeze.parents_first(_selected(context)):
             context.view_layer.update()
             n += bake_pivot(ob)
-        leave_custom_orientation(context.scene, 'LOCAL')
+        leave_custom_orientation(context.scene, 'LOCAL')   # Maya: axis mode back to Object (P8)
         if not n:
-            results.result(self, _zh('No custom pivot orientation to bake', 'MWK:operators/pivot.py:406'))
-        if _watch['running']:
+            results.result(self, "No custom pivot orientation to bake")
+        if _watch["running"]:
             process(context)
         return {'FINISHED'}
+
 
 class ALLSET_OT_match_pivots(_PivotOp, bpy.types.Operator):
-    """Move the pivots of the selected objects onto the last selected object's pivot
+    """Move the pivots of the selected objects onto the pivot of the last selected object or joint
     (Maya Modify > Match Transformations > Match Pivots)"""
-    bl_translation_context = 'MWK:operators/pivot.py:416'
-    bl_idname = 'allset.match_pivots'
-    bl_label = _zh_native('Match Pivots', 'MWK:operators/pivot.py:416')
-    bl_description = _zh_native("Move the pivots of the selected objects onto the last selected object's pivot\n(Maya Modify > Match Transformations > Match Pivots)", 'MWK:operators/pivot.py:416')
+    bl_idname = "allset.match_pivots"
+    bl_label = "Match Pivots"
+
+    # Maya's Pivots options: Rotate and Scale on, Orientation off. The kit has one pivot for both, so either one
+    # moves it
+    rotate_pivot: BoolProperty(name="Rotate", default=True, description="Match the rotate pivot")
+    scale_pivot: BoolProperty(name="Scale", default=True, description="Match the scale pivot")
+    orientation: BoolProperty(name="Orientation", default=False,
+                              description="Also turn the objects to the last selected one's orientation; their "
+                                          "geometry and children stay where they are")
 
     def execute(self, context):
-        lead = context.view_layer.objects.active
-        others = [ob for ob in _selected(context) if ob is not lead]
-        if lead is None or not others:
-            self.report({'WARNING'}, _zh('Select the objects, then the target last', 'MWK:operators/pivot.py:422'))
+        from . import snap_align
+        position = self.rotate_pivot or self.scale_pivot
+        if not (position or self.orientation):
+            return {'CANCELLED'}      # nothing checked: Maya runs nothing
+        # the last picked node (a joint / control included) gives the point; a picked bone has no pivot of its own
+        lead, nodes = snap_align.match_lead(context)
+        others = [ob for ob in nodes if isinstance(ob, bpy.types.Object)]
+        if lead is None or not nodes:
+            self.report({'WARNING'}, "Select the objects, then the target last")
             return {'CANCELLED'}
-        p = lead.matrix_world.translation.copy()
+        if not others:
+            self.report({'WARNING'}, "A joint or control has no pivot of its own to match")
+            return {'CANCELLED'}
+        frame = snap_align._maya_frame(lead)
+        p = frame.translation.copy()
+        turn = frame.to_quaternion()
+        turned = False
         for ob in freeze.parents_first(others):
             context.view_layer.update()
-            match_pivot(ob, p)
-        if _watch['running']:
+            if position:
+                match_pivot(ob, p)
+            if self.orientation:
+                context.view_layer.update()
+                turned = match_pivot_orient(ob, turn) or turned
+        if turned:
+            leave_custom_orientation(context.scene, 'LOCAL')   # like Bake Pivot: the axes are the object's again
+        if _watch["running"]:
             process(context)
         return {'FINISHED'}
+
+
 classes = (ALLSET_OT_reset_pivot, ALLSET_OT_bake_pivot, ALLSET_OT_match_pivots)
+
 
 def register_handler():
     if _on_depsgraph not in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.append(_on_depsgraph)
+
 
 def unregister_handler():
     if _on_depsgraph in bpy.app.handlers.depsgraph_update_post:

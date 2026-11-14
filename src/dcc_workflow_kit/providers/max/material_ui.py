@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Adapted for DCC Workflow Kit.
-from .i18n import msg as _msg, display as _dcc_ui_text, format_message as _dcc_format, error_text as _dcc_ui_error
+from .i18n import msg as _msg, display as _dcc_ui_text, format_message as _dcc_format
 "Slate and Compact material surfaces backed by real Blender shader data.\n\nThe visual structure follows Autodesk's documented material-editor workflows.\nAll graphics are independently drawn. A node on this canvas is a ShaderNode,\na wire is a NodeLink, fields edit RNA sockets, and sample slots hold persistent\nMaterial pointers. The module does not implement proprietary shader classes.\n"
 import math
 import time
@@ -12,6 +12,7 @@ from bpy_extras.io_utils import ImportHelper
 from gpu_extras.batch import batch_for_shader
 from gpu_extras.presets import draw_texture_2d
 from . import runtime, surfaces
+from .i18n import tr_ui as tr
 BG = (0.255, 0.255, 0.255, 1)
 PANEL = (0.285, 0.285, 0.285, 1)
 GRAPH = (0.19, 0.19, 0.19, 1)
@@ -22,7 +23,7 @@ GOLD = (0.92, 0.75, 0.34, 1)
 BLUE = (0.29, 0.46, 0.63, 1)
 CATALOGUE = ((_msg('Materials'), _msg('Physical Material'), _msg('ShaderNodeBsdfPrincipled')), (_msg('Materials'), _msg('Diffuse'), _msg('ShaderNodeBsdfDiffuse')), (_msg('Materials'), _msg('Glass'), _msg('ShaderNodeBsdfGlass')), (_msg('Materials'), _msg('Emission'), _msg('ShaderNodeEmission')), (_msg('Materials'), _msg('Mix Material'), _msg('ShaderNodeMixShader')), (_msg('Materials'), _msg('Material Output'), _msg('ShaderNodeOutputMaterial')), (_msg('Maps'), _msg('Bitmap'), _msg('ShaderNodeTexImage')), (_msg('Maps'), _msg('Noise'), _msg('ShaderNodeTexNoise')), (_msg('Maps'), _msg('Checker'), _msg('ShaderNodeTexChecker')), (_msg('Maps'), _msg('Gradient'), _msg('ShaderNodeTexGradient')), (_msg('Maps'), _msg('Voronoi'), _msg('ShaderNodeTexVoronoi')), (_msg('Maps'), _msg('Color Correction'), _msg('ShaderNodeHueSaturation')), (_msg('Maps'), _msg('Color Ramp'), _msg('ShaderNodeValToRGB')), (_msg('Maps'), _msg('Bump'), _msg('ShaderNodeBump')), (_msg('Maps'), _msg('Normal Map'), _msg('ShaderNodeNormalMap')), (_msg('Maps'), _msg('Texture Coordinates'), _msg('ShaderNodeTexCoord')), (_msg('Maps'), _msg('Mapping'), _msg('ShaderNodeMapping')), (_msg('Maps'), _msg('Math'), _msg('ShaderNodeMath')), (_msg('Maps'), _msg('RGB Color'), _msg('ShaderNodeRGB')), (_msg('Maps'), _msg('Value'), _msg('ShaderNodeValue')))
 CATALOGUE_LABELS = {entry[2]: entry[1] for entry in CATALOGUE}
-MAIN_INPUTS = {_msg('Base Color'), _msg('Metallic'), _msg('Roughness'), 'IOR', _msg('Alpha'), _msg('Normal'), _msg('Coat Weight'), _msg('Emission Color'), _msg('Emission Strength')}
+MAIN_INPUTS = {_msg('Base Color'), _msg('Metallic'), _msg('Roughness'), _msg('IOR'), _msg('Alpha'), _msg('Normal'), _msg('Coat Weight'), _msg('Emission Color'), _msg('Emission Strength')}
 _states = {}
 _drag = None
 _enum_target = None
@@ -147,7 +148,7 @@ def assign_material(context, material):
     from .editors import _assign_material
     if not material:
         return 0
-    objects = [obj for obj in context.selected_objects if obj.is_editable and getattr(obj, 'data', None) is not None and obj.data.is_editable and hasattr(obj.data, 'materials')]
+    objects = [obj for obj in context.selected_objects if obj.is_editable and getattr(obj, 'data', None) is not None and obj.data.is_editable and hasattr(obj.data, _msg('materials'))]
     for obj in objects:
         _assign_material(obj, material)
     return len(objects)
@@ -220,7 +221,7 @@ def _border(c, x, y, w, h, color=EDGE, width=1):
 
 def _clip_text(c, value, x, y, width, size=9, color=TEXT, bold=False):
     limit = max(1, int(width / (size * 0.51)))
-    value = str(value)
+    value = tr(value)
     c.text(value if len(value) <= limit else value[:max(0, limit - 1)] + '…', x, y, size, color, bold)
 
 def _clip(c, box):
@@ -684,7 +685,7 @@ def _parameters(c, state, material, x, bottom, width, top, compact=False):
     c.text(_msg('Material Parameter Editor') if not compact else _msg('Material Parameters'), x + 7, y - 15, 10)
     y -= 47
     if material:
-        c.field(x + 7, y, width - 14, material, 'name')
+        c.field(x + 7, y, width - 14, material, _msg('name'))
     else:
         c.text(_msg('No material selected'), x + 10, y + 4, 10, DIM)
         c.button(x + 10, y - 31, width - 20, 23, _msg('Create Material'), ('MAT', 'NEW'))
@@ -719,7 +720,7 @@ def _parameters(c, state, material, x, bottom, width, top, compact=False):
             y -= 12
         sockets = [s for s in node.inputs if s.enabled and (not s.hide) and (hasattr(s, 'default_value') or s.is_linked)]
         if node.type == 'BSDF_PRINCIPLED':
-            groups = [(_msg('Base Color and Reflections'), [s for s in sockets if s.name in {_msg('Base Color'), _msg('Metallic'), _msg('Roughness'), 'IOR', _msg('Alpha'), _msg('Normal'), _msg('Diffuse Roughness')}]), (_msg('Specular'), [s for s in sockets if s.name.startswith((_msg('Specular'), _msg('Anisotropic'))) or s.name == _msg('Tangent')]), (_msg('Coating'), [s for s in sockets if s.name.startswith(_msg('Coat'))]), (_msg('Transparency'), [s for s in sockets if s.name.startswith(_msg('Transmission'))]), (_msg('Sub-Surface Scattering'), [s for s in sockets if s.name.startswith(_msg('Subsurface'))]), (_msg('Emission'), [s for s in sockets if s.name.startswith(_msg('Emission'))]), (_msg('Sheen'), [s for s in sockets if s.name.startswith(_msg('Sheen'))])]
+            groups = [(_msg('Base Color and Reflections'), [s for s in sockets if s.name in {_msg('Base Color'), _msg('Metallic'), _msg('Roughness'), _msg('IOR'), _msg('Alpha'), _msg('Normal'), _msg('Diffuse Roughness')}]), (_msg('Specular'), [s for s in sockets if s.name.startswith((_msg('Specular'), _msg('Anisotropic'))) or s.name == _msg('Tangent')]), (_msg('Coating'), [s for s in sockets if s.name.startswith(_msg('Coat'))]), (_msg('Transparency'), [s for s in sockets if s.name.startswith(_msg('Transmission'))]), (_msg('Sub-Surface Scattering'), [s for s in sockets if s.name.startswith(_msg('Subsurface'))]), (_msg('Emission'), [s for s in sockets if s.name.startswith(_msg('Emission'))]), (_msg('Sheen'), [s for s in sockets if s.name.startswith(_msg('Sheen'))])]
             included = {s.identifier for (_, entries) in groups for s in entries}
             remaining = [s for s in sockets if s.identifier not in included]
             if remaining:
@@ -762,7 +763,7 @@ def _parameters(c, state, material, x, bottom, width, top, compact=False):
                     y -= 24
                     c.button(x + 12, y, width - 24, 21, _msg('Open Bitmap...'), ('MAT', 'IMAGE', material, node))
                     y -= 20
-                    _clip_text(c, getattr(node.image, 'name', _msg('No image selected')), x + 12, y + 4, width - 24, 9, DIM)
+                    _clip_text(c, getattr(node.image, _msg('name'), _msg('No image selected')), x + 12, y + 4, width - 24, 9, DIM)
                 for attr in attrs:
                     y -= 24
                     c.text(attr.replace('_', ' ').title(), x + 12, y + 4, 9)
@@ -965,7 +966,7 @@ def active_event(context, event):
     state = _state(area)
     if event.type in {'ESC', 'RIGHTMOUSE'} and event.value == 'PRESS':
         if drag['kind'] == 'NODES':
-            for (node, position) in drag['positions']:
+            for (node, position) in drag[_msg('positions')]:
                 try:
                     node.location = position
                 except ReferenceError:
@@ -980,7 +981,7 @@ def active_event(context, event):
         dy = y - drag['start'][1]
         drag['last'] = (x, y)
         if drag['kind'] == 'NODES':
-            for (node, position) in drag['positions']:
+            for (node, position) in drag[_msg('positions')]:
                 try:
                     node.location = (position[0] + dx / state.zoom, position[1] + dy / state.zoom)
                 except ReferenceError:
@@ -1480,7 +1481,7 @@ class BSM_OT_material_image(bpy.types.Operator, ImportHelper):
                 return {'CANCELLED'}
             node.image = image
         except (RuntimeError, OSError) as error:
-            self.report({'ERROR'}, _dcc_ui_error(error))
+            self.report({'ERROR'}, _dcc_ui_text(str(error)))
             return {'CANCELLED'}
         request_preview(material)
         runtime.redraw()
@@ -1590,7 +1591,7 @@ def clear():
     """Cancel modal gestures and release GPU objects; preserve scene materials."""
     global _drag, _enum_target, _smooth_shader, _menu_click
     if _drag and _drag.get('kind') == 'NODES':
-        for (node, position) in _drag['positions']:
+        for (node, position) in _drag[_msg('positions')]:
             try:
                 node.location = position
             except ReferenceError:

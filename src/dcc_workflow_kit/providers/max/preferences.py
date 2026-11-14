@@ -9,7 +9,7 @@ def _splash_changed(self, context):
     runtime.apply_splash(runtime.is_active())
 
 class BSM_Preferences(bpy.types.PropertyGroup):
-    enabled_mode: BoolProperty(name=_msg('Start in Blender Max'), default=False, translation_context=_msg('DCCWorkflowKit.Max'))
+    enabled_mode: BoolProperty(name=_msg('Start in MaxFlow'), default=False, translation_context=_msg('DCCWorkflowKit.Max'))
     studio_colors: BoolProperty(name=_msg('Max gray colors'), default=True, description=_msg('Temporarily apply original gray UI colors; restore the previous colors on exit'), translation_context=_msg('DCCWorkflowKit.Max'))
     theme_backup: StringProperty(default='', options={'HIDDEN'}, translation_context=_msg('DCCWorkflowKit.Max'))
     splash_image: StringProperty(name=_msg('Custom Splash Image'), subtype='FILE_PATH', update=_splash_changed, description=_msg("PNG or JPEG shown as Blender's splash screen while Max mode is on. Blender's own splash is 1000 x 500 px; the version number is drawn at the top right"), translation_context=_msg('DCCWorkflowKit.Max'))
@@ -18,11 +18,11 @@ class BSM_Preferences(bpy.types.PropertyGroup):
     def draw(self, context):
         from . import runtime
         layout = self.layout
-        layout.label(text=_dcc_ui_text(_msg('Blender Max · 0.6.8 development preview')))
+        layout.label(text=_dcc_ui_text(_msg('MaxFlow · 0.8.3 development preview')))
         layout.prop(self, 'last_material_editor')
         row = layout.row(align=True)
         row.operator('bsm.environment', text=_dcc_ui_text(_msg('Blender')), depress=not runtime.is_active()).mode = 'BLENDER'
-        row.operator('bsm.environment', text=_dcc_ui_text(_msg('Blender Max')), depress=runtime.is_active()).mode = 'STUDIO'
+        row.operator('bsm.environment', text=_dcc_ui_text(_msg('MaxFlow')), depress=runtime.is_active()).mode = 'STUDIO'
         row = layout.row()
         row.enabled = not runtime.is_active()
         row.prop(self, 'studio_colors')

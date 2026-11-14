@@ -1,3 +1,10 @@
+# DCC Workflow Kit 0.2.0 · Blender 5.3 试用版
+
+- 更新到 MaxFlow 0.8.3 和 Maya Workflow Kit 0.16.0，补充编辑多边形、工具设置和帮助栏的简体中文。
+- 适配 Blender 5.3 的大纲视图排序接口及行业兼容键表，修复三个失效的快捷键绑定。
+- 在 Windows Blender 5.3.0 验证 ZIP 安装、两套工作流切换和界面语言切换。详见 [验证记录](VALIDATION-5.3.md)。
+- 安装包为 `dcc-workflow-kit-0.2.0.zip`。Blender 4.5 继续使用 0.1.5。
+
 # DCC Workflow Kit 0.1.5 · 视口撕下副本修复预览版
 
 支持 Blender >=4.5.0、<5.3.0。安装文件为 dcc-workflow-kit-0.1.5.zip，先停用独立 Max/Maya 插件，安装后重启 Blender。

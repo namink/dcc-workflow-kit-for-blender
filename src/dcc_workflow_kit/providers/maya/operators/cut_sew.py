@@ -1,38 +1,47 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Simplified Chinese localization by namink; additional display integration 2026-10-31.
-"""Maya 3D Cut and Sew UV Tool (docs/steps/step_79.md 「계획」).
+"""Maya 3D Cut and Sew UV Tool.
 
 UV > 3D Cut and Sew UV Tool switches to edge mode; in the 3D View an LMB drag
-along edges cuts the UVs there, Ctrl+drag sews; tool keys x / s / d = Cut / Sew / Unfold + Layout (Maya default
-hotkeys); shell borders (Texture Borders) show thick. The cut / sew themselves are step 66's ``uv_tools.cut`` /
-``sew``; the edge under the mouse is the pre-selection pick (step 74), so the red highlight is the edge a press takes.
+along edges cuts the UVs there, Ctrl+drag sews; tool keys x / s / d = Cut / Sew / Unfold + Layout (Maya
+hotkeys); shell borders (Texture Borders) show thick. The cut / sew themselves are ``uv_tools.cut`` /
+``sew``; the edge under the mouse is the pre-selection pick, so the red highlight is the edge a press takes.
 """
-from ..i18n import source_message as _dcc_source, display_message as _dcc_display, format_message as _dcc_format
-from ..i18n import tr as _zh, enum_items as _zh_enum, native as _zh_native
+
 import bmesh
 import bpy
 import gpu
 from gpu_extras.batch import batch_for_shader
+
 from .. import results
 from . import preselect, uv_tools
-TOOL = 'allset.cut_sew_tool'
-STEP_PX = 4.0
-END_PX = 6.0
-STROKE_RGB = (1.0, 0.85, 0.1)
-BORDER_RGB = (0.95, 0.95, 0.95)
+
+TOOL = "allset.cut_sew_tool"
+STEP_PX = 4.0                         # drag samples: every 4 px between two mouse events
+END_PX = 6.0                          # drag samples this close to an edge end don't count: at a corner the
+                                      # side edges are as near as the next edge of the path
+STROKE_RGB = (1.0, 0.85, 0.1)         # the edges a stroke collected (Maya draws the cut path yellow)
+BORDER_RGB = (0.95, 0.95, 0.95)       # shell borders, thick (Maya Texture Borders)
 BORDER_PX = 3.0
 STROKE_PX = 3.0
-ACTIONS = (('CUT', _dcc_source('Cut'), _dcc_source('Maya: drag along edges cuts the UVs')), ('SEW', _dcc_source('Sew'), _dcc_source('Maya: Ctrl+drag sews')), ('SELECT', _dcc_source('Select'), _dcc_source('Shift+drag adds the edges to the selection (for x / s / d)')))
+
+ACTIONS = (("CUT", "Cut", "Maya: drag along edges cuts the UVs"),
+           ("SEW", "Sew", "Maya: Ctrl+drag sews"),
+           ("SELECT", "Select", "Shift+drag adds the edges to the selection (for x / s / d)"))
+
+
+# --- pure helpers (tests/test_step79_cut_sew.py) ------------------------------------------------------
 
 def stroke_points(a, b, step=STEP_PX):
     """Points from ``a`` (exclusive) to ``b`` (inclusive) at most ``step`` px apart."""
-    (dx, dy) = (b[0] - a[0], b[1] - a[1])
+    dx, dy = b[0] - a[0], b[1] - a[1]
     n = max(1, int((dx * dx + dy * dy) ** 0.5 // step) + 1)
     return [(a[0] + dx * k / n, a[1] + dy * k / n) for k in range(1, n + 1)]
 
+
 def near_end(mouse, a, b, px=END_PX):
     """True when ``mouse`` is within ``px`` of either screen end ``a`` / ``b`` of an edge."""
-    return any((p is not None and (p[0] - mouse[0]) ** 2 + (p[1] - mouse[1]) ** 2 <= px * px for p in (a, b)))
+    return any(p is not None and (p[0] - mouse[0]) ** 2 + (p[1] - mouse[1]) ** 2 <= px * px for p in (a, b))
+
 
 def border_edges(bm, uv):
     """Edges on a UV shell border: a mesh border, or the two faces' UVs differ at a vertex (Maya Texture Borders)."""
@@ -41,30 +50,37 @@ def border_edges(bm, uv):
         if e.hide:
             continue
         fs = [f for f in e.link_faces if not f.hide]
-        if len(fs) == 1:
+        if len(fs) == 1 or e.seam:     # a cut edge (seam) shows at once, also inside a shell
             out.append(e)
         elif len(fs) == 2:
-            (a, b) = fs
-            if not all((uv_tools._same(uv_tools._uv_at(a, v, uv), uv_tools._uv_at(b, v, uv)) for v in e.verts)):
+            a, b = fs
+            if not all(uv_tools._same(uv_tools._uv_at(a, v, uv), uv_tools._uv_at(b, v, uv)) for v in e.verts):
                 out.append(e)
     return out
 
+
 def apply(bm, uv, edges, action):
     """Cut / sew / select ``edges`` of one mesh; returns how many edges changed."""
-    if action == 'CUT':
+    if action == "CUT":
         uv_tools.cut(bm, uv, edges)
         return len(edges)
-    if action == 'SEW':
+    if action == "SEW":
         return uv_tools.sew(bm, uv, edges)
     for e in edges:
         e.select_set(True)
     return len(edges)
-_border_cache = {}
-_stroke = {'edges': {}}
+
+
+# --- drawing: shell borders while the tool is active, the stroke while dragging ------------------------
+
+_border_cache = {}          # object pointer -> world line points
+_stroke = {"edges": {}}     # object pointer -> set of edge indices (the running stroke)
 _handle = []
+
 
 def tool_active(context):
     return context.mode == 'EDIT_MESH' and preselect.tool_id(context) == TOOL
+
 
 def _border_lines(ob):
     key = ob.as_pointer()
@@ -80,13 +96,15 @@ def _border_lines(ob):
         _border_cache[key] = lines
     return lines
 
+
 def _lines(shader, region, pts, rgb, px):
     if not pts:
         return
-    shader.uniform_float('viewportSize', (region.width, region.height))
-    shader.uniform_float('lineWidth', px)
-    shader.uniform_float('color', (*rgb, 1.0))
-    batch_for_shader(shader, 'LINES', {'pos': pts}).draw(shader)
+    shader.uniform_float("viewportSize", (region.width, region.height))
+    shader.uniform_float("lineWidth", px)
+    shader.uniform_float("color", (*rgb, 1.0))
+    batch_for_shader(shader, 'LINES', {"pos": pts}).draw(shader)
+
 
 def _draw():
     context = bpy.context
@@ -102,7 +120,7 @@ def _draw():
             if ob.type == 'MESH':
                 _lines(shader, region, _border_lines(ob), BORDER_RGB, BORDER_PX * scale)
         gpu.state.depth_test_set('NONE')
-        for (ptr, idx) in _stroke['edges'].items():
+        for ptr, idx in _stroke["edges"].items():
             c = preselect._cache_of(ptr)
             if c is None:
                 continue
@@ -114,32 +132,38 @@ def _draw():
     except (ReferenceError, AttributeError, IndexError):
         _border_cache.clear()
 
+
 @bpy.app.handlers.persistent
 def _invalidate(_scene=None, depsgraph=None):
-    if depsgraph is not None and (not any((isinstance(u.id, (bpy.types.Mesh, bpy.types.Object)) and (u.is_updated_geometry or u.is_updated_transform) for u in depsgraph.updates))):
+    if depsgraph is not None and not any(
+            isinstance(u.id, (bpy.types.Mesh, bpy.types.Object)) and (u.is_updated_geometry or u.is_updated_transform)
+            for u in depsgraph.updates):
         return
     _border_cache.clear()
+
+
+# --- operators ---------------------------------------------------------------------------------------
 
 def _objects_by_ptr(context):
     return {ob.as_pointer(): ob for ob in context.objects_in_mode_unique_data or () if ob.type == 'MESH'}
 
+
 class ALLSET_OT_cut_sew_stroke(bpy.types.Operator):
     """Drag along edges to cut their UVs; Ctrl = sew, Shift = select (Maya 3D Cut and Sew UV Tool)"""
-    bl_translation_context = 'MWK:operators/cut_sew.py:156'
-    bl_idname = 'allset.cut_sew_stroke'
-    bl_label = _zh_native('Cut / Sew UV Stroke', 'MWK:operators/cut_sew.py:156')
-    bl_description = _zh_native('Drag along edges to cut their UVs; Ctrl = sew, Shift = select (Maya 3D Cut and Sew UV Tool)', 'MWK:operators/cut_sew.py:156')
+    bl_idname = "allset.cut_sew_stroke"
+    bl_label = "Cut / Sew UV Stroke"
     bl_options = {'UNDO'}
-    action: bpy.props.EnumProperty(items=_zh_enum(ACTIONS, 'MWK:operators/cut_sew.py:159'), name=_zh_native('Action', 'MWK:operators/cut_sew.py:159'), options={'SKIP_SAVE'}, translation_context='MWK:operators/cut_sew.py:159')
+
+    action: bpy.props.EnumProperty(items=ACTIONS, name="Action", options={'SKIP_SAVE'})
 
     @classmethod
     def poll(cls, context):
-        return context.mode == 'EDIT_MESH' and context.area is not None and (context.area.type == 'VIEW_3D')
+        return context.mode == 'EDIT_MESH' and context.area is not None and context.area.type == 'VIEW_3D'
 
     def _collect(self, context, pts, first=False):
         from bpy_extras.view3d_utils import location_3d_to_region_2d
         from mathutils import Vector
-        (region, rv3d) = (context.region, context.region_data)
+        region, rv3d = context.region, context.region_data
         end = END_PX * (context.preferences.system.ui_scale or 1.0)
         for p in pts:
             hit = preselect.pick(context, region, rv3d, p)
@@ -148,29 +172,29 @@ class ALLSET_OT_cut_sew_stroke(bpy.types.Operator):
             if not first:
                 c = preselect._cache_of(hit[0])
                 if c is not None:
-                    (a, b) = (location_3d_to_region_2d(region, rv3d, Vector(c.co[c.edges[hit[2], k]])) for k in (0, 1))
+                    a, b = (location_3d_to_region_2d(region, rv3d, Vector(c.co[c.edges[hit[2], k]])) for k in (0, 1))
                     if near_end(p, a, b, end):
                         continue
-            _stroke['edges'].setdefault(hit[0], set()).add(hit[2])
+            _stroke["edges"].setdefault(hit[0], set()).add(hit[2])
 
     def invoke(self, context, event):
         if context.region is None or context.region.type != 'WINDOW' or context.region_data is None:
             return {'PASS_THROUGH'}
         mode = tuple(context.scene.tool_settings.mesh_select_mode)
-        if not mode[1]:
+        if not mode[1]:        # Maya's tool works on edges: the pick follows the select mode
             context.scene.tool_settings.mesh_select_mode = (False, True, False)
-        _stroke['edges'] = {}
+        _stroke["edges"] = {}
         self._mouse = (event.mouse_region_x, event.mouse_region_y)
         self._collect(context, [self._mouse], first=True)
-        if not _stroke['edges']:
-            return {'PASS_THROUGH'}
+        if not _stroke["edges"]:
+            return {'PASS_THROUGH'}     # not on an edge: Blender's select (tool fallback)
         context.window_manager.modal_handler_add(self)
         context.area.tag_redraw()
         return {'RUNNING_MODAL'}
 
     def modal(self, context, event):
         if event.type in {'ESC', 'RIGHTMOUSE'} and event.value == 'PRESS':
-            _stroke['edges'] = {}
+            _stroke["edges"] = {}
             context.area.tag_redraw()
             return {'CANCELLED'}
         if event.type in {'MOUSEMOVE', 'INBETWEEN_MOUSEMOVE'}:
@@ -183,10 +207,10 @@ class ALLSET_OT_cut_sew_stroke(bpy.types.Operator):
         return {'RUNNING_MODAL'}
 
     def _finish(self, context):
-        (stroke, _stroke['edges']) = (_stroke['edges'], {})
+        stroke, _stroke["edges"] = _stroke["edges"], {}
         obs = _objects_by_ptr(context)
         done = 0
-        for (ptr, idx) in stroke.items():
+        for ptr, idx in stroke.items():
             ob = obs.get(ptr)
             if ob is None:
                 continue
@@ -199,16 +223,15 @@ class ALLSET_OT_cut_sew_stroke(bpy.types.Operator):
         preselect.invalidate()
         _border_cache.clear()
         context.area.tag_redraw()
-        if not done and self.action == 'SEW':
-            results.result(self, _zh('No UV shells to sew along these edges', 'MWK:operators/cut_sew.py:229'))
+        if not done and self.action == "SEW":
+            results.result(self, "No UV shells to sew along these edges")
         return {'FINISHED'}
+
 
 class ALLSET_OT_uv_unfold_layout(bpy.types.Operator):
     """Unfold the UV shells, then lay them out (Maya 3D Cut and Sew d: UnfoldUV + LayoutUV)"""
-    bl_translation_context = 'MWK:operators/cut_sew.py:236'
-    bl_idname = 'allset.uv_unfold_layout'
-    bl_label = _zh_native('Unfold and Layout', 'MWK:operators/cut_sew.py:236')
-    bl_description = _zh_native('Unfold the UV shells, then lay them out (Maya 3D Cut and Sew d: UnfoldUV + LayoutUV)', 'MWK:operators/cut_sew.py:236')
+    bl_idname = "allset.uv_unfold_layout"
+    bl_label = "Unfold and Layout"
     bl_options = {'REGISTER', 'UNDO'}
 
     @classmethod
@@ -223,19 +246,19 @@ class ALLSET_OT_uv_unfold_layout(bpy.types.Operator):
             uv_tools.layout(context, ob, s.shell_padding, s.map_size)
         return {'FINISHED'} if n else {'CANCELLED'}
 
+
 def _view3d_area(context):
     for window in ([context.window] if context.window else []) + list(context.window_manager.windows):
         areas = [a for a in window.screen.areas if a.type == 'VIEW_3D'] if window else []
         if areas:
-            return (window, max(areas, key=lambda a: a.width * a.height))
-    return (None, None)
+            return window, max(areas, key=lambda a: a.width * a.height)
+    return None, None
+
 
 class ALLSET_OT_cut_sew_tool_set(bpy.types.Operator):
     """Edit the UVs on the model: drag along edges to cut, Ctrl+drag to sew (Maya 3D Cut and Sew UV Tool)"""
-    bl_translation_context = 'MWK:operators/cut_sew.py:263'
-    bl_idname = 'allset.cut_sew_tool_set'
-    bl_label = _zh_native('3D Cut and Sew UV Tool', 'MWK:operators/cut_sew.py:263')
-    bl_description = _zh_native('Edit the UVs on the model: drag along edges to cut, Ctrl+drag to sew (Maya 3D Cut and Sew UV Tool)', 'MWK:operators/cut_sew.py:263')
+    bl_idname = "allset.cut_sew_tool_set"
+    bl_label = "3D Cut and Sew UV Tool"
     bl_options = {'REGISTER'}
 
     @classmethod
@@ -244,19 +267,25 @@ class ALLSET_OT_cut_sew_tool_set(bpy.types.Operator):
         return ob is not None and ob.type == 'MESH'
 
     def execute(self, context):
-        (window, area) = _view3d_area(context)
-        if area is None:
-            self.report({'WARNING'}, _zh('No 3D View to cut and sew in', 'MWK:operators/cut_sew.py:274'))
+        from . import maya_errors
+        if context.mode != 'EDIT_MESH' and maya_errors.refuse_hidden(self, context.active_object):     # #187
             return {'CANCELLED'}
-        region = next((r for r in area.regions if r.type == 'WINDOW'))
+        window, area = _view3d_area(context)
+        if area is None:
+            self.report({'WARNING'}, "No 3D View to cut and sew in")
+            return {'CANCELLED'}
+        region = next(r for r in area.regions if r.type == 'WINDOW')
         with context.temp_override(window=window, area=area, region=region):
             if context.mode != 'EDIT_MESH':
                 bpy.ops.object.mode_set(mode='EDIT')
-            context.scene.tool_settings.mesh_select_mode = (False, True, False)
+            context.scene.tool_settings.mesh_select_mode = (False, True, False)   # Maya 3D Cut and Sew tool: edges
             bpy.ops.wm.tool_set_by_id(name=TOOL)
-        self.report({'INFO'}, _zh('3D Cut and Sew UV Tool: drag = cut, Ctrl+drag = sew, x / s / d = Cut / Sew / Unfold', 'MWK:operators/cut_sew.py:282'))
+        self.report({'INFO'}, "3D Cut and Sew UV Tool: drag = cut, Ctrl+drag = sew, x / s / d = Cut / Sew / Unfold")
         return {'FINISHED'}
+
+
 classes = (ALLSET_OT_cut_sew_stroke, ALLSET_OT_uv_unfold_layout, ALLSET_OT_cut_sew_tool_set)
+
 
 def register_handlers():
     if not _handle:
@@ -264,10 +293,11 @@ def register_handlers():
     if _invalidate not in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.append(_invalidate)
 
+
 def unregister_handlers():
     while _handle:
         bpy.types.SpaceView3D.draw_handler_remove(_handle.pop(), 'WINDOW')
     if _invalidate in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.remove(_invalidate)
     _border_cache.clear()
-    _stroke['edges'] = {}
+    _stroke["edges"] = {}

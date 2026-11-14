@@ -10,6 +10,7 @@ import gpu
 import os
 from pathlib import Path
 from . import runtime
+from .i18n import tr_ui as tr
 _targets = {}
 _hover = {}
 _hover_since = {}
@@ -147,12 +148,12 @@ class Canvas:
         blf.size(f, size * self.u)
         blf.position(f, x * self.u, (y + self.oy) * self.u, 0)
         blf.color(f, *color)
-        blf.draw(f, _dcc_ui_text(value))
+        blf.draw(f, _dcc_ui_text(tr(value)))
 
     def text_width(self, value, size=9, bold=False):
         f = font(bold)
         blf.size(f, size * self.u)
-        return blf.dimensions(f, _dcc_ui_text(value))[0] / self.u
+        return blf.dimensions(f, _dcc_ui_text(tr(value)))[0] / self.u
 
     def text_right(self, value, x, y, size=9, color=TEXT):
         self.text(value, x - self.text_width(value, size), y, size, color)
@@ -240,7 +241,7 @@ class Canvas:
         prefix = label + ' ' if label else ''
         self.text(prefix + text, x + 4, y + 4, 9, TEXT if enabled else DIM)
         if editing:
-            caret = _editing.get('cursor', len(text))
+            caret = _editing.get(_msg('cursor'), len(text))
             cx = x + 4 + self.text_width(prefix + text[:caret])
             if _editing.get('all'):
                 self.rect(x + 3 + self.text_width(prefix), y + 2, self.text_width(text) + 2, 12, (0.55, 0.7, 0.9, 0.45))
@@ -350,7 +351,7 @@ def toolbar(context):
     b('bind', op('bsm.pick_object', purpose='BIND'), _msg('Bind to Space Warp'), _picking(context, 'BIND'))
     gap()
     drop(52, FILTER_LABELS.get(state.selection_filter, _msg('All')), menu(_msg('BSM_MT_selection_filter')), _msg('Selection Filter'))
-    b('cursor', op('bsm.tool', tool='SELECT'), _msg('Select Object (Q)'), tool.startswith('builtin.select'))
+    b(_msg('cursor'), op('bsm.tool', tool='SELECT'), _msg('Select Object (Q)'), tool.startswith('builtin.select'))
     b('select_list', op('bsm.select_from_scene'), _msg('Select by Name (H)'))
     b(REGION_ICONS.get(state.region_type, 'box'), menu(_msg('BSM_MT_region_flyout')), _msg('Rectangular Selection Region'), flyout=True)
     b('window_crossing', toggle(state, 'window_selection'), _msg('Window/Crossing (Shift+O)'), state.window_selection)
@@ -431,7 +432,7 @@ def strip(context):
         c.button((c.w - 24) / 2, y, 24, 24, icon=name, action=action, flat=True, enabled=action is not None, tip=tip)
     c.tooltip()
 CREATE = {'GEOMETRY': ((_msg('Standard Primitives'), (('BOX', _msg('Box')), ('CONE', _msg('Cone')), ('SPHERE', _msg('Sphere')), ('GEOSPHERE', _msg('GeoSphere')), ('CYLINDER', _msg('Cylinder')), ('TUBE', _msg('Tube')), ('TORUS', _msg('Torus')), ('PYRAMID', _msg('Pyramid')), ('TEAPOT', _msg('Teapot')), ('PLANE', _msg('Plane')), ('TEXTPLUS', _msg('TextPlus')))), (_msg('Extended Primitives'), ((None, _msg('Hedra')), (None, _msg('Torus Knot')), ('CHAMFER_BOX', _msg('ChamferBox')), ('CHAMFER_CYL', _msg('ChamferCyl')), (None, _msg('OilTank')), ('CAPSULE', _msg('Capsule')), (None, _msg('Spindle')), (None, _msg('L-Ext')), (None, _msg('Gengon')), (None, _msg('C-Ext')), (None, _msg('RingWave')), (None, _msg('Hose')), (None, _msg('Prism')))), (_msg('Compound Objects'), ((None, _msg('Morph')), (None, _msg('Scatter')), (None, _msg('Conform')), (None, _msg('Connect')), (None, _msg('BlobMesh')), (None, _msg('ShapeMerge')), ('BOOLEAN', _msg('Boolean')), (None, _msg('Terrain')), (None, _msg('Loft')), (None, _msg('Mesher')), ('BOOLEAN', _msg('ProBoolean')), (None, _msg('ProCutter')))), (_msg('Particle Systems'), ((None, _msg('PF Source')), (None, _msg('Spray')), (None, _msg('Snow')), (None, _msg('Blizzard')), (None, _msg('PArray')), (None, _msg('PCloud')), (None, _msg('Super Spray')))), (_msg('Patch Grids'), ((None, _msg('Quad Patch')), (None, _msg('Tri Patch')))), (_msg('NURBS Surfaces'), (('POINT_SURFACE', _msg('Point Surf')), ('CV_SURFACE', _msg('CV Surf'))))), 'SHAPES': ((_msg('Splines'), (('LINE', _msg('Line')), ('RECTANGLE', _msg('Rectangle')), ('CIRCLE', _msg('Circle')), ('ELLIPSE', _msg('Ellipse')), ('ARC', _msg('Arc')), ('DONUT', _msg('Donut')), ('NGON', _msg('NGon')), ('STAR', _msg('Star')), ('TEXT', _msg('Text')), ('HELIX', _msg('Helix')), (None, _msg('Egg')), (None, _msg('Section')), (None, _msg('Freehand')))), (_msg('NURBS Curves'), (('POINT_CURVE', _msg('Point Curve')), ('CV_CURVE', _msg('CV Curve')))), (_msg('Extended Splines'), ((None, _msg('WRectangle')), (None, _msg('Channel')), (None, _msg('Angle')), (None, _msg('Tee')), (None, _msg('Wide Flange'))))), 'LIGHTS': ((_msg('Photometric'), (('TARGET_LIGHT', _msg('Target Light')), ('FREE_LIGHT', _msg('Free Light')), ('SUN_POSITIONER', _msg('Sun Positioner')))), (_msg('Standard'), (('TARGET_SPOT', _msg('Target Spot')), ('FREE_SPOT', _msg('Free Spot')), ('TARGET_DIRECT', _msg('Target Direct')), ('FREE_DIRECT', _msg('Free Direct')), ('OMNI', _msg('Omni')), ('SKYLIGHT', _msg('Skylight')))), (_msg('Arnold'), (('AREA', _msg('Arnold Light')),))), 'CAMERAS': ((_msg('Standard'), (('PHYSICAL_CAMERA', _msg('Physical')), ('TARGET_CAMERA', _msg('Target')), ('FREE_CAMERA', _msg('Free')))),), 'HELPERS': ((_msg('Standard'), (('DUMMY', _msg('Dummy')), (None, _msg('Container')), (None, _msg('Crowd')), (None, _msg('Delegate')), (None, _msg('ExposeTm')), ('GRID', _msg('Grid')), ('POINT', _msg('Point')), (None, _msg('Protractor')), (None, _msg('Tape')), ('COMPASS', _msg('Compass')), ('ARROW', _msg('Arrow')))),), 'SPACEWARPS': ((_msg('Forces'), (('MOTOR', _msg('Motor')), ('PUSH', _msg('Push')), ('VORTEX', _msg('Vortex')), ('DRAG', _msg('Drag')), (None, _msg('PBomb')), ('PATH_FOLLOW', _msg('Path Follow')), ('DISPLACE_WARP', _msg('Displace')), ('GRAVITY', _msg('Gravity')), ('WIND', _msg('Wind')))), (_msg('Deflectors'), ((None, _msg('POmniFlect')), (None, _msg('PDynaFlect')), (None, _msg('SOmniFlect')), (None, _msg('UOmniFlect')), (None, _msg('Deflector')))), (_msg('Geometric/Deformable'), ((None, _msg('FFD(Box)')), (None, _msg('FFD(Cyl)')), (None, _msg('Wave')), (None, _msg('Ripple')), (None, _msg('Displace')), (None, _msg('Conform')), (None, _msg('Bomb'))))), 'SYSTEMS': ((_msg('Standard'), (('BONES', _msg('Bones')), (None, _msg('Ring Array')), (None, _msg('Biped')), (None, _msg('Sunlight')), (None, _msg('Daylight')))),)}
-CATEGORIES = (('GEOMETRY', 'geometry', _msg('Geometry')), ('SHAPES', 'shapes', _msg('Shapes')), ('LIGHTS', 'lights', _msg('Lights')), ('CAMERAS', 'cameras', _msg('Cameras')), ('HELPERS', 'helpers', _msg('Helpers')), ('SPACEWARPS', 'spacewarps', _msg('Space Warps')), ('SYSTEMS', 'systems', _msg('Systems')))
+CATEGORIES = (('GEOMETRY', 'geometry', _msg('Geometry')), ('SHAPES', 'shapes', _msg('Shapes')), ('LIGHTS', _msg('lights'), _msg('Lights')), ('CAMERAS', _msg('cameras'), _msg('Cameras')), ('HELPERS', 'helpers', _msg('Helpers')), ('SPACEWARPS', 'spacewarps', _msg('Space Warps')), ('SYSTEMS', 'systems', _msg('Systems')))
 PARAMETRIC = {'BOX', 'CONE', 'SPHERE', 'GEOSPHERE', 'CYLINDER', 'TUBE', 'TORUS', 'PYRAMID', 'TEAPOT', 'PLANE'}
 
 def subcategory(state):
@@ -482,7 +483,7 @@ def command(context):
 def _name_color(c, y, context, state, obj):
     (y, opened) = c.rollout(_msg('Name and Color'), y, 25)
     if opened:
-        c.field(9, y - 20, c.w - 38, obj if obj else state, 'name' if obj else 'next_name', spinner=False)
+        c.field(9, y - 20, c.w - 38, obj if obj else state, _msg('name') if obj else 'next_name', spinner=False)
         color = obj.color if obj else state.next_color
         c.rect(c.w - 24, y - 20, 16, 16, tuple(color))
         c.hit(c.w - 24, y - 20, 16, 16, op('bsm.surface_color'), _msg('Object Color'))
@@ -493,7 +494,7 @@ def _create(c, y, context, state, obj):
     from . import params
     w = c.w
     for (i, (key, icon, tip)) in enumerate(CATEGORIES):
-        c.button(4 + i * 19, y - 20, 18, 20, icon=icon, action=('SET', state, 'category', key), flat=True, selected=state.category == key, tip=tip)
+        c.button(4 + i * 19, y - 20, 18, 20, icon=icon, action=('SET', state, _msg('category'), key), flat=True, selected=state.category == key, tip=tip)
     y -= 42
     c.dropdown(4, y, w - 8, subcategory(state), menu(_msg('BSM_MT_subcategories')))
     y -= 6
@@ -626,12 +627,26 @@ def editable_poly(obj):
 LEVELS = ((1, _msg('Vertex'), 'vertex'), (2, _msg('Edge'), 'edge'), (3, _msg('Border'), 'border'), (4, _msg('Polygon'), 'polygon'), (5, _msg('Element'), 'element'))
 STACK_ROW = 17
 
+def _selected_layer(obj, state):
+    from . import edit_poly
+    mod = obj.modifiers.get(state.active_modifier) if obj else None
+    return mod if edit_poly.is_layer(mod) else None
+
 def stack_rows(obj, state):
-    rows = [('MOD', mod.name, 0) for mod in reversed(obj.modifiers)] if obj else []
-    if obj:
-        rows.append(('BASE', '', 0))
-        if editable_poly(obj) and state.stack_expanded:
-            rows.extend((('LEVEL', label, level) for (level, label, _) in LEVELS))
+    """Stack rows top down; the sub-object levels open under the selected Edit Poly layer,
+    otherwise under the base Editable Poly."""
+    if not obj:
+        return []
+    layer = _selected_layer(obj, state)
+    levels = [('LEVEL', label, level) for (level, label, _) in LEVELS] if state.stack_expanded else []
+    rows = []
+    for mod in reversed(obj.modifiers):
+        rows.append(('MOD', mod.name, 0))
+        if mod == layer:
+            rows.extend(levels)
+    rows.append(('BASE', '', 0))
+    if layer is None and editable_poly(obj):
+        rows.extend(levels)
     return rows
 
 def _modify(c, y, context, state, obj):
@@ -639,7 +654,7 @@ def _modify(c, y, context, state, obj):
     if obj is None:
         c.text(_msg('Select an object'), 10, y - 16, 9, DIM)
         return y - 24
-    c.field(5, y - 17, w - 30, obj, 'name', spinner=False)
+    c.field(5, y - 17, w - 30, obj, _msg('name'), spinner=False)
     c.rect(w - 22, y - 17, 16, 16, tuple(obj.color))
     c.hit(w - 22, y - 17, 16, 16, op('bsm.surface_color'), _msg('Object Color'))
     y -= 39
@@ -657,7 +672,8 @@ def _modify(c, y, context, state, obj):
     box_h = max(92, min(len(rows), 12) * STACK_ROW + 6)
     c.rect(5, y - box_h, w - 10, box_h, (0.21, 0.21, 0.21, 1))
     selected_row = ('MOD', state.active_modifier) if state.active_modifier in obj.modifiers else ('BASE', '')
-    level = state.component if context.mode == 'EDIT_MESH' else 0
+    from . import edit_poly
+    level = state.component if context.mode == 'EDIT_MESH' and edit_poly.editing_layer(obj) == _selected_layer(obj, state) else 0
     layout = _stack_layout[c.key] = []
     for (i, (kind, name, lvl)) in enumerate(rows[:12]):
         ry = y - 3 - (i + 1) * STACK_ROW
@@ -672,18 +688,25 @@ def _modify(c, y, context, state, obj):
         is_selected = (kind, name) == selected_row
         if is_selected:
             c.rect(7, ry, w - 14, STACK_ROW - 1, BLUE)
+        name_x = 28
         if kind == 'MOD':
             mod = obj.modifiers[name]
             on = mod.show_viewport
             c.icon('bulb_on' if on else 'bulb_off', 9, ry + 1, 14)
             c.hit(8, ry, 16, STACK_ROW - 1, call(toggle_modifier, obj.name, name), _msg('Turn modifier on/off'))
-            c.text(name, 28, ry + 4, 9, TEXT if on else DIM)
+            if edit_poly.is_layer(mod):
+                name_x = 38
+                expanded = state.stack_expanded and state.active_modifier == name
+                c.text('−' if expanded else '+', 27, ry + 4, 10)
+                c.hit(24, ry, 12, STACK_ROW - 1, call(expand_layer, obj.name, name), _msg('Expand sub-object levels'))
+            c.text(name, name_x, ry + 4, 9, TEXT if on else DIM)
         else:
             if editable_poly(obj):
-                c.text('−' if state.stack_expanded else '+', 11, ry + 4, 10)
-                c.hit(8, ry, 14, STACK_ROW - 1, toggle(state, 'stack_expanded'), _msg('Expand sub-object levels'))
+                c.text('−' if state.stack_expanded and _selected_layer(obj, state) is None else '+', 11, ry + 4, 10)
+                c.hit(8, ry, 14, STACK_ROW - 1, call(expand_layer, obj.name, ''), _msg('Expand sub-object levels'))
             c.text(base_label(obj), 28, ry + 4, 9)
-        c.hit(24 if kind == 'MOD' else 22, ry, w - 31, STACK_ROW - 1, rmb(('STACK', obj.name, name), call(stack_context, obj.name, name)), name or base_label(obj))
+        x = (name_x - 2 if name_x > 28 else 24) if kind == 'MOD' else 22
+        c.hit(x, ry, w - 31 if name_x == 28 else w - 7 - x, STACK_ROW - 1, rmb(('STACK', obj.name, name), call(stack_context, obj.name, name)), name or base_label(obj))
     y -= box_h + 4
     mod = obj.modifiers.get(state.active_modifier)
     tools = (('pin', toggle_pin_action(state, obj), _msg('Pin Stack'), bool(state.stack_pinned)), ('end_result', toggle(state, 'show_end_result'), _msg('Show end result on/off toggle'), state.show_end_result), ('make_unique', op('bsm.stack_action', action='MAKE_UNIQUE', modifier=''), _msg('Make unique'), False), ('remove_modifier', op('bsm.stack_action', action='DELETE', modifier=mod.name) if mod else None, _msg('Remove modifier from the stack'), False), ('configure_sets', menu(_msg('BSM_MT_modifier_sets')), _msg('Configure Modifier Sets'), False))
@@ -691,6 +714,8 @@ def _modify(c, y, context, state, obj):
         enabled = action is not None and (not (icon == 'make_unique' and (not (obj.data and obj.data.users > 1))))
         c.button(5 + i * 24, y - 20, 22, 20, icon=icon, action=action, selected=on, flat=True, enabled=enabled, tip=tip)
     y -= 26
+    if mod and edit_poly.is_layer(mod):
+        return _editable_poly(c, y, context, state, obj, layer=mod)
     if mod:
         return _modifier_rollouts(c, y, context, obj, mod)
     if getattr(obj, 'bsm_prim', None) and obj.bsm_prim.kind:
@@ -712,6 +737,31 @@ def _modify(c, y, context, state, obj):
 
 def toggle_pin_action(state, obj):
     return ('SET', state, 'stack_pinned', '' if state.stack_pinned else obj.name)
+
+def expand_layer(context, obj_name, mod_name):
+    """The +/− of an Edit Poly layer, or of the base ('') : show or hide its sub-object
+    levels, selecting it first when the levels are open under another entry."""
+    state = context.window_manager.bsm
+    obj = bpy.data.objects.get(obj_name)
+    owner = _selected_layer(obj, state).name if obj and _selected_layer(obj, state) else ''
+    if owner == mod_name:
+        state.stack_expanded = not state.stack_expanded
+    else:
+        select_stack_entry(context, obj_name, mod_name)
+        state.stack_expanded = True
+
+def select_stack_entry(context, obj_name, mod_name):
+    """Select a stack entry. As in Max, picking another entry while an Edit Poly layer is at a
+    sub-object level (or picking a layer during base editing) returns to the top level."""
+    from . import edit_poly
+    state = context.window_manager.bsm
+    obj = bpy.data.objects.get(obj_name)
+    if obj is not None and obj.type == 'MESH' and (obj.mode == 'EDIT'):
+        current = edit_poly.editing_layer(obj)
+        target = obj.modifiers.get(mod_name) if mod_name else None
+        if target != current and (current is not None or edit_poly.is_layer(target)):
+            bpy.ops.bsm.component(level=0)
+    state.active_modifier = mod_name
 
 def toggle_modifier(context, obj_name, mod_name):
     obj = bpy.data.objects.get(obj_name)
@@ -798,19 +848,23 @@ def _selection_count(context, obj, level):
         return _dcc_format('{0} Edges Selected', sum((e.select for e in bm.edges)))
     return _dcc_format('{0} Polygons Selected', sum((f.select for f in bm.faces)))
 
-def _buttons(c, y, items, columns=2, height=18):
+def _buttons(c, y, items, columns=2, height=18, allowed=None):
+    """Command buttons; at an Edit Poly layer only the commands in `allowed` are enabled."""
+    from .edit_poly import LAYER_ONLY_TIP
     w = c.w
     bw = (w - 14 - (columns - 1) * 4) / columns
     rows = 0
     i = 0
     for (label, action) in items:
+        enabled = action is not None and (allowed is None or action in allowed)
+        tip = LAYER_ONLY_TIP if action is not None and (not enabled) else ''
         if len(label) > 14 and columns > 1:
             if i % columns:
                 i += 1
-            c.button(7, y - (i // columns + 1) * (height + 2), w - 14, height, label, op('bsm.mesh_action', action=action) if action else None, enabled=action is not None)
+            c.button(7, y - (i // columns + 1) * (height + 2), w - 14, height, label, op('bsm.mesh_action', action=action) if action else None, enabled=enabled, tip=tip)
             i += columns
             continue
-        c.button(7 + i % columns * (bw + 4), y - (i // columns + 1) * (height + 2), bw, height, label, op('bsm.mesh_action', action=action) if action else None, enabled=action is not None)
+        c.button(7 + i % columns * (bw + 4), y - (i // columns + 1) * (height + 2), bw, height, label, op('bsm.mesh_action', action=action) if action else None, enabled=enabled, tip=tip)
         i += 1
     rows = (i + columns - 1) // columns
     return rows * (height + 2)
@@ -826,10 +880,21 @@ def _layout_height(items, columns=2, height=18):
             i += 1
     return (i + columns - 1) // columns * (height + 2)
 
-def _editable_poly(c, y, context, state, obj):
+def _editable_poly(c, y, context, state, obj, layer=None):
+    """Editable Poly rollouts, for the base object or an Edit Poly layer (Max's Edit Poly
+    modifier), where commands that add or delete vertices are off."""
+    from . import edit_poly
     w = c.w
-    level = state.component if context.mode == 'EDIT_MESH' else 0
+    level = state.component if context.mode == 'EDIT_MESH' and edit_poly.editing_layer(obj) == layer else 0
+    allowed = edit_poly.KEEPS_VERTICES if layer is not None else None
     space = context.space_data
+    if layer is not None:
+        (y, opened) = c.rollout(_msg('Edit Poly Mode'), y, 40)
+        if opened:
+            c.text(_msg('Moves stay in this modifier and'), 12, y - 16, 9, DIM)
+            c.text(_msg('follow the modifiers below it.'), 12, y - 30, 9, DIM)
+            y -= 40
+        y -= 5
     (y, opened) = c.rollout(_msg('Selection'), y, 140)
     if opened:
         for (i, (lvl, label, icon)) in enumerate(LEVELS):
@@ -856,13 +921,13 @@ def _editable_poly(c, y, context, state, obj):
         y -= 5
         (y, opened) = c.rollout(title, y, height)
         if opened:
-            _buttons(c, y - 2, items)
+            _buttons(c, y - 2, items, allowed=allowed)
             y -= height
     y -= 5
     height = _layout_height(GEOMETRY, 2) + 8
     (y, opened) = c.rollout(_msg('Edit Geometry'), y, height)
     if opened:
-        _buttons(c, y - 2, GEOMETRY, 2)
+        _buttons(c, y - 2, GEOMETRY, 2, allowed=allowed)
         y -= height
     if level in {4, 5}:
         y -= 5
@@ -1352,7 +1417,7 @@ def scrub(context, area, x, slider=True):
     if frame is not None:
         context.scene.frame_set(frame)
     runtime.redraw()
-EXPLORER_FILTERS = (('MESH', 'geometry', _msg('Display Geometry')), ('CURVE', 'shapes', _msg('Display Shapes')), ('LIGHT', 'lights', _msg('Display Lights')), ('CAMERA', 'cameras', _msg('Display Cameras')), ('EMPTY', 'helpers', _msg('Display Helpers')), ('FIELD', 'spacewarps', _msg('Display Space Warps')), ('GROUP', 'groups', _msg('Display Groups')), ('XREF', 'xrefs', _msg('Display Object XRefs')), ('ARMATURE', 'bones', _msg('Display Bone Objects')), ('CONTAINER', 'containers', _msg('Display Containers')), ('FROZEN', 'frozen', _msg('Display Frozen Objects')), ('HIDDEN', 'hide', _msg('Display Hidden Objects')))
+EXPLORER_FILTERS = (('MESH', 'geometry', _msg('Display Geometry')), ('CURVE', 'shapes', _msg('Display Shapes')), ('LIGHT', _msg('lights'), _msg('Display Lights')), ('CAMERA', _msg('cameras'), _msg('Display Cameras')), ('EMPTY', 'helpers', _msg('Display Helpers')), ('FIELD', 'spacewarps', _msg('Display Space Warps')), ('GROUP', 'groups', _msg('Display Groups')), ('XREF', 'xrefs', _msg('Display Object XRefs')), ('ARMATURE', 'bones', _msg('Display Bone Objects')), ('CONTAINER', 'containers', _msg('Display Containers')), ('FROZEN', 'frozen', _msg('Display Frozen Objects')), ('HIDDEN', 'hide', _msg('Display Hidden Objects')))
 _collapsed = set()
 
 def explorer_kind(obj):
@@ -1436,7 +1501,7 @@ def explorer(context):
         c.icon('hide' if hidden else 'visible', x + 8, y + 2, 13)
         c.hit(x + 8, y, 14, ROW, call(toggle_hidden, obj.name), _msg('Hide/Unhide'))
         kind = explorer_kind(obj)
-        icon = {'MESH': 'geometry', 'LIGHT': 'lights', 'CAMERA': 'cameras', 'CURVE': 'shapes', 'EMPTY': 'helpers', 'FIELD': 'spacewarps', 'GROUP': 'groups', 'XREF': 'xrefs', 'ARMATURE': 'bones'}.get(kind, 'geometry')
+        icon = {'MESH': 'geometry', 'LIGHT': _msg('lights'), 'CAMERA': _msg('cameras'), 'CURVE': 'shapes', 'EMPTY': 'helpers', 'FIELD': 'spacewarps', 'GROUP': 'groups', 'XREF': 'xrefs', 'ARMATURE': 'bones'}.get(kind, 'geometry')
         c.icon(icon, x + 24, y + 2, 13)
         max_chars = max(4, int((w - x - 86) / 5.6))
         label = obj.name if len(obj.name) <= max_chars else obj.name[:max_chars - 1] + '…'
@@ -1589,10 +1654,7 @@ def dispatch(context, action, secondary=False):
             _closed.discard(key)
             _opened.add(key)
     elif kind == 'STACK':
-        state = context.window_manager.bsm
-        state.active_modifier = action[2]
-        if not action[2] and context.mode == 'EDIT_MESH':
-            pass
+        select_stack_entry(context, action[1], action[2])
     elif kind == 'EXPLORER_ROW':
         explorer_click(context, action[1])
     if kind in {'SET', 'TOGGLE'} and (isinstance(action[1], bpy.types.ID) or isinstance(getattr(action[1], 'id_data', None), bpy.types.ID)):

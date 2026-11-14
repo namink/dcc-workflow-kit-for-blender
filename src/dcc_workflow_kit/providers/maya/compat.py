@@ -1,23 +1,24 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Blender version differences in one place (step 118, docs/compat_5x.md).
+"""Blender version differences in one place.
 
-The kit's main target is Blender 5.2 (step 272); it supports 4.5.0 - 5.2.x. Every check of "which Blender is
-this" lives here; feature code calls these helpers and stays the same on every version. Each helper does the
-5.x thing first and falls back to the 4.5 path; the feature checks themselves are unchanged, so every version
-gets the same result as before.
+The kit's main target is Blender 5.2; it supports 5.0.0 - 5.2.x (0.6.2 is the
+last version for Blender 4.5, and the 4.5 paths are gone). Every check of "which Blender is this" lives here;
+feature code calls these helpers and stays the same on every version.
 """
+
+from operator import attrgetter
 
 import bpy
 
 VERSION = tuple(bpy.app.version[:2])
-TARGET = (5, 2)                         # main target since step 272 (Blender 5.2 LTS); 4.5 stays supported
-STRICT_VERSIONS = ((4, 5), (5, 2))      # keymap patches must all apply to these minors' IC data
+TARGET = (5, 2)                         # main target (Blender 5.2 LTS)
+STRICT_VERSIONS = ((5, 2),)             # keymap patches must all apply to these minors' IC data
 IS_TARGET = VERSION == TARGET
 IS_STRICT = VERSION in STRICT_VERSIONS
 
 
-# Properties tab flags newer than 4.5 (measured, step 118): a 4.5-saved file (the Maya Workflow Kit template) opens in 5.x with
-# them on, so they carry no meaning in a kit dock's role (ui/maya_dock.role).
+# Properties tab flags newer than 4.5: the Maya Workflow Kit template is still a 4.5-saved file
+# and opens in 5.x with them on, so they carry no meaning in a kit dock's role (ui/maya_dock.role).
 LATER_PROPERTIES_TABS = frozenset({"show_properties_strip", "show_properties_strip_modifier"})
 
 
@@ -45,21 +46,17 @@ def has_op(module, name):
 
 
 def strips(sequence_editor):
-    """The sequencer's top-level strips: ``strips`` (4.4+); 5.0 removed ``sequences``."""
-    if hasattr(sequence_editor, "strips"):
-        return sequence_editor.strips
-    return sequence_editor.sequences
+    """The sequencer's top-level strips (5.0 removed ``sequences``)."""
+    return sequence_editor.strips
 
 
 def fcurve_owners(action):
-    """Collections holding the action's F-curves: every channelbag of a layered action (4.4+); 5.0 removed
-    the legacy ``Action.fcurves`` / ``Action.groups``, which 4.5 still has as a proxy of the first slot."""
+    """Collections holding the action's F-curves: every channelbag of the layered action (5.0 removed the legacy
+    ``Action.fcurves`` / ``Action.groups``)."""
     owners = []
-    for layer in getattr(action, "layers", ()):
+    for layer in action.layers:
         for strip in layer.strips:
             owners.extend(getattr(strip, "channelbags", ()))
-    if not owners and hasattr(action, "fcurves"):
-        owners.append(action)
     return owners
 
 
@@ -75,10 +72,7 @@ def action_fcurves(action, slot=None):
 
 def channelbag(action, slot):
     """The channelbag of ``slot`` (None when the slot has no keys yet)."""
-    try:
-        from bpy_extras.anim_utils import action_get_channelbag_for_slot
-    except ImportError:
-        return None
+    from bpy_extras.anim_utils import action_get_channelbag_for_slot
     return action_get_channelbag_for_slot(action, slot)
 
 
@@ -87,10 +81,8 @@ def id_fcurves(anim_id):
     ad = getattr(anim_id, "animation_data", None)
     if ad is None or ad.action is None:
         return []
-    slot = getattr(ad, "action_slot", None)
-    if slot is not None:
-        return action_fcurves(ad.action, slot)
-    return list(getattr(ad.action, "fcurves", ()))
+    slot = ad.action_slot
+    return action_fcurves(ad.action, slot) if slot is not None else []
 
 
 def id_fcurve_collection(anim_id):
@@ -98,71 +90,50 @@ def id_fcurve_collection(anim_id):
     ad = getattr(anim_id, "animation_data", None)
     if ad is None or ad.action is None:
         return None
-    slot = getattr(ad, "action_slot", None)
-    if slot is not None:
-        bag = channelbag(ad.action, slot)
-        return bag.fcurves if bag is not None else None
-    return getattr(ad.action, "fcurves", None)
+    slot = ad.action_slot
+    if slot is None:
+        return None
+    bag = channelbag(ad.action, slot)
+    return bag.fcurves if bag is not None else None
 
 
 # --- Timeline ------------------------------------------------------------------------------
-# Blender 5.x: the Timeline is a Dope Sheet mode and bl_ui.space_time has no TIME_HT_editor_buttons /
-# TIME_MT_editor_menus; the timeline header is DOPESHEET_HT_editor_buttons.draw_header and
+# Blender 5.x: the Timeline is a Dope Sheet mode; the timeline header is DOPESHEET_HT_editor_buttons.draw_header and
 # DOPESHEET_MT_editor_menus with ``mode == 'TIMELINE'`` ($S52\startup\bl_ui\space_dopesheet.py:198-230, :395-412).
-
-def _legacy_timeline():
-    from bl_ui import space_time
-    return hasattr(space_time, "TIME_HT_editor_buttons")
-
-
-LEGACY_TIMELINE = _legacy_timeline()
-
 
 def timeline_header_classes():
     """(class whose ``draw_header`` draws the timeline buttons, class whose ``draw_collapsible`` draws
-    the timeline menus) of this Blender."""
-    if not LEGACY_TIMELINE:
-        from bl_ui import space_dopesheet
-        return space_dopesheet.DOPESHEET_HT_editor_buttons, space_dopesheet.DOPESHEET_MT_editor_menus
-    from bl_ui import space_time
-    return space_time.TIME_HT_editor_buttons, space_time.TIME_MT_editor_menus
+    the timeline menus)."""
+    from bl_ui import space_dopesheet
+    return space_dopesheet.DOPESHEET_HT_editor_buttons, space_dopesheet.DOPESHEET_MT_editor_menus
 
 
 # --- UV select mode -------------------------------------------------------------------------
-# 4.5: uv_select_mode has 'ISLAND'; 5.x: uv_select_mode is VERTEX / EDGE / FACE and island selection is the
-# separate ``use_uv_select_island`` (measured, step 118).
+# 5.x: uv_select_mode is VERTEX / EDGE / FACE and island selection is the separate ``use_uv_select_island``.
 
 def uv_island_mode(ts):
-    if hasattr(ts, "use_uv_select_island"):
-        return ts.use_uv_select_island
-    return ts.uv_select_mode == 'ISLAND'
+    return ts.use_uv_select_island
 
 
 def set_uv_island_mode(ts, island):
     """Island (Maya shell) selection on, or plain UV (vertex) selection."""
-    if hasattr(ts, "use_uv_select_island"):
-        if not island:
-            ts.uv_select_mode = 'VERTEX'
-        ts.use_uv_select_island = island
-    else:
-        ts.uv_select_mode = 'ISLAND' if island else 'VERTEX'
+    if not island:
+        ts.uv_select_mode = 'VERTEX'
+    ts.use_uv_select_island = island
 
 
 # --- Render output format -------------------------------------------------------------------
 # 5.x: ImageFormatSettings.media_type (IMAGE / MULTI_LAYER_IMAGE / VIDEO) picks which file formats exist;
-# 'FFMPEG' needs media_type 'VIDEO' first (measured, step 118). 4.5 has no media_type.
-MEDIA_TYPE = "media_type" in bpy.types.ImageFormatSettings.bl_rna.properties
-
+# 'FFMPEG' needs media_type 'VIDEO' first.
 
 def set_file_format(image_settings, fmt):
-    if MEDIA_TYPE:
-        image_settings.media_type = ('VIDEO' if fmt == 'FFMPEG' else
-                                     'MULTI_LAYER_IMAGE' if fmt == 'OPEN_EXR_MULTILAYER' else 'IMAGE')
+    image_settings.media_type = ('VIDEO' if fmt == 'FFMPEG' else
+                                 'MULTI_LAYER_IMAGE' if fmt == 'OPEN_EXR_MULTILAYER' else 'IMAGE')
     image_settings.file_format = fmt
 
 
 # --- bmesh ----------------------------------------------------------------------------------
-# 5.2 renamed pointmerge_facedata's ``vert_snap`` to ``vert_target`` (bmesh.ops docstring, measured, step 118).
+# 5.2 renamed pointmerge_facedata's ``vert_snap`` to ``vert_target`` (bmesh.ops docstring).
 
 def pointmerge_facedata(bm, verts, target):
     import bmesh
@@ -171,80 +142,79 @@ def pointmerge_facedata(bm, verts, target):
 
 
 # --- UV selection in bmesh ------------------------------------------------------------------
-# 4.5: per UV layer, ``loop[uv].select`` / ``select_edge``; 5.x: one UV selection per loop,
-# ``loop.uv_select_vert`` / ``uv_select_edge`` (BMLoopUV has only uv / pin_uv, measured, step 118).
-def _loop_uv_select():
-    import bmesh
-    return hasattr(bmesh.types.BMLoop, "uv_select_vert")
-
-
-LOOP_UV_SELECT = _loop_uv_select()
-
+# 5.x: one UV selection per loop, ``loop.uv_select_vert`` / ``uv_select_edge`` (BMLoopUV has only uv / pin_uv,
+# 5.x). ``uv`` (the UV layer) stays in the signatures for the callers.
 
 def uv_vert_selected(loop, uv):
-    return loop.uv_select_vert if LOOP_UV_SELECT else loop[uv].select
+    return loop.uv_select_vert
 
 
 def uv_edge_selected(loop, uv):
-    return loop.uv_select_edge if LOOP_UV_SELECT else loop[uv].select_edge
+    return loop.uv_select_edge
+
+
+def uv_edge_selected_reader():
+    """``uv_edge_selected`` as one getter for ``map`` over many loops (no Python call per loop)."""
+    return attrgetter("uv_select_edge")
 
 
 def set_uv_vert_selected(loop, uv, value):
-    if LOOP_UV_SELECT:
-        loop.uv_select_vert = value
-    else:
-        loop[uv].select = value
+    loop.uv_select_vert = value
 
 
 def set_uv_edge_selected(loop, uv, value):
-    if LOOP_UV_SELECT:
-        loop.uv_select_edge = value
-    else:
-        loop[uv].select_edge = value
+    loop.uv_select_edge = value
 
 
 def set_uv_face_selected(face, uv, value):
-    """A face's UVs picked / unpicked with UV Sync Selection off: its loops, and 5.x's own face flag
-    (``BMFace.uv_select``, which a UV select-mode change flushes back to the loops — step 155)."""
+    """A face's UVs picked / unpicked with UV Sync Selection off: its loops, and the face's own flag
+    (``BMFace.uv_select``, which a UV select-mode change flushes back to the loops)."""
     for loop in face.loops:
-        set_uv_vert_selected(loop, uv, value)
-        set_uv_edge_selected(loop, uv, value)
-    if hasattr(face, "uv_select"):
-        face.uv_select = value
+        loop.uv_select_vert = value
+        loop.uv_select_edge = value
+    face.uv_select = value
+
+
+def uv_selection_on_loops(bm, synced):
+    """The UV Editor shows the per-loop UV selection (``uv_edge_selected``) rather than the mesh selection: always
+    with UV Sync Selection off, and with it on while 5.x keeps a UV selection of its own (``uv_select_sync_valid``)."""
+    return not synced or getattr(bm, "uv_select_sync_valid", False)
+
+
+def uv_sync_from_mesh(bm):
+    """After the mesh selection was written with UV Sync Selection on: 5.x keeps a UV selection of its own while
+    ``uv_select_sync_valid``, and the UV Editor draws that one, so it is refreshed from the mesh selection (#245)."""
+    if getattr(bm, "uv_select_sync_valid", False):
+        bm.uv_select_sync_from_mesh()
 
 
 # --- Bone visibility ------------------------------------------------------------------------
-# 4.5: a bone is hidden in pose / object mode by ``Bone.hide``; 5.x moved that to ``PoseBone.hide`` and
-# ``Bone.hide`` only hides the edit bone (step 118, api notes).
-POSE_BONE_HIDE = "hide" in bpy.types.PoseBone.bl_rna.properties
-
+# 5.x: a bone is hidden in pose / object mode by ``PoseBone.hide``; ``Bone.hide`` only hides the edit bone
+# (api notes).
 
 def bone_hidden(pb):
-    return pb.hide if POSE_BONE_HIDE else pb.bone.hide
+    return pb.hide
 
 
 def set_bone_hidden(pb, hidden):
-    if POSE_BONE_HIDE:
-        pb.hide = hidden
-    else:
-        pb.bone.hide = hidden
+    pb.hide = hidden
 
 
 def timeline_marker_menu():
-    """The Timeline's Marker menu: DOPESHEET_MT_marker (5.x, $S52 space_dopesheet.py:573), TIME_MT_marker (4.5)."""
-    return "DOPESHEET_MT_marker" if not LEGACY_TIMELINE else "TIME_MT_marker"
+    """The Timeline's Marker menu: DOPESHEET_MT_marker ($S52 space_dopesheet.py:573)."""
+    return "DOPESHEET_MT_marker"
 
 
 def save_dialog_args(op):
     """Extra arguments Blender's own Ctrl+S / Ctrl+Shift+S items pass: 5.2 adds
-    ``show_save_modified_images_dialog`` (IC keymap data, step 118); none in 4.5."""
+    ``show_save_modified_images_dialog`` (IC keymap data); none in 5.0 / 5.1."""
     props = op.get_rna_type().properties
     return {"show_save_modified_images_dialog": True} if "show_save_modified_images_dialog" in props else {}
 
 
 def read_region_row(fb, region, y):
     """One framebuffer row of the region (``read_color``), or None when ``y`` is outside it: 5.1+ raises on
-    out-of-bounds reads where 4.5 returned garbage (step 118, api notes)."""
+    out-of-bounds reads (api notes)."""
     y = int(y)
     if not 0 <= y < region.height or region.width <= 0:
         return None
@@ -255,44 +225,36 @@ def read_region_row(fb, region, y):
 
 
 # --- Materials ------------------------------------------------------------------------------
-# 5.0: every material uses nodes; ``Material.use_nodes`` is deprecated (prints a warning when set).
-MATERIAL_ALWAYS_NODES = VERSION >= (5, 0)
-
+# 5.0: every material uses nodes; ``Material.use_nodes`` is deprecated (prints a warning when set). The helpers
+# stay so callers keep one spelling.
 
 def ensure_material_nodes(mat):
-    if not MATERIAL_ALWAYS_NODES:
-        mat.use_nodes = True
+    pass
 
 
 def material_uses_nodes(mat):
-    return mat is not None and mat.node_tree is not None and (MATERIAL_ALWAYS_NODES or mat.use_nodes)
+    return mat is not None and mat.node_tree is not None
 
 
 # --- Worlds ---------------------------------------------------------------------------------
-# Assumed like materials (5.0: ``use_nodes`` deprecated, every World has its tree; step 214, not measured on 5.x).
-WORLD_ALWAYS_NODES = MATERIAL_ALWAYS_NODES
-
+# Like materials (5.0: ``use_nodes`` deprecated, every World has its tree).
 
 def ensure_world_nodes(world):
-    """Turn the World's nodes on; True when this call turned them on."""
-    if WORLD_ALWAYS_NODES or (world.use_nodes and world.node_tree is not None):
-        return False
-    world.use_nodes = True
-    return True
+    """Turn the World's nodes on; True when this call turned them on (never: 5.x worlds always use nodes)."""
+    return False
 
 
 def release_world_nodes(world):
-    if not WORLD_ALWAYS_NODES:
-        world.use_nodes = False
+    pass
 
 
 # --- Lights ---------------------------------------------------------------------------------
-# 5.1: every light has a node tree; ``Light.use_nodes`` is deprecated (warns when read or set, measured step 137).
+# 5.1: every light has a node tree; ``Light.use_nodes`` is deprecated (warns when read or set).
 LIGHT_ALWAYS_NODES = VERSION >= (5, 1)
 
 
 def ensure_light_nodes(light):
-    """Turn the light's nodes on; True when this call turned them on (4.5 / 5.0)."""
+    """Turn the light's nodes on; True when this call turned them on (5.0)."""
     if LIGHT_ALWAYS_NODES or light.use_nodes:
         return False
     light.use_nodes = True
@@ -306,70 +268,67 @@ def release_light_nodes(light):
 
 
 def toolbar_back(theme):
-    """The 3D View toolbar / sidebar background of the user's theme (read only — the kit never writes a theme,
-    step 130): ``view_3d.space.button`` (4.5), ``regions.sidebars.back`` (5.0 theme migration table)."""
-    regions = getattr(theme, "regions", None)
-    if regions is not None and hasattr(regions, "sidebars"):
-        return regions.sidebars.back
-    return theme.view_3d.space.button
+    """The 3D View toolbar / sidebar background of the user's theme (read only — the kit never writes a theme):
+    ``regions.sidebars.back`` (5.0 theme migration table)."""
+    return theme.regions.sidebars.back
 
 
 # --- GPU image shader -----------------------------------------------------------------------
-# Kit textures (shelf icons) hold scene-linear colours. 4.5's builtin 'IMAGE' shader converts them for display;
-# from 5.0 'IMAGE' draws the values as they are and the converting shader is
-# 'IMAGE_SCENE_LINEAR_TO_REC709_SRGB' (5.0 Python API notes, GPU; seen as darker shelf icons, step 119).
-LINEAR_IMAGE_SHADER = 'IMAGE_SCENE_LINEAR_TO_REC709_SRGB' if VERSION >= (5, 0) else 'IMAGE'
+# Kit textures (shelf icons) hold scene-linear colours. From 5.0 the builtin 'IMAGE' shader draws the values as they
+# are and the converting shader is 'IMAGE_SCENE_LINEAR_TO_REC709_SRGB' (5.0 Python API notes, GPU).
+LINEAR_IMAGE_SHADER = 'IMAGE_SCENE_LINEAR_TO_REC709_SRGB'
 
 
 # --- Unified paint settings -----------------------------------------------------------------
-# 4.5: one ``ToolSettings.unified_paint_settings`` with ``unprojected_radius`` (a radius). 5.0+: each paint mode
-# has its own (``tool_settings.weight_paint.unified_paint_settings``) and the scene size is ``unprojected_size``,
-# a diameter (measured on 5.0.1 / 5.2.3: "Diameter of brush in Blender units", step 153, #90).
+def scene_annotation(scene):
+    """The scene's annotation data (the 3D View's Annotate tool): ``Scene.annotation`` (5.2), else the older
+    ``Scene.grease_pencil`` when it still holds annotation data."""
+    gp = getattr(scene, "annotation", None)
+    if gp is None:
+        gp = getattr(scene, "grease_pencil", None)
+        if gp is not None and not hasattr(gp, "layers"):
+            gp = None
+    return gp
+
+
+# 5.0+: each paint mode has its own unified paint settings (``tool_settings.weight_paint.unified_paint_settings``)
+# and the scene size is ``unprojected_size``, a diameter (5.0.1 / 5.2.3: "Diameter of brush in Blender
+# units", #90).
 def unified_paint_settings(ts, paint="weight_paint"):
     """The unified paint settings that apply to paint mode ``paint`` (a ToolSettings member name)."""
-    mode = getattr(ts, paint, None)
-    ups = getattr(mode, "unified_paint_settings", None)
-    return ups if ups is not None else ts.unified_paint_settings
+    return getattr(ts, paint).unified_paint_settings
 
 
 def unprojected_radius(ups):
     """The brush radius in scene units."""
-    if "unprojected_radius" not in ups.bl_rna.properties:
-        return ups.unprojected_size / 2.0
-    return ups.unprojected_radius
+    return ups.unprojected_size / 2.0
 
 
 def set_unprojected_radius(ups, radius):
-    if "unprojected_radius" not in ups.bl_rna.properties:
-        ups.unprojected_size = radius * 2.0
-    else:
-        ups.unprojected_radius = radius
+    ups.unprojected_size = radius * 2.0
 
 
 # --- Brush falloff curve ----------------------------------------------------------------------
-# 4.5: ``Brush.curve_preset`` / ``Brush.curve``; 5.0+: ``curve_distance_falloff_preset`` / ``curve_distance_falloff``
-# (PR #125 used the 5.x names only, AttributeError on 4.5).
+# 5.0+: ``curve_distance_falloff_preset`` / ``curve_distance_falloff``.
 def brush_falloff_props(brush):
     """(preset property, curve property) names of the brush's distance falloff."""
-    if "curve_distance_falloff_preset" in brush.bl_rna.properties:
-        return "curve_distance_falloff_preset", "curve_distance_falloff"
-    return "curve_preset", "curve"
+    return "curve_distance_falloff_preset", "curve_distance_falloff"
 
 
 # --- Menus closing when the mouse leaves ----------------------------------------------------
-# 4.5 closes a menu the mouse moved away from; 5.0 keeps menus and popups open until a click, with the preference
-# ``PreferencesView.menu_close_leave`` (default off) for the old behaviour (5.0 release notes, user interface,
-# 5953ff318c; measured on 5.2.3). Python has no call that closes a popup and the kit never writes preferences
-# (step 130), so with the 5.x default a held option box can't close the Maya menu under it (step 153).
+# 5.0 keeps menus and popups open until a click, with the preference ``PreferencesView.menu_close_leave`` (default
+# off) for closing a menu the mouse left (5.0 release notes, user interface, 5953ff318c; seen on 5.2.3). Python
+# has no call that closes a popup and the kit never writes preferences, so with the 5.x default a held
+# option box can't close the Maya menu under it.
 def menus_close_on_leave(prefs):
-    return getattr(prefs.view, "menu_close_leave", True)
+    return prefs.view.menu_close_leave
 
 
 # --- Geometry Nodes modifier inputs --------------------------------------------------------------------
-# 4.5 – 5.1 keep a Geometry Nodes modifier's inputs as ID properties on the modifier (``md[socket identifier]``,
+# 5.0 – 5.1 keep a Geometry Nodes modifier's inputs as ID properties on the modifier (``md[socket identifier]``,
 # ``<identifier>_use_attribute`` / ``_attribute_name``); 5.2 moved them to ``md.properties.inputs.<identifier>``
 # with ``value``, ``type`` ('VALUE' / 'ATTRIBUTE') and ``attribute_name``, and ``md[key] = value`` raises
-# (measured on 5.2.3, step 200).
+# (5.2.3).
 GN_INPUT_STRUCT = "properties" in bpy.types.NodesModifier.bl_rna.properties
 
 
@@ -407,9 +366,9 @@ def gn_input_attribute(md, key, attribute):
 
 
 def compare_inputs(node):
-    """The (A, B) input sockets of a ``FunctionNodeCompare`` for its current data type. 4.5 – 5.1 keep every type's
+    """The (A, B) input sockets of a ``FunctionNodeCompare`` for its current data type. 5.0 – 5.1 keep every type's
     sockets on the node (A / B float first, then ``A_INT`` / ``B_INT`` ...; the others unavailable); 5.2 keeps only
-    the current type's two (an index 2 raised IndexError, step 212). Looked up by identifier, else the first two."""
+    the current type's two (an index 2 raised IndexError). Looked up by identifier, else the first two."""
     suffix = {'INT': "_INT", 'VECTOR': "_VEC3", 'RGBA': "_COL", 'STRING': "_STR"}.get(node.data_type, "")
     by_id = {s.identifier: s for s in node.inputs}
     a, b = by_id.get("A" + suffix), by_id.get("B" + suffix)
@@ -419,20 +378,20 @@ def compare_inputs(node):
 
 
 # --- Top bar: where the first menu of the Maya menu bar opens ------------------------------------------
-# Option box click model (ui/option_click.py, step 183): top bar region left -> the first Maya menu's pulldown,
-# in widget units. 4.5: 1.48 (step 183 table); 5.0 – 5.2: 1.25 (step 200, gui_step183_option_click at UI 1.0 =
-# 25 px of 20, UI 1.25 = 31 px of 25 on 5.0.1 / 5.1.2 / 5.2.3: the header row starts closer to the region edge).
-MENU_BAR_LEAD_UNITS = 1.25 if VERSION >= (5, 0) else 1.48
+# Option box click model (ui/option_click.py): top bar region left -> the first Maya menu's pulldown,
+# in widget units: 1.25 on 5.0 – 5.2 (gui_step183_option_click at UI 1.0 = 25 px of 20, UI 1.25 = 31 px
+# of 25 on 5.0.1 / 5.1.2 / 5.2.3).
+MENU_BAR_LEAD_UNITS = 1.25
 
 
 
 # --- Mesh selection attributes ----------------------------------------------------------------------------------
-# Blender 5.0.1 (measured, step 229, tmp/p229/vanilla7.py / vanilla8.py; 4.5 and 5.2.3 make a BOOLEAN): computing a
-# mesh's edges (``Mesh.from_pydata`` with no edges, ``Mesh.update(calc_edges=True)``) while it has a ``.select_vert``
-# attribute creates ``.select_edge`` as an EDGE **INT32_2D** attribute (the ``.edge_verts`` layout). Blender then
-# crashes on reading it as a selection: writing ``MeshEdge.select`` (rna_MeshEdge_select_set), leaving weight paint
-# (mesh_select_vert_flush), and edit mode gets a garbage edge selection. Feature check by type: a selection attribute
-# that is not BOOLEAN on its domain is dropped and rebuilt from the vertex selection.
+# Blender 5.0.1 (5.2.3 makes a BOOLEAN): computing a mesh's edges (``Mesh.from_pydata`` with no
+# edges, ``Mesh.update(calc_edges=True)``) while it has a ``.select_vert`` attribute creates ``.select_edge`` as an
+# EDGE **INT32_2D** attribute (the ``.edge_verts`` layout). Blender then crashes on reading it as a selection:
+# writing ``MeshEdge.select`` (rna_MeshEdge_select_set), leaving weight paint (mesh_select_vert_flush), and edit mode
+# gets a garbage edge selection. Feature check by type: a selection attribute that is not BOOLEAN on its domain is
+# dropped and rebuilt from the vertex selection.
 _SELECT_ATTRS = ((".select_vert", 'POINT'), (".select_edge", 'EDGE'), (".select_poly", 'FACE'))
 
 

@@ -32,7 +32,7 @@ class DCC_OT_switch(bpy.types.Operator):
         try:
             core.request(target)
         except (RuntimeError, ValueError) as error:
-            self.report({'ERROR'}, str(error))
+            self.report({'ERROR'}, tr(str(error)))
             return {'CANCELLED'}
         return {'FINISHED'}
 

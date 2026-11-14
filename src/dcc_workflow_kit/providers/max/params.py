@@ -497,7 +497,10 @@ def build(obj):
         p = obj.bsm_prim
         m = _Mesh(p.real_world)
         _BUILDERS[p.kind](m, p)
+        from . import edit_poly
+        kept = edit_poly.keep(obj.data)
         _commit(obj.data, m, p.gen_uv)
+        edit_poly.put_back(obj.data, kept)
     finally:
         _busy.discard(key)
 

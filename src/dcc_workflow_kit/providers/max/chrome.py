@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Adapted for DCC Workflow Kit.
-from .i18n import msg as _msg, display as _dcc_ui_text, format_message as _dcc_format, error_text as _dcc_ui_error
+from .i18n import msg as _msg, display as _dcc_ui_text, format_message as _dcc_format
 'Original interactive chrome, measured against the installed 3ds Max 2027 UI.\n\nAll artwork is drawn from basic geometry/text. No reference icons are embedded.\nSurfaces live in Image Editor areas identified by role; no image datablocks\nare created, so saved files carry no extension data beyond the workspace.\n'
 import math
 import time
@@ -11,6 +11,7 @@ from gpu_extras.batch import batch_for_shader
 from mathutils import Vector
 from bpy_extras import view3d_utils
 from . import runtime, surfaces
+from .i18n import tr_ui as tr
 PREFIX = '.BSM.'
 _handles = []
 _generation = 0
@@ -74,12 +75,12 @@ def text(value, x, y, size=11, color=(0.8, 0.8, 0.8, 1)):
     blf.size(f, size * _scale())
     blf.position(f, x, y, 0)
     blf.color(f, *color)
-    blf.draw(f, _dcc_ui_text(value))
+    blf.draw(f, _dcc_ui_text(tr(value)))
 
 def text_width(value, size=10):
     f = surfaces.font()
     blf.size(f, size * _scale())
-    return blf.dimensions(f, _dcc_ui_text(value))[0]
+    return blf.dimensions(f, _dcc_ui_text(tr(value)))[0]
 
 def draw_image():
     context = bpy.context
@@ -271,9 +272,7 @@ def _viewcube(context, w, h, u, hover):
         line(outline, (0.18, 0.18, 0.18, 1), 1)
         if depth > 0.35:
             center = (sum((p[0] for p in points)) / 4, sum((p[1] for p in points)) / 4)
-            from ...localization import is_chinese
-            face_labels = {'TOP': _msg('Top'), 'BOTTOM': _msg('Bottom'), 'FRONT': _msg('Front'), 'BACK': _msg('Back'), 'RIGHT': _msg('Right'), 'LEFT': _msg('Left')}
-            label = _dcc_ui_text(face_labels[name]) if is_chinese() else name if depth > 0.6 else name[0]
+            label = name if depth > 0.6 else name[0]
             tw = text_width(label, 6)
             text(label, center[0] - tw / 2, center[1] - 2 * u, 6, (0.12, 0.12, 0.12, 1))
         hits.append(('POLY', points, ('CUBE', name, normal, a, b)))
@@ -397,7 +396,7 @@ def draw_status(self, context):
     l.template_reports_banner()
     l.template_running_jobs()
     l.separator_spacer()
-    l.label(text=_dcc_ui_text(_msg('Blender Max')))
+    l.label(text=_dcc_ui_text(_msg('MaxFlow')))
 
 class BSM_OT_explorer_search(bpy.types.Operator):
     bl_idname = 'bsm.explorer_search'
@@ -504,7 +503,7 @@ def _spin_step(owner, attr):
 
 class BSM_OT_chrome_events(bpy.types.Operator):
     bl_idname = 'bsm.chrome_events'
-    bl_label = _msg('Blender Max Interface Events')
+    bl_label = _msg('MaxFlow Interface Events')
     generation = 0
     pointer = 0
     edit = None
@@ -587,7 +586,7 @@ class BSM_OT_chrome_events(bpy.types.Operator):
                         try:
                             click['open'](context)
                         except RuntimeError as error:
-                            self.report({'WARNING'}, _dcc_ui_error(error).split('\n')[0])
+                            self.report({'WARNING'}, _dcc_ui_text(str(error).split('\n')[0]))
                     runtime.redraw()
                 return {'RUNNING_MODAL'}
         if area.type == 'VIEW_3D':
@@ -701,7 +700,7 @@ class BSM_OT_chrome_events(bpy.types.Operator):
             try:
                 surfaces.dispatch(context, hit[4], secondary)
             except RuntimeError as error:
-                self.report({'WARNING'}, _dcc_ui_error(error).split('\n')[0])
+                self.report({'WARNING'}, _dcc_ui_text(str(error).split('\n')[0]))
         runtime.redraw()
         return {'RUNNING_MODAL'}
 
@@ -866,7 +865,7 @@ class BSM_OT_chrome_events(bpy.types.Operator):
             if event.type == 'LEFTMOUSE' and event.value == 'RELEASE':
                 self.drag = None
                 context.window.cursor_modal_restore()
-                if not drag['moved'] or not drag['name']:
+                if not drag['moved'] or not drag[_msg('name')]:
                     surfaces.dispatch(context, drag['action'])
                     return {'RUNNING_MODAL'}
                 area = next((a for a in context.window.screen.areas if a.as_pointer() == drag['area']), None)
@@ -879,9 +878,9 @@ class BSM_OT_chrome_events(bpy.types.Operator):
                     return {'RUNNING_MODAL'}
                 nearest = min(rows, key=lambda r: abs(r[0] + 8 - y))
                 obj = bpy.data.objects.get(drag['obj'])
-                if obj and nearest[2] in obj.modifiers and (nearest[2] != drag['name']):
+                if obj and nearest[2] in obj.modifiers and (nearest[2] != drag[_msg('name')]):
                     target = list(obj.modifiers).index(obj.modifiers[nearest[2]])
-                    bpy.ops.bsm.stack_action(action='MOVE_TO', modifier=drag['name'], index=target)
+                    bpy.ops.bsm.stack_action(action='MOVE_TO', modifier=drag[_msg('name')], index=target)
                 runtime.redraw()
                 return {'RUNNING_MODAL'}
             if event.type == 'ESC':
@@ -950,7 +949,7 @@ class BSM_OT_chrome_events(bpy.types.Operator):
         edit = self.edit
         if event.type == 'MOUSEMOVE' or event.value != 'PRESS':
             return {'RUNNING_MODAL'} if event.type != 'MOUSEMOVE' else None
-        (value, cursor) = (edit['value'], edit['cursor'])
+        (value, cursor) = (edit['value'], edit[_msg('cursor')])
 
         def finish(commit=True):
             self.edit = None
@@ -959,7 +958,7 @@ class BSM_OT_chrome_events(bpy.types.Operator):
                 try:
                     _commit(context, edit)
                 except (ValueError, TypeError, AttributeError, ReferenceError) as error:
-                    self.report({'WARNING'}, _dcc_ui_error(error))
+                    self.report({'WARNING'}, _dcc_ui_text(str(error)))
             runtime.redraw()
         if event.type in {'RET', 'NUMPAD_ENTER', 'TAB'}:
             finish()
@@ -977,44 +976,44 @@ class BSM_OT_chrome_events(bpy.types.Operator):
                 context.window_manager.clipboard = value
             elif event.type == 'X':
                 context.window_manager.clipboard = value
-                (edit['value'], edit['cursor'], edit['all']) = ('', 0, False)
+                (edit['value'], edit[_msg('cursor')], edit['all']) = ('', 0, False)
             else:
                 paste = context.window_manager.clipboard.splitlines()[0] if context.window_manager.clipboard else ''
                 if edit['all']:
                     (value, cursor) = ('', 0)
                 edit['value'] = value[:cursor] + paste + value[cursor:]
-                edit['cursor'] = cursor + len(paste)
+                edit[_msg('cursor')] = cursor + len(paste)
                 edit['all'] = False
             runtime.redraw()
             return {'RUNNING_MODAL'}
         if event.type == 'BACK_SPACE':
             if edit['all']:
-                (edit['value'], edit['cursor']) = ('', 0)
+                (edit['value'], edit[_msg('cursor')]) = ('', 0)
             elif cursor:
                 edit['value'] = value[:cursor - 1] + value[cursor:]
-                edit['cursor'] = cursor - 1
+                edit[_msg('cursor')] = cursor - 1
             edit['all'] = False
         elif event.type == 'DEL':
             if edit['all']:
-                (edit['value'], edit['cursor']) = ('', 0)
+                (edit['value'], edit[_msg('cursor')]) = ('', 0)
             else:
                 edit['value'] = value[:cursor] + value[cursor + 1:]
             edit['all'] = False
         elif event.type == 'LEFT_ARROW':
-            edit['cursor'] = 0 if edit['all'] else max(0, cursor - 1)
+            edit[_msg('cursor')] = 0 if edit['all'] else max(0, cursor - 1)
             edit['all'] = False
         elif event.type == 'RIGHT_ARROW':
-            edit['cursor'] = len(value) if edit['all'] else min(len(value), cursor + 1)
+            edit[_msg('cursor')] = len(value) if edit['all'] else min(len(value), cursor + 1)
             edit['all'] = False
         elif event.type == 'HOME':
-            (edit['cursor'], edit['all']) = (0, False)
+            (edit[_msg('cursor')], edit['all']) = (0, False)
         elif event.type == 'END':
-            (edit['cursor'], edit['all']) = (len(value), False)
+            (edit[_msg('cursor')], edit['all']) = (len(value), False)
         elif event.unicode and (not event.ctrl) and (not event.alt):
             if edit['all']:
                 (value, cursor) = ('', 0)
             edit['value'] = value[:cursor] + event.unicode + value[cursor:]
-            edit['cursor'] = cursor + len(event.unicode)
+            edit[_msg('cursor')] = cursor + len(event.unicode)
             edit['all'] = False
         runtime.redraw()
         return {'RUNNING_MODAL'}
@@ -1140,11 +1139,6 @@ def prepare_workspace(window):
     runtime.redraw()
     window.workspace['bsm_layout_version'] = 5
 _grow_pending = set()
-_ACTIVE_REGION_OFFSET = []
-KNOWN_ACTIVE_REGION_OFFSETS = {(5, 0): 496}
-
-def _active_region_slot(screen):
-    return None
 
 def _timeline_delta(window):
     area = next((a for a in window.screen.areas if _roles.get(a.as_pointer()) == _msg('Timeline')), None)
@@ -1152,32 +1146,14 @@ def _timeline_delta(window):
 
 def _try_grow(window):
     """Give the bottom panel Max's height: at once when the screen allows area resizing,
-    otherwise for the length of the resize with the active region cleared, or, as a last
-    resort, when the mouse next crosses an area edge. The cursor is never moved."""
+    otherwise when the mouse next crosses an area edge (Blender resizes areas only while the
+    mouse is on an edge, where the screen has no active region). The cursor is never moved."""
     try:
-        screen = window.screen
-        with bpy.context.temp_override(window=window, screen=screen):
+        with bpy.context.temp_override(window=window, screen=window.screen):
             allowed = bpy.ops.screen.area_move.poll()
-        slot = None
-        if not allowed:
-            try:
-                slot = _active_region_slot(screen)
-            except (OSError, ValueError, AttributeError):
-                slot = None
-            if slot is None:
-                return None
-        saved = slot.value if slot is not None else 0
-        if slot is not None:
-            slot.value = 0
-        try:
-            with bpy.context.temp_override(window=window, screen=screen):
-                allowed = bpy.ops.screen.area_move.poll()
-            if allowed:
-                _grow_pending.discard(window.as_pointer())
-                _grow_timeline(window)
-        finally:
-            if slot is not None:
-                slot.value = saved
+        if allowed:
+            _grow_pending.discard(window.as_pointer())
+            _grow_timeline(window)
     except ReferenceError:
         _grow_pending.clear()
     return None

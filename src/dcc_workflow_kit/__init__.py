@@ -6,7 +6,7 @@ from . import lifecycle, localization, preferences, ui, core, migration
 from .providers import max as max_provider, maya
 
 bl_info = {'name': 'DCC Workflow Kit', 'author': 'DCC Workflow Kit contributors; original authors credited in THIRD_PARTY.md',
-           'version': (0, 1, 5), 'blender': (4, 5, 0), 'category': 'Interface',
+           'version': (0, 2, 0), 'blender': (5, 3, 0), 'category': 'Interface',
            'description': 'Choose 3ds Max + Blender or Maya + Blender workflows'}
 
 
@@ -47,6 +47,7 @@ def _register_max_data():
         max_provider._registered.append(cls)
     bpy.types.WindowManager.bsm = PointerProperty(type=max_provider.ui.BSM_State)
     max_provider.material_ui.register_data()
+    max_provider.edit_poly.register()
     max_provider.runtime.register()
 
 
@@ -63,11 +64,12 @@ def register():
         (_register_max_data, _unregister_max_data),
         (maya.operators.register_data, maya.operators.unregister_data),
         (maya.switch.register, maya.switch.unregister),
+        (maya.settings_io.register, maya.settings_io.unregister),
+        (maya.translations.register, maya.translations.unregister),
         (migration.register, migration.unregister),
         (ui.register, ui.unregister),
         (core.register, core.unregister),
     ])
-    maya.i18n.refresh()
 
 
 def unregister():

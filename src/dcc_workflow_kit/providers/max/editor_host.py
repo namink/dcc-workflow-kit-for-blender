@@ -34,7 +34,11 @@ def prepare(window):
     runtime.redraw()
 
 def _workspace(context, window, name, tags):
-    ws = next((w for w in bpy.data.workspaces if all((w.get(k) == v for (k, v) in tags.items()))), None)
+    found = [w for w in bpy.data.workspaces if all((w.get(k) == v for (k, v) in tags.items()))]
+    ws = next((w for w in found if len(w.screens)), None)
+    empty = [w for w in found if not len(w.screens)]
+    if empty:
+        bpy.data.batch_remove(empty)
     if ws is None:
         before = set(bpy.data.workspaces)
         with context.temp_override(window=window):

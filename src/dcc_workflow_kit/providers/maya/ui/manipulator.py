@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Simplified Chinese localization by namink; additional display integration 2026-10-31.
-"""Maya-shaped Move / Rotate / Scale manipulators (docs/steps/step_59.md 「계획」 5).
+"""Maya-shaped Move / Rotate / Scale manipulators.
 
 Blender's transform gizmo (``VIEW3D_GGT_xform_gizmo``) is C and its shape can't be
 changed: thick axes, small cones, a white centre
@@ -8,53 +7,78 @@ circle. Maya's:
 
 - Move: thin axis lines with cones, a hollow centre square (free move), filled
   plane handles (normal-axis colour), the active handle drawn yellow (M2).
-- Rotate: axis rings (front half), a camera ring, a grey trackball — Blender's C rotate gizmo
-  already has this layout, so the Rotate tool keeps it (with the axis colours of the user's theme: the kit never
-  writes a theme). The Move / Scale handles here use Maya's own axis colours (``MAYA_AXIS``, step 142).
+- Rotate: axis rings drawn on their front half only, a larger view ring, a grey trackball outline (a drag
+  inside it rotates freely). The handles use Maya's own axis colours (``MAYA_AXIS``).
 - Scale: axis lines with cubes at the ends, a yellow centre cube, plane handles.
 - Pivot edit mode (D / Insert): Move plus small rings to orient the pivot (M7).
-- Constant screen size, Maya 108 px for the Move Y arrow at manipGlobalScale 1.5 (M3, M4).
+- Constant screen size: 108 px for the Move Y arrow (M3, M4).
 
 ``ALLSET_GGT_xform`` draws that and runs Blender's own transform operators from each
 handle (``target_set_operator``), so snapping, constraints, numeric input, Smart
-Duplicate/Extrude (step 22/26) and the active handle (step 28) keep working. It becomes
-the widget of the Move and Scale tools in object and mesh edit mode by swapping their
+Duplicate/Extrude and the active handle keep working. The Scale centre and axis handles run
+``allset.manip_scale`` (operators/manip_scale.py), Maya's scale drag on top of Blender's resize. It becomes
+the widget of the Move, Rotate and Scale tools in object mode and mesh / lattice / curve / surface edit mode by swapping their
 ToolDefs in ``VIEW3D_PT_tools_active._tools`` for copies with another ``widget`` (same
 idname, so ``wm.tool_set_by_id`` still finds them); tools already active are set up
 again. Everything is put back on unregister.
 """
-from ..i18n import source_message as _dcc_source, display_message as _dcc_display, format_message as _dcc_format
-from ..i18n import tr as _zh, enum_items as _zh_enum, native as _zh_native
+
+import math
+
 import bmesh
 import bpy
 from bpy.types import Gizmo, GizmoGroup
 from mathutils import Matrix, Vector
-GROUP = 'ALLSET_GGT_xform'
-GIZMO = 'ALLSET_GT_maya_handle'
-MODES = ('OBJECT', 'EDIT_MESH')
-TOOLS = {'builtin.move': 'TRANSLATE', 'builtin.scale': 'RESIZE'}
+
+GROUP = "ALLSET_GGT_xform"
+GIZMO = "ALLSET_GT_maya_handle"
+RING_GIZMO = "ALLSET_GT_maya_ring"
+MODES = ('OBJECT', 'EDIT_MESH', 'EDIT_LATTICE', 'EDIT_CURVE', 'EDIT_SURFACE')
+TOOLS = {"builtin.move": 'TRANSLATE', "builtin.rotate": 'ROTATE', "builtin.scale": 'RESIZE'}
+# Orientation slot per tool kind (Blender: 0 default, 1 move, 2 rotate, 3 scale).
 SLOT = {'TRANSLATE': 1, 'ROTATE': 2, 'RESIZE': 3}
-KINDS = {'builtin.move': 'TRANSLATE', 'builtin.rotate': 'ROTATE', 'builtin.scale': 'RESIZE'}
+KINDS = {"builtin.move": 'TRANSLATE', "builtin.rotate": 'ROTATE', "builtin.scale": 'RESIZE'}
+
+# Arrow length in px at gizmo_size 75 and UI scale 1: Maya's Move Y arrow at a manipulator size of 1.5
+#. Shapes are built in "arrow units" (arrow length = 1).
 ARROW_PX = 108.0
-CENTER_HALF = 0.083
-(CONE_LEN, CONE_R) = (0.13, 0.045)
+# Shape sizes in arrow units (Maya's Move / Scale manipulators).
+CENTER_HALF = 0.083      # hollow centre square: 18 px
+CONE_LEN, CONE_R = 0.13, 0.045
 LINE_START = 0.0
-(PLANE_AT, PLANE_HALF) = (0.6, 0.08)
-(CUBE_AT, CUBE_HALF) = (0.85, 0.05)
+# Plane handles: Maya's YZ / XY squares span 0.52-0.68
+# arrow units along both axes: a 1 px rim in the
+# axis colour around a translucent fill (pixels over the #767676 top face: red #b6655f, blue #5f63db).
+PLANE_AT, PLANE_HALF = 0.60, 0.08
+CUBE_AT, CUBE_HALF = 0.85, 0.05
 CENTER_CUBE_HALF = 0.06
-PIVOT_RING_R = 0.32
-PICK_R = 0.05
-YELLOW = (1.0, 1.0, 0.0)
-ACTIVE = (253 / 255, 1.0, 136 / 255)
-CENTER_IDLE = (100 / 255, 220 / 255, 1.0)
+PIVOT_RING_R = 0.32      # pivot orientation rings (M7, offset 50)
+# Rotate rings in arrow units: the axis rings are 75 px in radius at size 1 (the size Blender's own rotate gizmo has
+# at its default gizmo size), the view ring 1.2 times that.
+ROTATE_RING_R = 75.0 / 108.0
+VIEW_RING = 1.2
+ROTATE_LINE = 2.0
+TRACKBALL = (0.55, 0.55, 0.55)   # grey outline of the free-rotate sphere
+PICK_R = 0.05            # half width of the invisible pick shape around a thin line
+YELLOW = (1.0, 1.0, 0.0)  # hovered handle (displayColor manipCurrent #ffff00)
+# Active handle and centre as Maya draws them on screen: #fdff88 for the active handle, the centre
+# light blue #64dcff while an axis is active (81 px of #fdff88 / #64dcff in the square).
+ACTIVE = (0xfd / 255, 1.0, 0x88 / 255)
+CENTER_IDLE = (0x64 / 255, 0xdc / 255, 1.0)
 ALPHA = 1.0
-PLANE_FILL = 0.65
+PLANE_FILL = 0.65         # fill alpha; the fill colour is the axis colour lightened toward white by PLANE_LIGHTEN
 PLANE_LIGHTEN = 0.35
+
 AXES = {'X': Vector((1, 0, 0)), 'Y': Vector((0, 1, 0)), 'Z': Vector((0, 0, 1))}
 
+
+# --- shape geometry (pure, testable headless) ---------------------------------------------------
+
 def _square(cx, cy, half, z=0.0):
-    (a, b, c, d) = ((cx - half, cy - half, z), (cx + half, cy - half, z), (cx + half, cy + half, z), (cx - half, cy + half, z))
+    a, b, c, d = ((cx - half, cy - half, z), (cx + half, cy - half, z),
+                  (cx + half, cy + half, z), (cx - half, cy + half, z))
     return [a, b, c, a, c, d]
+
 
 def _square_outline(half):
     pts = [(-half, -half, 0), (half, -half, 0), (half, half, 0), (-half, half, 0)]
@@ -63,39 +87,44 @@ def _square_outline(half):
         out += [pts[i], pts[(i + 1) % 4]]
     return out
 
+
 def _cone(base, tip, r, n=12):
     import math
     tris = []
     ring = [(r * math.cos(2 * math.pi * i / n), r * math.sin(2 * math.pi * i / n)) for i in range(n)]
     for i in range(n):
-        (x0, y0) = ring[i]
-        (x1, y1) = ring[(i + 1) % n]
+        x0, y0 = ring[i]
+        x1, y1 = ring[(i + 1) % n]
         tris += [(x0, y0, base), (x1, y1, base), (0, 0, tip)]
         tris += [(x0, y0, base), (0, 0, base), (x1, y1, base)]
     return tris
 
+
 def _box(c, half):
     """Triangles of an axis-aligned cube centred at ``c``."""
-    (x, y, z) = c
+    x, y, z = c
     v = [(x + sx * half, y + sy * half, z + sz * half) for sx in (-1, 1) for sy in (-1, 1) for sz in (-1, 1)]
     faces = ((0, 1, 3, 2), (4, 6, 7, 5), (0, 4, 5, 1), (2, 3, 7, 6), (0, 2, 6, 4), (1, 5, 7, 3))
     tris = []
-    for (a, b, cc, d) in faces:
+    for a, b, cc, d in faces:
         tris += [v[a], v[b], v[cc], v[a], v[cc], v[d]]
     return tris
+
 
 def _bar(z0, z1, r):
     """Triangles of a thin square bar along +Z (pick shape of a line)."""
     return _box_span((-r, -r, z0), (r, r, z1))
 
+
 def _box_span(lo, hi):
-    ((x0, y0, z0), (x1, y1, z1)) = (lo, hi)
+    (x0, y0, z0), (x1, y1, z1) = lo, hi
     v = [(x, y, z) for x in (x0, x1) for y in (y0, y1) for z in (z0, z1)]
     faces = ((0, 1, 3, 2), (4, 6, 7, 5), (0, 4, 5, 1), (2, 3, 7, 6), (0, 2, 6, 4), (1, 5, 7, 3))
     tris = []
-    for (a, b, c, d) in faces:
+    for a, b, c, d in faces:
         tris += [v[a], v[b], v[c], v[a], v[c], v[d]]
     return tris
+
 
 def _ring(r, n=64):
     import math
@@ -105,6 +134,7 @@ def _ring(r, n=64):
         out += [pts[i], pts[(i + 1) % n]]
     return out
 
+
 def _disc(r, n=48):
     import math
     pts = [(r * math.cos(2 * math.pi * i / n), r * math.sin(2 * math.pi * i / n), 0.0) for i in range(n)]
@@ -113,15 +143,18 @@ def _disc(r, n=48):
         tris += [(0, 0, 0), pts[i], pts[(i + 1) % n]]
     return tris
 
+
 def _band(r, w, n=64):
     """Flat ring band (pick shape of a ring)."""
     import math
     tris = []
     for i in range(n):
-        (a0, a1) = (2 * math.pi * i / n, 2 * math.pi * (i + 1) / n)
-        p = [((r - w) * math.cos(a0), (r - w) * math.sin(a0), 0), ((r + w) * math.cos(a0), (r + w) * math.sin(a0), 0), ((r + w) * math.cos(a1), (r + w) * math.sin(a1), 0), ((r - w) * math.cos(a1), (r - w) * math.sin(a1), 0)]
+        a0, a1 = 2 * math.pi * i / n, 2 * math.pi * (i + 1) / n
+        p = [((r - w) * math.cos(a0), (r - w) * math.sin(a0), 0), ((r + w) * math.cos(a0), (r + w) * math.sin(a0), 0),
+             ((r + w) * math.cos(a1), (r + w) * math.sin(a1), 0), ((r - w) * math.cos(a1), (r - w) * math.sin(a1), 0)]
         tris += [p[0], p[1], p[2], p[0], p[2], p[3]]
     return tris
+
 
 def shapes(kind):
     """(draw shapes [(type, verts)], pick shape (type, verts)) of a handle in arrow units.
@@ -130,33 +163,68 @@ def shapes(kind):
     handles (centre, view ring, trackball) are in the local XY plane facing +Z."""
     if kind == 'ARROW':
         base = 1.0 - CONE_LEN
-        return ([('LINES', [(0, 0, LINE_START), (0, 0, base)]), ('TRIS', _cone(base, 1.0, CONE_R))], ('TRIS', _bar(CENTER_HALF, base, PICK_R) + _cone(base, 1.0, CONE_R * 1.6)))
+        return ([('LINES', [(0, 0, LINE_START), (0, 0, base)]), ('TRIS', _cone(base, 1.0, CONE_R))],
+                ('TRIS', _bar(CENTER_HALF, base, PICK_R) + _cone(base, 1.0, CONE_R * 1.6)))
     if kind == 'SCALE_AXIS':
-        return ([('LINES', [(0, 0, LINE_START), (0, 0, CUBE_AT - CUBE_HALF)]), ('TRIS', _box((0, 0, CUBE_AT), CUBE_HALF))], ('TRIS', _bar(CENTER_HALF, CUBE_AT, PICK_R) + _box((0, 0, CUBE_AT), CUBE_HALF * 1.6)))
-    if kind == 'PLANE':
-        rim = [(x + PLANE_AT, y + PLANE_AT, z) for (x, y, z) in _square_outline(PLANE_HALF)]
-        return ([('TRIS', _square(PLANE_AT, PLANE_AT, PLANE_HALF)), ('LINES', rim)], ('TRIS', _square(PLANE_AT, PLANE_AT, PLANE_HALF * 1.4)))
+        return ([('LINES', [(0, 0, LINE_START), (0, 0, CUBE_AT - CUBE_HALF)]),
+                 ('TRIS', _box((0, 0, CUBE_AT), CUBE_HALF))],
+                ('TRIS', _bar(CENTER_HALF, CUBE_AT, PICK_R) + _box((0, 0, CUBE_AT), CUBE_HALF * 1.6)))
+    if kind == 'PLANE':      # fill first, then the rim (ALLSET_GT_maya_handle.draw)
+        rim = [(x + PLANE_AT, y + PLANE_AT, z) for x, y, z in _square_outline(PLANE_HALF)]
+        return ([('TRIS', _square(PLANE_AT, PLANE_AT, PLANE_HALF)), ('LINES', rim)],
+                ('TRIS', _square(PLANE_AT, PLANE_AT, PLANE_HALF * 1.4)))
     if kind == 'CENTER':
         return ([('LINES', _square_outline(CENTER_HALF))], ('TRIS', _square(0, 0, CENTER_HALF * 1.2)))
     if kind == 'CENTER_CUBE':
         return ([('TRIS', _box((0, 0, 0), CENTER_CUBE_HALF))], ('TRIS', _box((0, 0, 0), CENTER_CUBE_HALF * 1.4)))
     if kind == 'PIVOT_CENTER':
-        return ([('LINES', _square_outline(CENTER_HALF)), ('LINES', _ring(CENTER_HALF * 0.55, 24))], ('TRIS', _square(0, 0, CENTER_HALF * 1.2)))
+        return ([('LINES', _square_outline(CENTER_HALF)), ('LINES', _ring(CENTER_HALF * 0.55, 24))],
+                ('TRIS', _square(0, 0, CENTER_HALF * 1.2)))
     if kind == 'PIVOT_RING':
         return ([('LINES', _ring(PIVOT_RING_R))], ('TRIS', _band(PIVOT_RING_R, PICK_R * 0.8)))
     raise ValueError(kind)
 
+
+# --- where and how the manipulator sits --------------------------------------------------------
+
+def _lattice_points(ob):
+    """Selected, shown points of a lattice in edit mode, in object space (where the transform moves them)."""
+    return [p.co_deform.copy() for p in ob.data.points if p.select and not getattr(p, "hide", False)]
+
+
+def _curve_points(ob):
+    """Selected, shown control points of a curve / surface in edit mode, in object space: Bezier keys and handles
+    (each by its own selection, like Blender's transform), NURBS / poly CVs."""
+    out = []
+    for spline in ob.data.splines:
+        if spline.type == 'BEZIER':
+            for bp in spline.bezier_points:
+                if bp.hide:
+                    continue
+                for flag, co in ((bp.select_control_point, bp.co), (bp.select_left_handle, bp.handle_left),
+                                 (bp.select_right_handle, bp.handle_right)):
+                    if flag:
+                        out.append(co.copy())
+        else:
+            out += [p.co.xyz for p in spline.points if p.select and not p.hide]
+    return out
+
+
 def _edit_points(context):
-    """World positions of the selected vertices of the meshes in edit mode, and the active
-    element's centre (or None)."""
-    (pts, active) = ([], None)
+    """World positions of the selected vertices of the meshes (or points of the lattices) in edit mode, and the
+    active element's centre (or None)."""
+    pts, active = [], None
     obs = context.objects_in_mode_unique_data or ([context.edit_object] if context.edit_object else [])
     for ob in obs:
+        if ob is not None and ob.type in ('LATTICE', 'CURVE', 'SURFACE'):
+            mw = ob.matrix_world
+            pts += [mw @ co for co in (_lattice_points(ob) if ob.type == 'LATTICE' else _curve_points(ob))]
+            continue
         if ob is None or ob.type != 'MESH':
             continue
         bm = bmesh.from_edit_mesh(ob.data)
         mw = ob.matrix_world
-        pts += [mw @ v.co for v in bm.verts if v.select and (not v.hide)]
+        pts += [mw @ v.co for v in bm.verts if v.select and not v.hide]
         if ob == context.edit_object and active is None:
             el = bm.select_history.active
             if isinstance(el, bmesh.types.BMVert):
@@ -165,13 +233,15 @@ def _edit_points(context):
                 active = mw @ ((el.verts[0].co + el.verts[1].co) / 2)
             elif isinstance(el, bmesh.types.BMFace):
                 active = mw @ el.calc_center_median()
-    return (pts, active)
+    return pts, active
+
 
 def _object_points(context):
     obs = [ob for ob in context.selected_objects if ob.visible_get()]
     active = context.view_layer.objects.active
     act = active.matrix_world.translation.copy() if active is not None and active in obs else None
-    return ([ob.matrix_world.translation.copy() for ob in obs], act)
+    return [ob.matrix_world.translation.copy() for ob in obs], act
+
 
 def center_of(points, active, pivot_point, cursor):
     """Manipulator position for Blender's pivot point setting (what the transform uses)."""
@@ -182,13 +252,14 @@ def center_of(points, active, pivot_point, cursor):
     if pivot_point == 'ACTIVE_ELEMENT' and active is not None:
         return active
     if pivot_point == 'BOUNDING_BOX_CENTER':
-        lo = Vector(tuple((min((p[i] for p in points)) for i in range(3))))
-        hi = Vector(tuple((max((p[i] for p in points)) for i in range(3))))
+        lo = Vector(tuple(min(p[i] for p in points) for i in range(3)))
+        hi = Vector(tuple(max(p[i] for p in points) for i in range(3)))
         return (lo + hi) / 2
     total = Vector()
     for p in points:
         total += p
     return total / len(points)
+
 
 def slot_type(scene, kind):
     """Orientation type the manipulator of ``kind`` uses (a per-tool slot, else the default)."""
@@ -196,20 +267,44 @@ def slot_type(scene, kind):
     t = slots[SLOT[kind]].type
     return slots[0].type if t == 'DEFAULT' else t
 
+
 def pivot_frame(context, kind):
     """(centre, 3x3 axes, orientation type) of the manipulator of ``kind``: where it draws and how its axes point
-    (step 85: Shift+MMB picks one of these axes). Centre None = nothing selected."""
+    (Shift+MMB picks one of these axes). Centre None = nothing selected."""
     scene = context.scene
     otype = slot_type(scene, kind)
-    if context.mode == 'EDIT_MESH':
-        (pts, act) = _edit_points(context)
+    if context.mode != 'OBJECT':
+        pts, act = _edit_points(context)
     else:
-        (pts, act) = _object_points(context)
-    center = center_of(pts, act, scene.tool_settings.transform_pivot_point, scene.cursor.location)
-    return (center, axes_of(context, otype, context.region_data), otype)
+        pts, act = _object_points(context)
+    center = follow_centre(context, center_of(pts, act, scene.tool_settings.transform_pivot_point,
+                                              scene.cursor.location))
+    if pivot_edit(context) and context.active_object is not None:
+        from ..operators import pivot
+        return center, pivot_axes(context), pivot.ORIENT_NAME
+    return center, axes_of(context, otype, context.region_data), otype
+
+
+def follow_centre(context, center):
+    """``center`` plus the offset of a Move drag a placed component pivot has not followed yet (it moves with the
+    components, operators/pivot_follow.py): the manipulator goes along with them during the drag."""
+    if center is None or context.mode != 'EDIT_MESH':
+        return center
+    from ..operators import pivot_follow
+    offset = pivot_follow.pending(context)
+    return center if offset is None else center + offset
+
+
+def pivot_axes(context):
+    """World axes of the pivot being edited: the lead object's pivot, or the component pivot (the 3D cursor)."""
+    if context.mode == 'EDIT_MESH':
+        return context.scene.cursor.matrix.to_3x3().normalized()
+    from ..operators import pivot
+    return pivot.axes_for(context.active_object)
+
 
 def _edit_normal_axes(context):
-    """Approximation of Blender's NORMAL orientation of the selection (docs/steps/step_59.md)."""
+    """Approximation of Blender's NORMAL orientation of the selection."""
     ob = context.edit_object
     if ob is None or ob.type != 'MESH':
         return None
@@ -218,11 +313,11 @@ def _edit_normal_axes(context):
     faces = [f for f in bm.faces if f.select]
     for f in faces:
         n += f.normal
-    if n.length < 1e-09:
+    if n.length < 1e-9:
         for v in bm.verts:
             if v.select:
                 n += v.normal
-    if n.length < 1e-09:
+    if n.length < 1e-9:
         return None
     nm = ob.matrix_world.to_3x3().inverted_safe().transposed()
     z = (nm @ n).normalized()
@@ -232,12 +327,13 @@ def _edit_normal_axes(context):
         e = max(edges, key=lambda e: e.calc_length())
         t = ob.matrix_world.to_3x3() @ (e.verts[1].co - e.verts[0].co)
         t = t - z * t.dot(z)
-    if t is None or t.length < 1e-09:
+    if t is None or t.length < 1e-9:
         t = Vector((0, 0, 1)) if abs(z.z) < 0.9 else Vector((0, 1, 0))
         t = t - z * t.dot(z)
     y = t.normalized()
     x = y.cross(z).normalized()
     return Matrix((x, y, z)).transposed()
+
 
 def axes_of(context, otype, rv3d=None):
     """3x3 world axes of an orientation type (columns = X, Y, Z)."""
@@ -268,6 +364,7 @@ def axes_of(context, otype, rv3d=None):
         return custom.matrix.copy().normalized()
     return ident
 
+
 def _axis_rot(axis):
     """Rotation taking local +Z to the frame axis ``axis``."""
     if axis == 'X':
@@ -275,7 +372,36 @@ def _axis_rot(axis):
     if axis == 'Y':
         return Matrix.Rotation(-1.5707963267948966, 3, 'X')
     return Matrix.Identity(3)
-PLANES = {'XY': ((True, True, False), 'Z', Matrix.Identity(3)), 'YZ': ((False, True, True), 'X', Matrix(((0, 0, 1), (1, 0, 0), (0, 1, 0)))), 'XZ': ((True, False, True), 'Y', Matrix(((1, 0, 0), (0, 0, 1), (0, 1, 0))))}
+
+
+def _ring_rot(axes, axis):
+    """Rotation taking local +Z to column ``axis`` of ``axes`` (which need not be orthogonal: Gimbal rings)."""
+    z = axes.col['XYZ'.index(axis)].normalized()
+    return z.to_track_quat('Z', 'Y').to_matrix()
+
+
+def gimbal_axes(ob):
+    """World axes (columns X, Y, Z) of ``ob``'s Euler rotation channels: each axis turned by the rotations applied
+    after it. Quaternion / axis-angle rotations have no gimbal: the object's own axes."""
+    mode = ob.rotation_mode
+    if mode not in ('XYZ', 'XZY', 'YXZ', 'YZX', 'ZXY', 'ZYX'):
+        return ob.matrix_world.to_3x3().normalized()
+    parent = (ob.matrix_world @ ob.matrix_basis.inverted_safe()).to_3x3().normalized()
+    e = ob.rotation_euler
+    cols = [None, None, None]
+    m = parent.copy()
+    for axis in reversed(mode):          # the last applied rotation turns the earlier axes
+        i = 'XYZ'.index(axis)
+        cols[i] = m.col[i].copy()
+        m = m @ Matrix.Rotation(e[i], 3, axis)
+    return Matrix((cols[0], cols[1], cols[2])).transposed()
+
+
+# Plane handles: local XY plane -> the frame plane; (constraint axes, colour axis = normal).
+PLANES = {'XY': ((True, True, False), 'Z', Matrix.Identity(3)),
+          'YZ': ((False, True, True), 'X', Matrix(((0, 0, 1), (1, 0, 0), (0, 1, 0)))),
+          'XZ': ((True, False, True), 'Y', Matrix(((1, 0, 0), (0, 0, 1), (0, 1, 0))))}
+
 
 def active_tool(context):
     if context.mode not in MODES:
@@ -285,63 +411,91 @@ def active_tool(context):
     except (AttributeError, TypeError):
         return None
 
+
 def tool_kind(context):
     tool = active_tool(context)
     if tool is None or tool.widget != GROUP:
         return None
+    if pivot_edit(context) and (tool.idname == 'builtin.rotate'
+                                or (tool.idname == 'builtin.scale' and context.mode == 'EDIT_MESH')):
+        return 'TRANSLATE'      # like Maya: Rotate (and Scale on components) edit the pivot with the Move handles
     return TOOLS.get(tool.idname)
 
+
 def pivot_edit(context):
-    return context.mode == 'OBJECT' and context.scene.tool_settings.use_transform_data_origin
+    """A pivot is being edited (D / Insert): the object pivot (Affect Only Origins) or the component pivot."""
+    if context.mode == 'OBJECT':
+        return context.scene.tool_settings.use_transform_data_origin
+    if context.mode == 'EDIT_MESH':
+        from ..operators import hold
+        return hold.COMPONENT.on
+    return False
+
 
 def _has_selection(context):
     if context.mode == 'OBJECT':
-        return any((ob.visible_get() for ob in context.selected_objects))
+        return any(ob.visible_get() for ob in context.selected_objects)
     for ob in context.objects_in_mode_unique_data or ():
         if ob.type == 'MESH' and ob.data.total_vert_sel:
             return True
+        if ob.type == 'LATTICE' and _lattice_points(ob):
+            return True
+        if ob.type in ('CURVE', 'SURFACE') and _curve_points(ob):
+            return True
     return False
-MAYA_AXIS = {'X': '#e60000', 'Y': '#00e600', 'Z': '#0000ff'}
+
+
+# #76: kit-fixed Maya-style axis colours instead of the user's theme gizmo axes (Blender's #ff3653 /
+# #8adb00 / #3b64a5): X #e60000, Y #00e600, Z #0000ff. The active and the hovered handle stay yellow #ffff00. Gizmo
+# colours are sRGB like the theme values they replace (the gizmo shaders convert).
+MAYA_AXIS = {'X': "#e60000", 'Y': "#00e600", 'Z': "#0000ff"}
+
 
 def _srgb(hex_str):
-    h = hex_str.lstrip('#')
-    return tuple((int(h[i:i + 2], 16) / 255.0 for i in (0, 2, 4)))
+    h = hex_str.lstrip("#")
+    return tuple(int(h[i:i + 2], 16) / 255.0 for i in (0, 2, 4))
+
 
 def axis_colours():
     """{'X' / 'Y' / 'Z': sRGB (r, g, b)} of the Maya manipulator axes (kit-fixed, whatever the theme is)."""
-    return {axis: _srgb(value) for (axis, value) in MAYA_AXIS.items()}
+    return {axis: _srgb(value) for axis, value in MAYA_AXIS.items()}
+
 
 def plane_fill(colour):
     """Fill colour of a plane handle: the rim colour lightened toward white (Maya 02: red rim, pinkish fill)."""
-    return tuple((c + (1.0 - c) * PLANE_LIGHTEN for c in colour[:3]))
+    return tuple(c + (1.0 - c) * PLANE_LIGHTEN for c in colour[:3])
+
 
 def _active_handle(kind):
-    """The remembered handle of ``kind`` (operators/manip.HANDLES, step 28): None = centre."""
+    """The remembered handle of ``kind`` (operators/manip.HANDLES): None = centre."""
     from ..operators import manip
     return manip.HANDLES.get(kind)
+
 
 def _is_active(kind, handle_axes):
     h = _active_handle(kind)
     if h is None:
         return handle_axes is None
-    return handle_axes is not None and tuple(h.get('constraint_axis', ())) == handle_axes
+    return handle_axes is not None and tuple(h.get("constraint_axis", ())) == handle_axes
+
 
 class ALLSET_GT_maya_handle(Gizmo):
     """One Maya manipulator handle: custom shapes, picked with a fatter invisible shape."""
     bl_idname = GIZMO
-    __slots__ = ('draw_shapes', 'pick_shape', 'handle_kind', 'handle_role', 'handle_axis')
+
+    __slots__ = ("draw_shapes", "pick_shape", "handle_kind", "handle_role", "handle_axis")
 
     def build(self, kind):
         self.handle_kind = kind
-        (draw, pick) = shapes(kind)
-        self.draw_shapes = [self.new_custom_shape(t, v) for (t, v) in draw]
+        draw, pick = shapes(kind)
+        self.draw_shapes = [self.new_custom_shape(t, v) for t, v in draw]
         self.pick_shape = self.new_custom_shape(*pick)
 
     def draw(self, context):
-        if getattr(self, 'handle_kind', None) == 'PLANE':
+        if getattr(self, "handle_kind", None) == 'PLANE':
             self._draw_plane()
             return
-        for sh in getattr(self, 'draw_shapes', ()):
+        for sh in getattr(self, "draw_shapes", ()):
             self.draw_custom_shape(sh)
 
     def _draw_plane(self):
@@ -352,9 +506,9 @@ class ALLSET_GT_maya_handle(Gizmo):
         fill = plane_fill(colour)
         gpu.state.blend_set('ALPHA')
         gpu.state.line_width_set(self.line_width)
-        for (i, (batch, shader)) in enumerate(getattr(self, 'draw_shapes', ())):
+        for i, (batch, shader) in enumerate(getattr(self, "draw_shapes", ())):
             shader.bind()
-            shader.uniform_float('color', (*fill, alpha * PLANE_FILL) if i == 0 else (*colour, alpha))
+            shader.uniform_float("color", (*fill, alpha * PLANE_FILL) if i == 0 else (*colour, alpha))
             with gpu.matrix.push_pop():
                 gpu.matrix.multiply_matrix(self.matrix_world)
                 batch.draw(shader)
@@ -362,65 +516,194 @@ class ALLSET_GT_maya_handle(Gizmo):
         gpu.state.blend_set('NONE')
 
     def draw_select(self, context, select_id):
-        sh = getattr(self, 'pick_shape', None)
+        sh = getattr(self, "pick_shape", None)
         if sh is not None:
             self.draw_custom_shape(sh, select_id=select_id)
+
+
+RING_STEPS = 72
+RING_PICK_PX = 10.0     # a press this close to a drawn ring (x UI scale) grabs it, about as far as Blender's rings
+RING_CLIP_BIAS = 0.02   # in ring radii: a ring facing the view stays whole
+
+
+def front_arcs(matrix, view_z, steps=RING_STEPS):
+    """World polylines of the front half of the unit circle in ``matrix``'s local XY plane: the points on the
+    viewer's side of the plane through the ring centre facing ``view_z`` (the view's +Z, toward the viewer)."""
+    centre = matrix.translation
+    radius = (matrix.to_3x3() @ Vector((1.0, 0.0, 0.0))).length
+    bias = -RING_CLIP_BIAS * radius
+    arcs, run = [], []
+    for i in range(steps + 1):
+        a = 6.283185307179586 * i / steps
+        p = matrix @ Vector((math.cos(a), math.sin(a), 0.0))
+        if (p - centre).dot(view_z) >= bias:
+            run.append(p)
+        elif run:
+            arcs.append(run)
+            run = []
+    if run:
+        if arcs and len(arcs[0]) and (arcs[0][0] - run[-1]).length < 1e-9 * max(radius, 1.0):
+            arcs[0] = run[:-1] + arcs[0]       # the run that wraps past angle 0
+        else:
+            arcs.append(run)
+    return [arc for arc in arcs if len(arc) > 1]
+
+
+class ALLSET_GT_maya_ring(Gizmo):
+    """A Rotate axis ring: only its front half is drawn and picked (picked on screen, ahead of the trackball)."""
+    bl_idname = RING_GIZMO
+
+    __slots__ = ("handle_role", "handle_axis")
+
+    def _arcs(self, context):
+        rv3d = context.region_data
+        if rv3d is None:
+            return []
+        view_z = rv3d.view_matrix.inverted_safe().col[2].xyz.normalized()
+        return front_arcs(self.matrix_world, view_z)
+
+    def draw(self, context):
+        import gpu
+        from gpu_extras.batch import batch_for_shader
+        colour = self.color_highlight if self.is_highlight else self.color
+        alpha = self.alpha_highlight if self.is_highlight else self.alpha
+        shader = gpu.shader.from_builtin('POLYLINE_UNIFORM_COLOR')
+        gpu.state.blend_set('ALPHA')
+        shader.bind()
+        shader.uniform_float("viewportSize", gpu.state.viewport_get()[2:])
+        shader.uniform_float("lineWidth", self.line_width * context.preferences.system.ui_scale)
+        shader.uniform_float("color", (*colour[:3], alpha))
+        for arc in self._arcs(context):
+            batch_for_shader(shader, 'LINE_STRIP', {"pos": [tuple(p) for p in arc]}).draw(shader)
+        gpu.state.blend_set('NONE')
+
+    def test_select(self, context, location):
+        from bpy_extras.view3d_utils import location_3d_to_region_2d
+        region, rv3d = context.region, context.region_data
+        if rv3d is None:
+            return -1
+        limit = RING_PICK_PX * context.preferences.system.ui_scale
+        mouse = Vector((location[0], location[1]))
+        for arc in self._arcs(context):
+            pts = [location_3d_to_region_2d(region, rv3d, p) for p in arc]
+            for a, b in zip(pts, pts[1:]):
+                if a is None or b is None:
+                    continue
+                ab = b - a
+                t = 0.0 if ab.length_squared < 1e-12 else max(0.0, min(1.0, (mouse - a).dot(ab) / ab.length_squared))
+                if (a + ab * t - mouse).length <= limit:
+                    return 0
+        return -1
+
+
+# Maya = / - (operators/manip.ALLSET_OT_manip_size): the kit manipulator's own size factor for this session. Not
+# Blender's gizmo_size preference, which the kit never writes.
 SIZE = [1.0]
+PIVOT_RING_CACHE = {}  # region pointer -> (plain numeric signature, projected ring paths)
+_PIVOT_RING_POINTS = tuple(Vector(p) for p in _ring(1.0, 48)[::2])
+
+
+def _cache_pivot_rings(context, handles, editing):
+    """Share the rendered ring strokes with preselect; keep no live UI references."""
+    key = context.region.as_pointer()
+    if not editing:
+        PIVOT_RING_CACHE.pop(key, None)
+        return
+    matrices = [gz.matrix_world.copy() for gz, role, _axis in handles if role == 'PIVOT_RING']
+    region, projection = context.region, context.region_data.perspective_matrix
+    signature = (region.width, region.height, tuple(v for row in projection for v in row),
+                 tuple(v for matrix in matrices for row in matrix for v in row))
+    previous = PIVOT_RING_CACHE.get(key)
+    if previous is not None and previous[0] == signature:
+        return
+    from ..operators import preselect
+    paths = []
+    for matrix in matrices:
+        xy, front = preselect.project([matrix @ p for p in _PIVOT_RING_POINTS], projection, region.width, region.height)
+        if front.all():
+            paths.append(xy)
+    PIVOT_RING_CACHE[key] = (signature, paths)
+
 
 def scale_basis(context):
     """World size of one arrow unit is set by the draw scale; this is the px factor."""
     return ARROW_PX / 75.0 * context.preferences.view.gizmo_size * SIZE[0] / BASE_PX_PER_UNIT
+
+
+# Pixels one gizmo unit spans with use_draw_scale and scale_basis 1 at gizmo_size 75.
 BASE_PX_PER_UNIT = 75.0
 
+
 class ALLSET_GGT_xform(GizmoGroup):
-    bl_translation_context = 'MWK:ui/manipulator.py:457'
     bl_idname = GROUP
-    bl_label = _zh_native('Maya Manipulator', 'MWK:ui/manipulator.py:457')
+    bl_label = "Maya Manipulator"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'WINDOW'
+    # TOOL_FALLBACK_KEYMAP like Blender's transform gizmo: without it the tool loses its select
+    # fallback (a marquee in empty space does nothing).
     bl_options = {'3D', 'PERSISTENT', 'TOOL_FALLBACK_KEYMAP'}
 
     @classmethod
     def setup_keymap(cls, keyconfig):
-        return keyconfig.keymaps.new(name=_dcc_source('Generic Gizmo Maybe Drag'), space_type='EMPTY', region_type='WINDOW')
+        # Same keymap as Blender's transform gizmo: the Maya keyconfig's Smart Duplicate / Extrude
+        # and active-handle items sit in front of gizmo_tweak there.
+        return keyconfig.keymaps.new(name="Generic Gizmo Maybe Drag", space_type='EMPTY', region_type='WINDOW')
 
     @classmethod
     def poll(cls, context):
         space = context.space_data
-        if space is None or space.type != 'VIEW_3D' or (not space.show_gizmo) or (not space.show_gizmo_tool):
+        if space is None or space.type != 'VIEW_3D' or not space.show_gizmo or not space.show_gizmo_tool:
             return False
         if tool_kind(context) is None or not _has_selection(context):
             return False
+        from . import channel_box
+        from .. import preferences
+        if (channel_box._slider['armed'] and channel_box._view3d_tool(context) == channel_box._slider['tool']
+                and preferences.get(context).cb_manipulators in {'INVISIBLE', 'NONE'}):
+            return False
         from . import in_view
-        return not in_view.manip_visible(context)
+        return not in_view.manip_visible(context)   # Maya: the extrude manipulator replaces it
 
     def setup(self, context):
-        self.handles = []
+        self.handles = []      # (gizmo, role, data)
         self._built_for = None
 
     def _clear(self):
-        for (gz, _role, _data) in self.handles:
+        for gz, _role, _data in self.handles:
             self.gizmos.remove(gz)
         self.handles = []
 
     def _new(self, kind, role=None, axis=None):
         gz = self.gizmos.new(GIZMO)
         gz.build(kind)
-        (gz.handle_role, gz.handle_axis) = (role, axis)
+        gz.handle_role, gz.handle_axis = role, axis       # read by operators/manip.py Ctrl+LMB
         gz.use_draw_scale = True
         gz.use_draw_modal = True
-        gz.use_tooltip = False
+        gz.use_tooltip = False                           # Maya manipulators show no tooltip (#98)
         gz.line_width = 1.5
         gz.color_highlight = YELLOW
         gz.alpha = gz.alpha_highlight = ALPHA
         return gz
 
-    def _dial(self):
-        gz = self.gizmos.new('GIZMO_GT_dial_3d')
+    def _ring(self, axis):
+        gz = self.gizmos.new(RING_GIZMO)
+        gz.handle_role, gz.handle_axis = 'RING', axis
         gz.use_draw_scale = True
         gz.use_draw_modal = True
         gz.use_tooltip = False
-        gz.line_width = 1.5
+        gz.line_width = ROTATE_LINE
+        gz.color_highlight = YELLOW
+        gz.alpha = gz.alpha_highlight = ALPHA
+        return gz
+
+    def _dial(self, options=None, line_width=1.5):
+        gz = self.gizmos.new("GIZMO_GT_dial_3d")
+        if options is not None:
+            gz.draw_options = options
+        gz.use_draw_scale = True
+        gz.use_draw_modal = True
+        gz.use_tooltip = False                           # Maya manipulators show no tooltip (#98)
+        gz.line_width = line_width
         gz.color_highlight = YELLOW
         gz.alpha = gz.alpha_highlight = ALPHA
         return gz
@@ -436,6 +719,16 @@ class ALLSET_GGT_xform(GizmoGroup):
             if pivot:
                 for ax in 'XYZ':
                     self.handles.append((self._dial(), 'PIVOT_RING', ax))
+        elif kind == 'ROTATE':
+            # the trackball (outline drawn, whole disc picked where nothing else is), the view ring, then the axis
+            # rings drawn and picked on their front half only. Blender keeps the first hit of its gizmo list,
+            # which runs from the last made gizmo: the rings are made last.
+            ball = self._dial({'FILL_SELECT'}, 1.0)
+            ball.use_select_background = True
+            self.handles.append((ball, 'TRACKBALL', None))
+            self.handles.append((self._dial(set(), ROTATE_LINE), 'VIEW_RING', None))
+            for ax in 'XYZ':
+                self.handles.append((self._ring(ax), 'RING', ax))
         elif kind == 'RESIZE':
             for ax in 'XYZ':
                 self.handles.append((self._new('SCALE_AXIS', 'AXIS', ax), 'AXIS', ax))
@@ -445,31 +738,77 @@ class ALLSET_GGT_xform(GizmoGroup):
         self._built_for = (kind, pivot)
         self._ops_for = None
 
-    def _bind_ops(self, kind, otype):
+    def _bind_ops(self, kind, otype, frame=None, clamp=False, live_move=False, slide=False):
         """Point each handle at Blender's transform with its constraint and orientation."""
-        op = {'TRANSLATE': 'transform.translate', 'RESIZE': 'transform.resize'}[kind]
-        for (gz, role, data) in self.handles:
-            if role == 'AXIS':
-                axes = tuple((a == data for a in 'XYZ'))
-                props = gz.target_set_operator(op)
+        op = {'TRANSLATE': "transform.translate", 'ROTATE': "transform.rotate", 'RESIZE': "transform.resize"}[kind]
+        if frame is None:
+            frame = Matrix.Identity(3)
+        editing = getattr(self, "_built_for", None) == ('TRANSLATE', True)
+        if editing:
+            op = "allset.pivot_translate"
+        for gz, role, data in self.handles:
+            if kind == 'RESIZE' and role in ('AXIS', 'PLANE', 'CENTER'):
+                # #200: Maya's scale drag (operators/manip_scale.py)
+                props = gz.target_set_operator("allset.manip_scale")
+                props.mode = role
+                if role == 'AXIS':
+                    props.axis = data
+                elif role == 'PLANE':
+                    props.plane = data
+                props.orient_type = otype
+            elif slide and kind == 'TRANSLATE' and not editing and role in ('AXIS', 'PLANE', 'CENTER'):
+                # Maya Transform Constraint Edge / Surface: every Move handle slides the components
+                props = gz.target_set_operator("allset.component_slide")
+                if role in ('AXIS', 'PLANE'):
+                    props.constraint_axis = (tuple(a == data for a in 'XYZ') if role == 'AXIS'
+                                             else PLANES[data][0])
+                    builtin = {'GLOBAL', 'LOCAL', 'NORMAL', 'GIMBAL', 'VIEW', 'CURSOR', 'PARENT'}
+                    props.orient_type = otype if otype in builtin else 'GLOBAL'
+                    props.orient_matrix = Matrix.Identity(3) if otype in builtin else frame
+            elif role == 'AXIS':
+                axes = tuple(a == data for a in 'XYZ')
+                props = gz.target_set_operator("allset.component_scale" if clamp and kind == 'RESIZE' else op)
                 props.constraint_axis = axes
-                props.orient_type = otype
-                props.release_confirm = True
+                if not editing:
+                    ALLSET_GGT_xform._orient(props, otype, frame)
+                    props.release_confirm = True
             elif role == 'PLANE':
-                props = gz.target_set_operator(op)
+                props = gz.target_set_operator('allset.live_translate' if live_move else op)
                 props.constraint_axis = PLANES[data][0]
-                props.orient_type = otype
-                props.release_confirm = True
+                if not editing:
+                    ALLSET_GGT_xform._orient(props, otype, frame)
+                    props.release_confirm = True
             elif role == 'CENTER':
-                props = gz.target_set_operator(op)
-                props.release_confirm = True
+                props = gz.target_set_operator('allset.live_translate' if live_move else op)
+                if not editing:
+                    props.release_confirm = True
             elif role == 'PIVOT_RING':
-                props = gz.target_set_operator('transform.rotate')
+                props = gz.target_set_operator("allset.pivot_rotate")
+                props.axis = data
+            elif role == 'RING':
+                props = gz.target_set_operator(op)
+                props.constraint_axis = tuple(a == data for a in 'XYZ')
                 props.orient_axis = data
-                props.orient_type = 'LOCAL'
-                props.constraint_axis = tuple((a == data for a in 'XYZ'))
+                ALLSET_GGT_xform._orient(props, otype, frame)
                 props.release_confirm = True
-        self._ops_for = (kind, otype)
+            elif role == 'VIEW_RING':
+                props = gz.target_set_operator(op)
+                props.orient_type = 'VIEW'      # about the view axis
+                props.orient_axis = 'Z'
+                props.release_confirm = True
+            elif role == 'TRACKBALL':
+                props = gz.target_set_operator("transform.trackball")
+                props.release_confirm = True
+        self._ops_for = (kind, otype, tuple(v for row in frame for v in row), clamp, live_move, slide)
+
+    @staticmethod
+    def _orient(props, otype, frame):
+        # Gizmo operator properties expose built-in enum values on Blender 5.2.
+        # Supply the picked component axes explicitly for custom orientations.
+        builtin = {'GLOBAL', 'LOCAL', 'NORMAL', 'GIMBAL', 'VIEW', 'CURSOR', 'PARENT'}
+        props.orient_type = otype if otype in builtin else 'GLOBAL'
+        props.orient_matrix_type = 'GLOBAL'
+        props.orient_matrix = Matrix.Identity(3) if otype in builtin else frame
 
     def draw_prepare(self, context):
         kind = tool_kind(context)
@@ -480,42 +819,83 @@ class ALLSET_GGT_xform(GizmoGroup):
             self._build(context, kind, pivot)
         scene = context.scene
         otype = slot_type(scene, kind)
-        if self._ops_for != (kind, otype):
-            self._bind_ops(kind, otype)
-        if context.mode == 'EDIT_MESH':
-            (pts, act) = _edit_points(context)
-        else:
-            (pts, act) = _object_points(context)
-        center = center_of(pts, act, scene.tool_settings.transform_pivot_point, scene.cursor.location)
-        hide = center is None
         rv3d = context.region_data
         frame = axes_of(context, otype, rv3d)
+        rings = frame
+        if kind == 'ROTATE' and otype == 'GIMBAL' and context.view_layer.objects.active is not None:
+            rings = gimbal_axes(context.view_layer.objects.active)
+        if pivot and context.active_object is not None:
+            from ..operators import pivot as pivot_ops
+            frame, otype = pivot_axes(context), pivot_ops.ORIENT_NAME
+        from ..operators import component_scale
+        scale_drag = component_scale.DRAG if kind == 'RESIZE' else None
+        if scale_drag is not None:
+            frame, otype = scale_drag._frame, 'GLOBAL'
+        clamp = kind == 'RESIZE' and component_scale.enabled(context)
+        from ..operators import live_translate
+        live_move = kind == 'TRANSLATE' and not pivot and live_translate.enabled(context)
+        from ..operators import xform_constraint
+        slide = kind == 'TRANSLATE' and not pivot and xform_constraint.active(context)
+        signature = (kind, otype, tuple(v for row in frame for v in row), clamp, live_move, slide)
+        if self._ops_for != signature and not any(gz.is_modal for gz, _role, _data in self.handles):
+            self._bind_ops(kind, otype, frame=frame, clamp=clamp, live_move=live_move, slide=slide)
+        if context.mode != 'OBJECT':
+            pts, act = _edit_points(context)
+        else:
+            pts, act = _object_points(context)
+        center = follow_centre(context, center_of(pts, act, scene.tool_settings.transform_pivot_point,
+                                                  scene.cursor.location))
+        if scale_drag is not None:
+            center = scale_drag._centre
+        hide = center is None
         view = rv3d.view_rotation.to_matrix() if rv3d is not None else Matrix.Identity(3)
         colours = axis_colours()
         s = scale_basis(context)
-        for (gz, role, data) in self.handles:
+        for gz, role, data in self.handles:
             gz.hide = hide
             if hide:
                 continue
             gz.scale_basis = s
             if role == 'AXIS':
                 rot = frame @ _axis_rot(data)
-                active = _is_active(kind, tuple((a == data for a in 'XYZ')))
+                active = _is_active(kind, tuple(a == data for a in 'XYZ'))
                 gz.color = ACTIVE if active else colours[data]
             elif role == 'PLANE':
-                (axes, normal, local) = PLANES[data]
+                axes, normal, local = PLANES[data]
                 rot = frame @ local
                 gz.color = ACTIVE if _is_active(kind, axes) else colours[normal]
+            elif role == 'RING':
+                rot = _ring_rot(rings, data)
+                gz.color = ACTIVE if _is_active(kind, tuple(a == data for a in 'XYZ')) else colours[data]
+                gz.scale_basis = s * ROTATE_RING_R
+            elif role in ('VIEW_RING', 'TRACKBALL'):
+                rot = view
+                if role == 'VIEW_RING':     # light blue, #fdff88 while it is the active handle
+                    h = _active_handle(kind)
+                    gz.color = ACTIVE if h is not None and h.get("orient_type") == 'VIEW' else CENTER_IDLE
+                else:
+                    gz.color = TRACKBALL
+                gz.scale_basis = s * ROTATE_RING_R * (VIEW_RING if role == 'VIEW_RING' else 1.0)
             elif role == 'CENTER':
+                # Maya: the centre (free move / uniform scale) is the active handle by default, drawn #fdff88;
+                # light blue while an axis or plane is active
                 rot = frame if kind == 'RESIZE' else view
                 gz.color = ACTIVE if _is_active(kind, None) else CENTER_IDLE
-            else:
-                rot = axes_of(context, 'LOCAL', rv3d) @ _axis_rot(data)
+            else:   # PIVOT_RING
+                rot = frame @ _axis_rot(data)
                 gz.color = colours[data]
                 gz.scale_basis = s * PIVOT_RING_R
             gz.matrix_basis = Matrix.Translation(center) @ rot.to_4x4()
-classes = (ALLSET_GT_maya_handle, ALLSET_GGT_xform)
-TITLES = {'TRANSLATE': _dcc_source('Move Settings'), 'ROTATE': _dcc_source('Rotate Settings'), 'RESIZE': _dcc_source('Scale Settings')}
+        _cache_pivot_rings(context, self.handles, pivot and not hide)
+
+
+classes = (ALLSET_GT_maya_handle, ALLSET_GT_maya_ring, ALLSET_GGT_xform)
+
+
+# --- Tool Settings: Maya Move / Rotate / Scale Settings --------
+
+TITLES = {'TRANSLATE': "Move Settings", 'ROTATE': "Rotate Settings", 'RESIZE': "Scale Settings"}
+
 
 def draw_tool_settings(self, context):
     """Appended to the active tool panel (the Status Line / W-menu Tool Settings popup)."""
@@ -528,46 +908,64 @@ def draw_tool_settings(self, context):
     ts = scene.tool_settings
     layout = self.layout
     layout.separator()
-    layout.label(text=_zh(TITLES[kind], 'MWK:ui/manipulator.py:624'))
+    layout.label(text=TITLES[kind])
     col = layout.column(align=True)
-    col.prop(scene.transform_orientation_slots[SLOT[kind]], 'type', text=_zh('Axis Orientation', 'MWK:ui/manipulator.py:626'))
-    col.prop(ts, 'transform_pivot_point', text=_zh('Pivot', 'MWK:ui/manipulator.py:627'))
+    col.prop(scene.transform_orientation_slots[SLOT[kind]], "type", text="Axis Orientation")
+    col.prop(ts, "transform_pivot_point", text="Pivot")
+    if kind == 'RESIZE':
+        from .. import preferences
+        row = col.row()
+        row.enabled = context.mode == 'EDIT_MESH'
+        row.prop(preferences.get(context), 'prevent_negative_scale')
     row = layout.row(align=True)
-    row.label(text=_zh('Step Snap', 'MWK:ui/manipulator.py:629'))
+    row.label(text="Step Snap")
     mode = snap_align.step_snap_mode(ts, kind)
     for m in ('OFF', 'RELATIVE', 'ABSOLUTE'):
         cell = row.row(align=True)
+        # Move offers Absolute only with World axes (Maya)
         cell.enabled = m != 'ABSOLUTE' or snap_align.absolute_offered(scene, kind)
-        op = cell.operator('allset.step_snap', text=_zh(m.title(), 'MWK:ui/manipulator.py:635'), depress=mode == m)
-        (op.kind, op.mode) = (kind, m)
+        op = cell.operator("allset.step_snap", text=m.title(), depress=mode == m)
+        op.kind, op.mode = kind, m
     if kind == 'ROTATE':
-        layout.prop(ts, 'snap_angle_increment_3d', text=_zh('Step', 'MWK:ui/manipulator.py:638'))
+        layout.prop(ts, "snap_angle_increment_3d", text="Step")
+    elif kind == 'RESIZE':
+        layout.label(text="Step: 0.1")
     else:
-        layout.label(text=_zh('Step: one grid unit', 'MWK:ui/manipulator.py:641'), icon='SNAP_INCREMENT')
+        # Blender's increment is the grid step: 1 Maya unit in the Maya Workflow Kit template.
+        layout.label(text="Step: one grid unit", icon='SNAP_INCREMENT')
     if kind == 'TRANSLATE':
-        layout.label(text=_zh('Retain Component Spacing', 'MWK:ui/manipulator.py:644'), icon='CHECKBOX_HLT')
+        # Blender snapping always keeps the selection's spacing (on by default, like Maya; off = not possible).
+        layout.label(text="Retain Component Spacing", icon='CHECKBOX_HLT')
     if context.mode == 'OBJECT':
-        layout.label(text=_zh('Pivot', 'MWK:ui/manipulator.py:646'))
+        layout.label(text="Pivot")
         row = layout.row(align=True)
-        row.operator('allset.pivot_toggle', text=_zh('Edit Pivot', 'MWK:ui/manipulator.py:648'), icon='OBJECT_ORIGIN', depress=ts.use_transform_data_origin)
-        row.operator('allset.reset_pivot', text=_zh('Reset', 'MWK:ui/manipulator.py:650'))
-        row.operator('allset.bake_pivot', text=_zh('Bake', 'MWK:ui/manipulator.py:651'))
-_saved = {}
+        row.operator("allset.pivot_toggle", text="Edit Pivot", icon='OBJECT_ORIGIN',
+                     depress=ts.use_transform_data_origin)
+        row.operator("allset.reset_pivot", text="Reset")
+        row.operator("allset.bake_pivot", text="Bake")
+
+
+# --- tool widget swap ---------------------------------------------------------------------------
+
+_saved = {}   # mode -> original tool list
+
 
 def _swap_items(items):
     out = []
     for it in items:
-        if isinstance(it, tuple) and (not hasattr(it, 'idname')):
+        if isinstance(it, tuple) and not hasattr(it, "idname"):
             out.append(tuple(_swap_items(it)))
-        elif getattr(it, 'idname', None) in TOOLS and getattr(it, 'widget', None) == 'VIEW3D_GGT_xform_gizmo':
+        elif getattr(it, "idname", None) in TOOLS and getattr(it, "widget", None) == "VIEW3D_GGT_xform_gizmo":
             out.append(it._replace(widget=GROUP))
         else:
             out.append(it)
     return out
 
+
 def _panel():
     from bl_ui.space_toolsystem_toolbar import VIEW3D_PT_tools_active
     return VIEW3D_PT_tools_active
+
 
 def patch_tools():
     cls = _panel()
@@ -578,39 +976,57 @@ def patch_tools():
         _saved[mode] = items
         cls._tools[mode] = type(items)(_swap_items(items))
 
+
 def unpatch_tools():
     cls = _panel()
-    for (mode, items) in _saved.items():
+    for mode, items in _saved.items():
         cls._tools[mode] = items
     _saved.clear()
+
 
 def _find_item(mode, idname):
     cls = _panel()
     from bl_ui.space_toolsystem_common import ToolSelectPanelHelper
-    for (item, _index) in ToolSelectPanelHelper._tools_flatten_with_tool_index(cls.tools_from_context(bpy.context, mode=mode)):
+    for item, _index in ToolSelectPanelHelper._tools_flatten_with_tool_index(
+            cls.tools_from_context(bpy.context, mode=mode)):
         if item is not None and item.idname == idname:
             return item
     return None
 
-def resetup(tool, mode):
+
+def resetup(tool, mode, widget=None):
     """Set ``tool`` (a WorkSpaceTool of ``mode``) up again from the current ToolDef: the gizmo
     group a tool uses is copied at activation, so a swapped ToolDef needs this."""
     item = _find_item(mode, tool.idname)
     if item is None:
         return False
     fallback = _find_item(mode, tool.idname_fallback) if tool.idname_fallback else None
-    keymap_fallback = fallback and fallback.keymap and fallback.keymap[0] or ''
+    keymap_fallback = (fallback and fallback.keymap and fallback.keymap[0]) or ""
     if keymap_fallback:
-        keymap_fallback += ' (fallback)'
-    tool.setup(idname=item.idname, keymap=item.keymap[0] if item.keymap is not None else '', cursor=item.cursor or 'DEFAULT', options=item.options or set(), gizmo_group=item.widget or '', brush_type=item.brush_type or 'ANY', data_block=item.data_block or '', operator=item.operator or '', index=tool.index, idname_fallback=tool.idname_fallback, keymap_fallback=keymap_fallback)
+        keymap_fallback += " (fallback)"
+    tool.setup(idname=item.idname, keymap=item.keymap[0] if item.keymap is not None else "",
+               cursor=item.cursor or 'DEFAULT', options=item.options or set(),
+               gizmo_group=(item.widget or "") if widget is None else widget, brush_type=item.brush_type or 'ANY',
+               data_block=item.data_block or "", operator=item.operator or "", index=tool.index,
+               idname_fallback=tool.idname_fallback, keymap_fallback=keymap_fallback)
     return True
+
+
+def refresh_pivot_tool(context):
+    """Rotate shows the pivot edit handles during D / Insert and its rings again after (``tool_kind``, same gizmo
+    group): only a tool still carrying another group is set up again."""
+    tool = active_tool(context)
+    if context.mode == 'OBJECT' and stale(tool, bool(_saved)):
+        resetup(tool, context.mode)
+
 
 def stale(tool, patched):
     """True when an active transform tool still carries the other gizmo group."""
     if tool is None or tool.idname not in TOOLS:
         return False
-    want = GROUP if patched else 'VIEW3D_GGT_xform_gizmo'
+    want = GROUP if patched else "VIEW3D_GGT_xform_gizmo"
     return tool.widget != want
+
 
 def ensure_tools(patched=True):
     """Set up again every workspace's Move/Rotate/Scale tool whose gizmo group is stale."""
@@ -625,8 +1041,9 @@ def ensure_tools(patched=True):
                 try:
                     done += resetup(tool, mode)
                 except (TypeError, RuntimeError, AttributeError) as ex:
-                    print('allset: tool setup failed', tool.idname, ex)
+                    print("allset: tool setup failed", tool.idname, ex)
     return done
+
 
 def _ensure_timer():
     try:
@@ -635,9 +1052,11 @@ def _ensure_timer():
         pass
     return 0.5 if _saved else None
 
+
 @bpy.app.handlers.persistent
 def _on_load_post(_dummy):
     ensure_tools(bool(_saved))
+
 
 def register():
     for cls in classes:
@@ -648,8 +1067,10 @@ def register():
     if _on_load_post not in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.append(_on_load_post)
 
+
 def unregister():
     SIZE[0] = 1.0
+    PIVOT_RING_CACHE.clear()
     if _on_load_post in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.remove(_on_load_post)
     if bpy.app.timers.is_registered(_ensure_timer):
