@@ -66,7 +66,8 @@ def _props(tab):
     return ('allset.open_editor', {'ui_type': 'PROPERTIES', 'tab': tab})
 
 def _url(url):
-    return ('wm.url_open', {'url': url})
+    from ..compat import docs_url
+    return ('wm.url_open', {'url': docs_url(url)})
 
 def _sculpt(brush):
     return ('allset.sculpt_tool', {'brush': brush})

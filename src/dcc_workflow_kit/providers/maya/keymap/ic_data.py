@@ -13,7 +13,7 @@ import copy
 import sys
 from importlib import import_module
 from .. import compat
-VERSIONS = ((4, 5), (5, 0), (5, 1), (5, 2))
+VERSIONS = ((4, 2), (4, 5), (5, 0), (5, 1), (5, 2))
 
 def data_version(version=None):
     version = tuple(version or compat.VERSION)

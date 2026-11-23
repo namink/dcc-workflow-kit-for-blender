@@ -9774,7 +9774,8 @@
     "verticalOffset": "垂直偏移",
     "verticalRevolutions": "垂直旋转圈数",
     "xOffset": "X 偏移",
-    "zOffset": "Z 偏移"
+    "zOffset": "Z 偏移",
+    "3D Viewport": "3D 视图"
   },
   "contexts": {
     "Create/Sets": {
@@ -10503,6 +10504,9 @@
       "BACK": "后",
       "RIGHT": "右",
       "LEFT": "左"
+    },
+    "MWK:operators/menu_extras.py:135": {
+      "3D Viewport": "3D 视图"
     }
   },
   "provenance": {

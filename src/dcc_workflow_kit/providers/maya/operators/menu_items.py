@@ -466,6 +466,14 @@ class ALLSET_OT_paint_hair_follicles(bpy.types.Operator):
 def _activate_brush(brush, window=None):
     """``brush.asset_activate`` in a 3D View of the window when there is one: 5.2 checks the mode there and refuses
     from another editor (a shelf button: "Unable to activate brush, wrong object mode", GUI, step 118)."""
+    if bpy.app.version < (4, 3, 0):
+        legacy = {'Draw': 'DRAW', 'Clay Strips': 'CLAY_STRIPS', 'Inflate/Deflate': 'INFLATE', 'Crease': 'CREASE', 'Smooth': 'SMOOTH', 'Grab': 'GRAB', 'Flatten/Contrast': 'FLATTEN', 'Scrape/Fill': 'SCRAPE', 'Pinch/Magnify': 'PINCH', 'Mask': 'MASK'}
+        kind = legacy.get(brush, brush.upper().replace(' ', '_'))
+        selected = next((b for b in bpy.data.brushes if b.use_paint_sculpt and b.sculpt_tool == kind), None)
+        if selected is None:
+            raise RuntimeError('Blender 4.2: sculpt brush unavailable: ' + brush)
+        bpy.context.tool_settings.sculpt.brush = selected
+        return {'FINISHED'}
     window = window or bpy.context.window
     area = next((a for a in window.screen.areas if a.type == 'VIEW_3D'), None) if window else None
     region = next((r for r in area.regions if r.type == 'WINDOW'), None) if area else None

@@ -95,7 +95,19 @@ def _apply_addon(data):
             _state['addon_made'].append((name, space, region))
         km = kc.keymaps.new(name, **km_args)
         before = {k.as_pointer() for k in km.keymap_items}
-        keymap_init_from_data(km, list(reversed(content['items'])))
+        items = []
+        for identifier, event, options in reversed(content['items']):
+            try:
+                category, operator = identifier.split('.', 1)
+                rna = getattr(getattr(bpy.ops, category), operator).get_rna_type()
+            except (ValueError, AttributeError, KeyError, RuntimeError):
+                # The static preset also contains operators absent in older Blender builds.
+                continue
+            options = dict(options or {})
+            if 'properties' in options:
+                options['properties'] = [(key, value) for key, value in options['properties'] if key in rna.properties]
+            items.append((identifier, event, options))
+        keymap_init_from_data(km, items)
         _state['addon_items'].update((k.as_pointer() for k in _new_items(km, before)))
 
 def _restore_addon():

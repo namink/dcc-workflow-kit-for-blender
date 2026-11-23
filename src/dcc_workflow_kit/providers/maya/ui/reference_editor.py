@@ -14,6 +14,7 @@ Hypershade pane draws there), drawn by ``ALLSET_PT_reference_editor``. Menus com
 from ..i18n import source_message as _dcc_source, display_message as _dcc_display, format_message as _dcc_format
 from ..i18n import tr as _zh, enum_items as _zh_enum, native as _zh_native
 import bpy
+from ..compat import property_flags, property_flag, set_property_flag
 from bpy.props import BoolProperty, StringProperty
 from .. import live_refs
 EDITOR = _dcc_source('Reference Editor')
@@ -25,16 +26,16 @@ def _refs():
     return references
 
 def _flags(space):
-    return [p.identifier for p in space.bl_rna.properties if p.identifier.startswith('show_properties_')]
+    return property_flags(space)
 
 def is_pane(area):
     if area is None or area.type != 'PROPERTIES':
         return False
     space = area.spaces.active
-    if space.show_region_header or not space.show_properties_tool:
+    if space.show_region_header or not property_flag(space, 'show_properties_tool'):
         return False
     from .. import compat
-    on = {f for f in _flags(space) if getattr(space, f)} - set(compat.LATER_PROPERTIES_TABS)
+    on = {f for f in _flags(space) if property_flag(space, f)} - set(compat.LATER_PROPERTIES_TABS)
     return on == {'show_properties_tool', *MARK}
 
 def context_pane(context):
@@ -48,7 +49,7 @@ def set_pane(area, window=None):
     except TypeError:
         return False
     for flag in _flags(space):
-        setattr(space, flag, flag in ('show_properties_tool', *MARK))
+        set_property_flag(space, flag, flag in ('show_properties_tool', *MARK))
     space.show_region_header = False
     nav = next((r for r in area.regions if r.type == 'NAVIGATION_BAR'), None)
     if nav is not None and nav.width > 1 and (window is not None) and (not bpy.app.background):

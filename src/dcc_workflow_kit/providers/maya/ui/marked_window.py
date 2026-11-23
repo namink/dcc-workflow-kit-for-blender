@@ -12,21 +12,22 @@ Hypershade ``MARK`` pair or the Reference Editor's triple, so their checks never
 from ..i18n import source_message as _dcc_source, display_message as _dcc_display, format_message as _dcc_format
 from ..i18n import tr as _zh, enum_items as _zh_enum, native as _zh_native
 import bpy
+from ..compat import property_flags, property_flag, set_property_flag
 from .. import live_refs
 KINDS = {'COMPONENT_EDITOR': ('show_properties_object', 'show_properties_modifiers'), 'SHAPE_EDITOR': ('show_properties_object', 'show_properties_data'), 'CONNECTION_EDITOR': ('show_properties_object', 'show_properties_material'), 'HOTKEY_EDITOR': ('show_properties_bone', 'show_properties_bone_constraints'), 'PREFERENCES': ('show_properties_scene', 'show_properties_output'), 'POSE_EDITOR': ('show_properties_object', 'show_properties_constraints'), 'GAME_EXPORTER': ('show_properties_scene', 'show_properties_physics')}
 
 def _flags(space):
-    return [p.identifier for p in space.bl_rna.properties if p.identifier.startswith('show_properties_')]
+    return property_flags(space)
 
 def kind_of(area):
     """The kit editor kind the Properties ``area`` is marked as, else None."""
     if area is None or area.type != 'PROPERTIES':
         return None
     space = area.spaces.active
-    if space.show_region_header or not space.show_properties_tool:
+    if space.show_region_header or not property_flag(space, 'show_properties_tool'):
         return None
     from .. import compat
-    on = {f for f in _flags(space) if getattr(space, f)} - set(compat.LATER_PROPERTIES_TABS)
+    on = {f for f in _flags(space) if property_flag(space, f)} - set(compat.LATER_PROPERTIES_TABS)
     for (kind, mark) in KINDS.items():
         if on == {'show_properties_tool', *mark}:
             return kind
@@ -43,7 +44,7 @@ def set_kind(area, kind, window=None):
     except TypeError:
         return False
     for flag in _flags(space):
-        setattr(space, flag, flag in ('show_properties_tool', *KINDS[kind]))
+        set_property_flag(space, flag, flag in ('show_properties_tool', *KINDS[kind]))
     space.show_region_header = False
     nav = next((r for r in area.regions if r.type == 'NAVIGATION_BAR'), None)
     if nav is not None and nav.width > 1 and (window is not None) and (not bpy.app.background):

@@ -250,7 +250,9 @@ def unfold(context, ob):
     mark_shell_borders(bm, uv, faces)
     before = [([f.index for f in isl], _point_mean(isl, uv), sum((_uv_area(f, uv) for f in isl))) for isl in shells]
     bmesh.update_edit_mesh(ob.data)
-    _with_faces(context, ob, faces, lambda : bpy.ops.uv.unwrap(method='MINIMUM_STRETCH', margin=0.0))
+    methods = bpy.ops.uv.unwrap.get_rna_type().properties['method'].enum_items
+    method = 'MINIMUM_STRETCH' if 'MINIMUM_STRETCH' in methods else 'ANGLE_BASED'
+    _with_faces(context, ob, faces, lambda : bpy.ops.uv.unwrap(method=method, margin=0.0))
     bm = bmesh.from_edit_mesh(ob.data)
     uv = bm.loops.layers.uv.verify()
     bm.faces.ensure_lookup_table()

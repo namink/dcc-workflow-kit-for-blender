@@ -25,6 +25,7 @@ from ..i18n import source_message as _dcc_source, display_message as _dcc_displa
 from ..i18n import tr as _zh, enum_items as _zh_enum, native as _zh_native
 import math
 import bpy
+from ..compat import property_flags, property_flag, set_property_flag
 from bpy.props import EnumProperty, StringProperty
 from .. import live_refs
 KINDS = ('CHANNEL_BOX', 'ATTRIBUTE_EDITOR', 'MODELING_TOOLKIT')
@@ -37,20 +38,20 @@ _torn_menus = {}
 _pending = {}
 
 def _flags(space):
-    return [p.identifier for p in space.bl_rna.properties if p.identifier.startswith('show_properties_')]
+    return property_flags(space)
 
 def role(area):
     """'STACK' / a KINDS member / 'MENU' for a kit dock area, else None (the Tool Settings dock has no role)."""
     if area is None or area.type != 'PROPERTIES':
         return None
     space = area.spaces.active
-    if space.show_region_header or not space.show_properties_tool:
+    if space.show_region_header or not property_flag(space, 'show_properties_tool'):
         return None
-    on = [name for (name, flag) in ROLE_FLAGS.items() if getattr(space, flag, False)]
+    on = [name for (name, flag) in ROLE_FLAGS.items() if property_flag(space, flag, False)]
     if len(on) != 1:
         return None
     from .. import compat
-    if any((getattr(space, f) for f in _flags(space) if f not in ('show_properties_tool', ROLE_FLAGS[on[0]]) and f not in compat.LATER_PROPERTIES_TABS)):
+    if any((property_flag(space, f) for f in _flags(space) if f not in ('show_properties_tool', ROLE_FLAGS[on[0]]) and f not in compat.LATER_PROPERTIES_TABS)):
         return None
     return on[0]
 
@@ -63,7 +64,7 @@ def set_role(area, name, window=None):
     except TypeError:
         return False
     for flag in _flags(space):
-        setattr(space, flag, flag == 'show_properties_tool' or flag == ROLE_FLAGS.get(name))
+        set_property_flag(space, flag, flag == 'show_properties_tool' or flag == ROLE_FLAGS.get(name))
     space.show_region_header = False
     nav = next((r for r in area.regions if r.type == 'NAVIGATION_BAR'), None)
     if nav is not None and nav.width > 1 and (window is not None) and (not bpy.app.background):

@@ -25,6 +25,7 @@ Windows > Rendering Editors > Hypershade, the Status Line icon and the hotbox's 
 from ..i18n import source_message as _dcc_source, display_message as _dcc_display, format_message as _dcc_format
 from ..i18n import tr as _zh, enum_items as _zh_enum, native as _zh_native
 import bpy
+from ..compat import property_flags, property_flag, set_property_flag
 from bpy.props import BoolProperty, EnumProperty, StringProperty
 from .. import results
 from .. import compat, live_refs
@@ -77,20 +78,20 @@ PANE_FLAGS = {'BROWSER': 'show_properties_render', 'CREATE': 'show_properties_ou
 PANE_LABELS = {'BROWSER': _dcc_source('Browser'), 'CREATE': _dcc_source('Create'), 'VIEWER': _dcc_source('Material Viewer'), 'PROPERTY': _dcc_source('Property Editor')}
 
 def _flags(space):
-    return [p.identifier for p in space.bl_rna.properties if p.identifier.startswith('show_properties_')]
+    return property_flags(space)
 
 def pane(area):
     """'BROWSER' / 'CREATE' / 'VIEWER' / 'PROPERTY' for a Hypershade pane, else None."""
     if area is None or area.type != 'PROPERTIES':
         return None
     space = area.spaces.active
-    if space.show_region_header or not space.show_properties_tool or (not all((getattr(space, f) for f in MARK))):
+    if space.show_region_header or not property_flag(space, 'show_properties_tool') or (not all((property_flag(space, f) for f in MARK))):
         return None
-    on = [name for (name, flag) in PANE_FLAGS.items() if getattr(space, flag, False)]
+    on = [name for (name, flag) in PANE_FLAGS.items() if property_flag(space, flag, False)]
     if len(on) != 1:
         return None
     allowed = {'show_properties_tool', *MARK, PANE_FLAGS[on[0]], *compat.LATER_PROPERTIES_TABS}
-    if any((getattr(space, f) for f in _flags(space) if f not in allowed)):
+    if any((property_flag(space, f) for f in _flags(space) if f not in allowed)):
         return None
     return on[0]
 
@@ -106,7 +107,7 @@ def set_pane(area, name, window=None):
     except TypeError:
         return False
     for flag in _flags(space):
-        setattr(space, flag, flag in ('show_properties_tool', *MARK, PANE_FLAGS[name]))
+        set_property_flag(space, flag, flag in ('show_properties_tool', *MARK, PANE_FLAGS[name]))
     space.show_region_header = False
     nav = next((r for r in area.regions if r.type == 'NAVIGATION_BAR'), None)
     if nav is not None and nav.width > 1 and (window is not None) and (not bpy.app.background):

@@ -7,6 +7,7 @@ this" lives here; feature code calls these helpers and stays the same on every v
 gets the same result as before.
 """
 
+import re
 import bpy
 
 VERSION = tuple(bpy.app.version[:2])
@@ -14,6 +15,56 @@ TARGET = (5, 2)                         # main target since step 272 (Blender 5.
 STRICT_VERSIONS = ((4, 5), (5, 2))      # keymap patches must all apply to these minors' IC data
 IS_TARGET = VERSION == TARGET
 IS_STRICT = VERSION in STRICT_VERSIONS
+
+# Backported from upstream master; retain the running 4.x manual for this branch.
+DOCS_VERSION = '%d.%d' % VERSION
+_DOCS_LINK = re.compile(r'(docs\.blender\.org/(?:manual/[A-Za-z_]+|api)|developer\.blender\.org/docs/release_notes)/\d+\.\d+/')
+
+
+def docs_url(url):
+    return _DOCS_LINK.sub(lambda m: f'{m.group(1)}/{DOCS_VERSION}/', url)
+
+
+# 4.2 has no Properties tab visibility flags; keep kit panel roles on the owning Screen.
+_PROPERTY_FLAGS = tuple('show_properties_' + name for name in (
+    'tool', 'render', 'output', 'view_layer', 'scene', 'world', 'object', 'modifiers',
+    'particles', 'physics', 'constraints', 'data', 'bone', 'bone_constraints', 'material',
+    'texture', 'effects'))
+
+
+def property_flags(space):
+    flags = [p.identifier for p in space.bl_rna.properties if p.identifier.startswith('show_properties_')]
+    return flags or _PROPERTY_FLAGS
+
+
+def _flag_owner(space):
+    ptr = space.as_pointer()
+    for screen in bpy.data.screens:
+        for index, area in enumerate(screen.areas):
+            if area.spaces.active.as_pointer() == ptr:
+                return screen, str(index)
+    return None, None
+
+
+def property_flag(space, name, default=False):
+    if hasattr(space, name):
+        return getattr(space, name)
+    screen, index = _flag_owner(space)
+    return name in screen.get('dcc_properties_flags', {}).get(index, ()) if screen else default
+
+
+def set_property_flag(space, name, value):
+    if hasattr(space, name):
+        setattr(space, name, value)
+        return
+    screen, index = _flag_owner(space)
+    if screen is None:
+        return
+    flags = dict(screen.get('dcc_properties_flags', {}))
+    on = set(flags.get(index, ()))
+    on.add(name) if value else on.discard(name)
+    flags[index] = sorted(on)
+    screen['dcc_properties_flags'] = flags
 
 
 # Properties tab flags newer than 4.5 (measured, step 118): a 4.5-saved file (the Maya Workflow Kit template) opens in 5.x with

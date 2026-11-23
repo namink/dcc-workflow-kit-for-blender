@@ -56,7 +56,7 @@ def shelf_import():
     assert actual == user
     assert source.read_bytes() == original_bytes
     assert dest.with_suffix('.json.backup').exists()
-    assert root.maya.ui.shelf.store_path() == str(dest)
+    assert Path(root.maya.ui.shelf.store_path()).resolve() == dest.resolve()
     source.write_text('{"invalid": true}', encoding='utf-8')
     before = dest.read_bytes()
     try:

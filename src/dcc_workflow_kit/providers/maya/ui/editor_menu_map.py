@@ -16,7 +16,8 @@ _NOTES = 'https://developer.blender.org/docs/release_notes/4.5/'
 _PKG = __package__.rpartition('.')[0]
 
 def _url(url):
-    return ('wm.url_open', {'url': url})
+    from ..compat import docs_url
+    return ('wm.url_open', {'url': docs_url(url)})
 
 def _prop(path, value=None):
     return ('prop', path, {} if value is None else {'value': value})

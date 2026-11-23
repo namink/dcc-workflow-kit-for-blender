@@ -1,3 +1,7 @@
+# 0.1.6 Blender 4.2.9 compatibility preview
+
+Native 4.2 keymap snapshot, legacy workspace format and Properties panel roles, legacy sculpt/weight brushes, Angle Based UV fallback, missing Chinese label, and selective upstream docs/operator detection fixes. Latest Maya 0.21.0 and MaxFlow 0.8.5 features are not fully merged; both require Blender 5.0+. See COMPATIBILITY_42.md.
+
 # DCC Workflow Kit 0.1.5 · 视口撕下副本修复预览版
 
 支持 Blender >=4.5.0、<5.3.0。安装文件为 dcc-workflow-kit-0.1.5.zip，先停用独立 Max/Maya 插件，安装后重启 Blender。

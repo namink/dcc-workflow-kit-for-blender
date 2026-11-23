@@ -126,6 +126,8 @@ def brush_kind(brush):
     return getattr(brush, 'weight_brush_type', getattr(brush, 'weight_tool', 'DRAW')) if brush else ''
 
 def brush_tool(context, kind):
+    if bpy.app.version < (4, 3, 0):
+        return 'builtin_brush.' + {'DRAW': 'Draw', 'BLUR': 'Blur', 'AVERAGE': 'Average', 'SMEAR': 'Smear'}[kind]
     from bl_ui.space_toolsystem_toolbar import VIEW3D_PT_tools_active as tools
     ids = [t.idname for entry in tools.tools_from_context(context) for t in (entry if type(entry) is tuple else (entry,)) if t is not None]
     suffix = {'BLUR': 'blur', 'AVERAGE': 'average', 'SMEAR': 'smear'}.get(kind)
@@ -135,7 +137,7 @@ def activate_brush(context, kind='DRAW', blend=None):
     with viewport(context) as ctx:
         bpy.ops.wm.tool_set_by_id(name=brush_tool(ctx, kind))
         brush = ctx.tool_settings.weight_paint.brush
-        if brush is None or brush_kind(brush) != kind:
+        if (brush is None or brush_kind(brush) != kind) and bpy.app.version >= (4, 3, 0):
             asset = {'DRAW': _dcc_source('Paint'), 'BLUR': _dcc_source('Blur'), 'AVERAGE': _dcc_source('Average'), 'SMEAR': _dcc_source('Smear')}[kind]
             bpy.ops.brush.asset_activate(asset_library_type='ESSENTIALS', relative_asset_identifier='brushes/essentials_brushes-mesh_weight.blend/Brush/' + asset)
             brush = ctx.tool_settings.weight_paint.brush
@@ -164,6 +166,9 @@ class ALLSET_OT_weight_tool(bpy.types.Operator):
     def execute(self, context):
         try:
             if self.kind == 'ASSETS':
+                if bpy.app.version < (4, 3, 0):
+                    self.report({'WARNING'}, 'Blender 4.2：请在原生笔刷设置中选择笔刷。' if context.preferences.view.language == 'zh_HANS' else 'Blender 4.2: choose brushes in the native brush settings.')
+                    return {'CANCELLED'}
                 with viewport(context):
                     bpy.ops.wm.call_asset_shelf_popover('INVOKE_DEFAULT', name='VIEW3D_AST_brush_weight_paint')
             elif self.kind in {'DRAW', 'BLUR', 'AVERAGE', 'SMEAR'}:
