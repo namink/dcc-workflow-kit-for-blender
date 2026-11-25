@@ -1,3 +1,9 @@
+# 0.1.7 Blender 4.2 Maya 空格切换修复
+
+修复短按空格进入四视图后无法返回单视图。对不支持坐标合并区域的 Blender 使用原生区域最大化；单视图暂时隐藏周围面板，再按空格恢复。Blender 4.2.9 GUI 操作符四轮往返通过，真实键盘事件未模拟，其他工具未完整重测。
+
+安装包：`dist/dcc-workflow-kit-0.1.7-blender-4.2.zip`。本次为 4.2 兼容分支，主分支 0.2.1 面向 Blender 5.3。
+
 # 0.1.6 Blender 4.2.9 compatibility preview
 
 Native 4.2 keymap snapshot, legacy workspace format and Properties panel roles, legacy sculpt/weight brushes, Angle Based UV fallback, missing Chinese label, and selective upstream docs/operator detection fixes. Latest Maya 0.21.0 and MaxFlow 0.8.5 features are not fully merged; both require Blender 5.0+. See COMPATIBILITY_42.md.

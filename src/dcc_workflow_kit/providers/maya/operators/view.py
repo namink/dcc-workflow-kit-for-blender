@@ -550,6 +550,10 @@ class ALLSET_OT_toggle_quad_view(bpy.types.Operator):
     def execute(self, context):
         from ..ui import four_view
         area = context.area
+        # Blender 4.2 cannot join areas by source/target coordinates.
+        if "source_xy" not in bpy.ops.screen.area_join.get_rna_type().properties:
+            if context.screen.show_fullscreen or four_view.is_four(context.window.screen):
+                return bpy.ops.screen.screen_full_area(use_hide_panels=False)
         if four_view.is_four(context.window.screen):
             if bpy.app.background:
                 self.report({'WARNING'}, _zh('Leaving the four view needs the Blender window', 'MWK:operators/view.py:637'))
