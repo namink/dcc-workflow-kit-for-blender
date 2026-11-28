@@ -119,7 +119,7 @@ def _on_depsgraph(scene, depsgraph):
         posing = None
     if posing:
         return
-    look = depsgraph_filter.Look(depsgraph) if depsgraph is not None else None
+    look = depsgraph_filter.look(depsgraph, _on_depsgraph) if depsgraph is not None else None
     if look is not None and look.outliner_skip():
         return
     if posing is not None:

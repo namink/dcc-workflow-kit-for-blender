@@ -12,6 +12,7 @@ equivalent for are greyed with their notice (ui/notices.py).
 import bpy
 from bpy.props import BoolProperty, FloatProperty
 
+from .. import i18n
 from . import notices
 
 MESH = (("Combine", "Mesh/Combine", 'AUTOMERGE_ON'), ("Separate", "Mesh/Separate", 'MOD_EXPLODE'),
@@ -20,7 +21,7 @@ COMPONENTS = (("Extrude", None, 'FACESEL'), ("Bevel", "Edit Mesh/Bevel", 'MOD_BE
               ("Smart Bevel", "Edit Mesh/Smart Bevel", 'MOD_BEVEL'),
               ("Bridge", "Edit Mesh/Bridge", 'MOD_LATTICE'), ("Add Divisions", "Edit Mesh/Add Divisions", 'MESH_GRID'))
 TOOLS = (("Multi-Cut", "Mesh Tools/Multi-Cut", 'SCULPTMODE_HLT'), ("Target Weld", "Mesh Tools/Target Weld", 'AUTOMERGE_OFF'),
-         ("Connect", "Edit Mesh/Connect", 'MOD_EDGESPLIT'), ("Quad Draw", "Mesh Tools/Quad Draw", 'MESH_DATA'))
+         ("Connect", "Mesh Tools/Connect", 'MOD_EDGESPLIT'), ("Quad Draw", "Mesh Tools/Quad Draw", 'MESH_DATA'))
 # Maya's three selection styles = Blender select tools
 PICK = (("Pick/Marquee", "builtin.select_box"), ("Drag", "builtin.select_circle"), ("Tweak/Marquee", "builtin.select"))
 COMPONENT_ICONS = (("VERT", 'VERTEXSEL', 0), ("EDGE", 'EDGESEL', 1), ("FACE", 'FACESEL', 2))
@@ -30,8 +31,6 @@ UNIT = ("vertex", "edge", "face")
 GREY = {
     "Modeling Toolkit/Highlight Backfaces": (
         "X-ray", "Blender does not highlight back faces separately: use X-ray (Alt+Z) to see and pick them."),
-    "Modeling Toolkit/Selection Constraint": (
-        "Select menu", "Blender has no selection constraint: use Select > Select Loops / Linked / Similar."),
     "Modeling Toolkit/UV": (
         "UV Editor", "UV components are edited in the UV Editor (Windows > Modeling Editors > UV Editor)."),
     "Modeling Toolkit/Soft Selection/Global": (
@@ -58,12 +57,18 @@ def _selected_count(context):
     return n, UNIT[i]
 
 
-def _button(layout, label, path, icon):
+def _button(layout, label, path, icon, depress=False):
     if path is None or path not in _menu_map().MAP:
         op = layout.operator("allset.menu_unavailable", text=label, icon=icon)
     else:
-        op = layout.operator("allset.menu_item", text=label, icon=icon)
+        op = layout.operator("allset.menu_item", text=label, icon=icon, depress=depress)
     op.item = path or f"Modeling Toolkit/{label}"
+
+
+def _tool_ids():
+    """Tools buttons -> the kit tool each one enters (the button shows pressed while it is active, like Maya)."""
+    from ..operators import connect_tool, multi_cut, quad_draw
+    return {"Multi-Cut": multi_cut.TOOL, "Connect": connect_tool.TOOL, "Quad Draw": quad_draw.TOOL}
 
 
 def _menu_map():
@@ -166,19 +171,19 @@ def _nearest_set(self, value):
     preferences.get().preselect_highlight = value
 
 
-def _grid(layout, items, context):
+def _grid(layout, items, context, active=None):
     grid = layout.grid_flow(row_major=True, columns=2, even_columns=True, align=True)
+    ids = _tool_ids() if active is not None else {}
     for label, path, icon in items:
         if label == "Extrude":
             grid.operator("allset.extrude", text=label, icon=icon)   # polyExtrudeFace
         else:
-            _button(grid, label, path, icon)
+            _button(grid, label, path, icon, depress=active is not None and ids.get(label) == active)
 
 
 def _section(layout, idname, label, default_closed=False):
-    header, body = layout.panel(idname, default_closed=default_closed)
-    header.label(text=label)
-    return body
+    from .maya_dock import section
+    return section(layout, idname, label, default_closed)
 
 
 def draw(layout, context):
@@ -209,7 +214,8 @@ def draw(layout, context):
     tool = context.workspace.tools.from_space_view3d_mode(context.mode, create=False) if context.workspace else None
     col = layout.column(align=True)
     for label, idname in PICK:
-        col.operator("wm.tool_set_by_id", text=label, depress=tool is not None and tool.idname == idname,
+        col.operator("wm.tool_set_by_id", text=label, text_ctxt=i18n.CTX_SELECT_STYLE,
+                     depress=tool is not None and tool.idname == idname,
                      icon='RADIOBUT_ON' if tool is not None and tool.idname == idname else 'RADIOBUT_OFF',
                      emboss=False).name = idname
     _grey(layout, "Modeling Toolkit/Highlight Backfaces", "Highlight Backfaces")
@@ -219,7 +225,13 @@ def draw(layout, context):
     split.label(text="Symmetry")
     from .status_line import draw_symmetry
     draw_symmetry(split, context)
-    _grey(layout, "Modeling Toolkit/Selection Constraint", "Selection Constraint: Off")
+    split = layout.split(factor=0.4)
+    split.label(text="Selection Constraint")
+    row = split.row(align=True)
+    row.prop(wm, "allset_sel_constraint", text="")
+    sub = row.row(align=True)
+    sub.enabled = wm.allset_sel_constraint == 'ANGLE'      # Maya's number field next to the list: the Angle
+    sub.prop(wm, "allset_sel_constraint_angle", text="")
     split = layout.split(factor=0.4)
     split.label(text="Transform Constraint")
     from .. import preferences
@@ -236,8 +248,17 @@ def draw(layout, context):
         _grid(body, COMPONENTS, context)
     body = _section(layout, "ALLSET_mtk_tools", "Tools")
     if body:
-        _grid(body, TOOLS, context)
-    from ..operators import quad_draw
+        _grid(body, TOOLS, context, active=tool.idname if tool is not None and edit else "")
+    from ..operators import connect_tool, quad_draw
+    if tool is not None and tool.idname == connect_tool.TOOL and edit:
+        from . import mesh_tools_loop, mesh_tools_poly
+        body = _section(layout, "ALLSET_mtk_connect", i18n.mark("Connect Options"))
+        if body:
+            mesh_tools_loop.draw_connect_rows(body, context)
+            body.operator("allset.reset_tool", text="Reset Settings")
+            shortcuts = _section(body, "ALLSET_mtk_connect_shortcuts", "Keyboard/Mouse Shortcuts", default_closed=True)
+            if shortcuts:
+                mesh_tools_poly.draw_shortcuts(shortcuts, mesh_tools_loop.CONNECT_SHORTCUTS)
     if tool is not None and tool.idname == quad_draw.TOOL and edit:
         from . import mesh_tools_poly
         body = _section(layout, "ALLSET_mtk_quad_draw", "Quad Draw Options")
@@ -252,7 +273,7 @@ def draw(layout, context):
                 mesh_tools_poly.draw_shortcuts(shortcuts, mesh_tools_poly.QUAD_DRAW_SHORTCUTS)
 
 
-# Drawn by the dock's Modeling Toolkit tab (channel_box.ALLSET_PT_dock_modeling_toolkit).
+# Drawn by the dock's Modeling Toolkit tab (cb_panel.ALLSET_PT_dock_modeling_toolkit).
 classes = (ALLSET_OT_soft_select_reset, ALLSET_OT_soft_falloff_mode)
 
 

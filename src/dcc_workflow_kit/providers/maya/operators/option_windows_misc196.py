@@ -3,7 +3,7 @@
 "no settings" window — Create Character Set / Subcharacter Set, Curves Cut / Detach / Reverse Direction / Smooth (both)
 / Straighten, the circular arc tools, UV Merge UVs / Contour Stretch, Set / Assume Preferred Angle, Add Influence.
 
-Same spec as operators/option_windows.py (``F`` fields, ``Window`` = one ``allset.opt_<key>`` operator, bound to its
+Same spec as operators/option_windows_spec.py (``F`` fields, ``Window`` = one ``allset.opt_<key>`` operator, bound to its
 menu paths; option_windows._extend appends ``WINDOWS``). Titles, buttons, labels and default values match the Maya
 option windows; fields the kit
 can't honour are only listed (``missing``), never faked. Every window run with its defaults does what the plain menu
@@ -166,7 +166,7 @@ WINDOWS = [
         F("no_visibility", "", "bool", True, text="No visibility"),
         F("no_dynamic", "", "bool", False, text="No dynamic"),
     ], _character(True), paths=("Control/Create Subcharacter Set", "Key/Create Subcharacter Set")),
-    # Cut Curve Options (factory 1 / 2, Cut / Keep radios, title)
+    # Cut Curve Options (default 1 / 2, Cut / Keep radios, title)
     Window("cut_curve", "Cut Curve Options", "Cut", None, [
         F("cut", "Cut:", "enum", "At all intersections", items=("At all intersections", "Using last curve")),
         F("keep", "Keep:", "enum", "All curve segments", items=("Longest segments", "All curve segments")),
@@ -205,7 +205,7 @@ WINDOWS = [
         F("degree", "Circular arc degree:", "enum", "3", items=("1 Linear", "3")),
         F("sections", "Sections:", "int", 8, lo=4, hi=200),
     ], _arc("arc2_tool"), paths=("Create/Curve Tools/Two Point Circular Arc",)),
-    # Merge UVs Options (factory 0.01)
+    # Merge UVs Options (default 0.01)
     Window("merge_uvs", "Merge UVs Options", "Merge UVs", None, [
         F("threshold", "Threshold:", "float", 0.01, lo=0.0, hi=1.0),
     ], _run_merge_uvs, paths=("UV/Merge UVs",)),
@@ -215,7 +215,7 @@ WINDOWS = [
            missing=("Method: Walk Contours / NURBS Projection (the kit follows the quad grid)",
                     "Smoothness 0-3, Offset 0-3", "User defined corner vertices",
                     "Insert projection before deformers", "Create new UV Set")),
-    # Set Preferred Angle Options (factory Hierarchy)
+    # Set Preferred Angle Options (default Hierarchy)
     Window("set_preferred_angle", "Set Preferred Angle Options", "Set", None, [
         F("options", "Options:", "enum", "Hierarchy", items=("Selected joint", "Hierarchy")),
     ], _preferred("set_preferred_angle"), paths=("Skeleton/Set Preferred Angle",)),
@@ -227,6 +227,6 @@ WINDOWS = [
         F("lock_weights", "Weight locking:", "bool", False, text="Lock weights"),
         F("default_weight", "Default weight:", "float", 0.0, lo=0.0, hi=1.0),
     ], _run_add_influence, paths=("Skin/Edit Influences/Add Influence",),
-        missing=("Geometry: Use geometry", "Dropoff: 4.0 (Maya weighs an unlocked influence by distance; the kit adds "
-                 "it at 0)", "Polygon smoothness: 0.0", "NURBS samples: 10")),
+        missing=("Geometry: Use geometry", "Dropoff (the kit adds the influence at its default weight, not by distance)",
+                 "Polygon smoothness: 0.0", "NURBS samples: 10")),
 ]

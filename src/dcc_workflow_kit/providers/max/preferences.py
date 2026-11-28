@@ -16,7 +16,7 @@ class BSM_Preferences(bpy.types.PropertyGroup):
     last_material_editor: EnumProperty(name=_msg('Material Editor'), items=(('MATERIAL', _msg('Slate'), ''), ('COMPACT', _msg('Compact'), '')), default='MATERIAL', translation_context=_msg('DCCWorkflowKit.Max'))
 
     def draw(self, context):
-        from . import runtime
+        from . import runtime, __version__
         layout = self.layout
         layout.label(text=_dcc_ui_text(_msg('MaxFlow · 0.8.3 development preview')))
         layout.prop(self, 'last_material_editor')

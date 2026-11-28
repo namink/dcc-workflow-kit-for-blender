@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Maya's Component Editor window (Issue #119).
 
-Maya 2022: menu bar Options /
+Maya: menu bar Options /
 Layout / Help, a tab bar (CE2), a table — Smooth Skins: one column per skinCluster influence + Total, a Hold row, a
 shape row, one row per selected vertex (CE3); Polygons: vertex.x / y / z (+ red / green / blue) in object space (CE6) —
 and the bottom row "Auto Normalization: Interactive", Load Components / Close (CE4).
@@ -9,7 +9,7 @@ and the bottom row "Auto Normalization: Interactive", Load Components / Close (C
 Blender: a ``marked_window`` kind "COMPONENT_EDITOR" (a Properties Tool tab in its own window) drawn by
 ``ALLSET_PT_component_editor``. The cells are Scene proxies (``Scene.allset_ce``: UI edits of Scene properties push undo
 steps) whose get / set read and write the live mesh: positions ÷ ``units.maya_unit()`` (Maya units),
-weights through ``skin_tools_199._Weights`` with Maya's Interactive normalisation (``normalize``, CE5). The proxy rows
+weights through ``skin_weight_access._Weights`` with Maya's Interactive normalisation (``normalize``, CE5). The proxy rows
 follow the selection from a depsgraph handler → timer while Auto Update is on (CE7); never written in ``draw``.
 """
 
@@ -402,7 +402,7 @@ def _tick():
 
 @persistent
 def _on_depsgraph(scene, _depsgraph=None):
-    if _pending["timer"]:
+    if _pending["timer"] and bpy.app.timers.is_registered(_tick):    # unless a file load dropped it meanwhile
         return
     wm = bpy.context.window_manager
     if wm is None or not getattr(wm, "allset_ce_auto_update", False) or not _is_open(bpy.context):

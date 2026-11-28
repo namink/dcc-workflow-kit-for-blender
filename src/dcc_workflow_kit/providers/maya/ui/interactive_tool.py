@@ -11,6 +11,7 @@ primitive leaves component mode, a new primitive is an object).
 import bpy
 
 from ..operators import interactive_create
+from ..keymap.ic_data import platform_tool
 
 _PRESS = "allset.interactive_create"
 
@@ -41,7 +42,7 @@ TOOLS = (ALLSET_TL_interactive_create,)
 
 def register():
     for tool in TOOLS:
-        bpy.utils.register_tool(tool, after={"builtin.measure"}, separator=True)
+        bpy.utils.register_tool(platform_tool(tool), after={"builtin.measure"}, separator=True)
 
 
 def unregister():

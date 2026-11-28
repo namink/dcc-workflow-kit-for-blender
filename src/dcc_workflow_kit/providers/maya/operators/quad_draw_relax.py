@@ -166,13 +166,25 @@ class Session:
             seeds=component_ids(c,comp)
             if not seeds:return []
             ids,self.weights=soft_area(context,c,seeds)
+            ids=self._seen(context,ids)
         elif self.owner.middle:
             comp=q.component_at(context,context.region,context.region_data,mouse,self.ob)
             ids=component_ids(c,comp)
         else:
             radius=q.BRUSH_PX*q._ui_scale(context)
             ids=np.flatnonzero(c.vok & front & (np.sum((xy-mouse)**2,axis=1)<=radius*radius))
+            ids=self._seen(context,ids)
         return self._filter(context,ids,mouse)
+
+    def _seen(self,context,ids):
+        """The vertices of ``ids`` the view shows, like the ones the hover picks: one hidden behind the mesh or on
+        the far side of the live surface is not relaxed, by the brush or inside the Soft Selection radius (it was
+        pulled through to the front)."""
+        from . import multi_cut, quad_draw as q
+        r,rv=context.region,context.region_data
+        xray=preselect._xray(context.space_data);cs=[(self.ob,self.c)];refs=self.owner._refs
+        return [int(i) for i in ids if not multi_cut._occluded(cs,r,rv,Vector(self.c.co[i]),xray)
+                and q._reference_visible(context,r,rv,Vector(self.c.co[i]),refs)]
 
     def _fixed_selection(self,context,mouse):
         self.fixed=self._area(context,mouse)
@@ -182,10 +194,19 @@ class Session:
             self.levels=[self.kernel.initial.copy()]
 
     def _project(self,context,points):
-        if not self.owner._refs:return points
-        from . import quad_draw as q
-        mw=self.ob.matrix_world;inv=mw.inverted_safe()
-        return np.asarray([tuple(inv@q.project_point(context,mw@Vector(p),self.owner._refs,context.region,context.region_data)) for p in points],dtype=float).reshape(-1,3)
+        """Relaxed points back onto the live surface, over the surface: the closest surface point, unless the view
+        can't see it (the other side of a thin sheet), then the visible surface under the point. Along the view ray
+        alone, a point near the outline slid toward the camera."""
+        refs=self.owner._refs
+        if not refs:return points
+        from . import live, quad_draw as q
+        mw=self.ob.matrix_world;inv=mw.inverted_safe();r,rv=context.region,context.region_data
+        out=[]
+        for p in points:
+            w=mw@Vector(p);hit=live.nearest(context,w,refs);s=q._surface_point(context,hit) if hit else None
+            if s is None or not q._reference_visible(context,r,rv,s,refs):s=q.project_point(context,w,refs,r,rv)
+            out.append(tuple(inv@s))
+        return np.asarray(out,dtype=float).reshape(-1,3)
 
     def apply(self,context,mouse):
         from . import quad_draw as q

@@ -324,8 +324,8 @@ def _joint_from_object():
     return (MAYA_WORLD @ JOINT_AXES.transposed()).to_4x4()
 
 
-# an object's Maya axes are its Blender X / Z / -Y (joints.MAYA_WORLD), a joint's are its bone's Y / Z / X
-# (joints.JOINT_AXES), so a bone copying an object's rotation has to copy the object's frame turned by
+# an object's Maya axes are its Blender X / Z / -Y (joint_frames.MAYA_WORLD), a joint's are its bone's Y / Z / X
+# (joint_frames.JOINT_AXES), so a bone copying an object's rotation has to copy the object's frame turned by
 # MAYA_WORLD JOINT_AXES^-1 (Maya orientConstraint / parentConstraint without offset: the joint's axes = the target's;
 # 90 deg off before). A bone target needs nothing.
 
@@ -365,7 +365,7 @@ def build(context, owner, targets, ctype, maintain_offset=None, weight=1.0):
             src = _helper(owner, f"{owner_name}_{group}_{labels[i]}Offset", t, sub, ow, ctype == 'COPY_LOCATION')
             src_sub = ""
         elif needs_joint_axes(owner, t, sub, ctype):
-            # a joint takes the target's Maya axes, not its Blender ones (joints.JOINT_AXES)
+            # a joint takes the target's Maya axes, not its Blender ones (joint_frames.JOINT_AXES)
             src = _helper(owner, f"{owner_name}_{group}_{labels[i]}Axes", t, sub,
                           _target_world(t, sub) @ _joint_from_object(), False)
             src_sub = ""
@@ -811,7 +811,9 @@ def _tick():
 @bpy.app.handlers.persistent
 def _on_depsgraph(_scene, _depsgraph):
     # armed once a group exists in this session (build / file load): at most one cleanup scan per 0.3 s
-    if _state["pending"] or not (_state["armed"] or bpy.data.collections.get(HELPERS) is not None):
+    # pending: unless a file load dropped the timer meanwhile
+    if ((_state["pending"] and bpy.app.timers.is_registered(_tick))
+            or not (_state["armed"] or bpy.data.collections.get(HELPERS) is not None)):
         return
     _state["pending"] = True
     bpy.app.timers.register(_tick, first_interval=0.3)

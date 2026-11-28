@@ -5,7 +5,7 @@ Maya's Tool Settings window has the tool name, Reset Tool / Tool Help above the 
 The kit's Tool Settings is a dock
 left of the viewport (``ui/tool_dock.py``: a Properties editor on its Tool tab) that draws ``ALLSET_PT_tool_settings``:
 the head row, then for the Move / Rotate / Scale tools Maya's sections in Maya's order with Maya's rows bound to kit
-state (Maya 2022's rows; rows the kit can't do are greyed with a tooltip).
+state (Maya's rows; rows the kit can't do are greyed with a tooltip).
 Other tools keep Blender's tool panels under the head row; the Reset Tool row is also prepended to
 ``VIEW3D_PT_active_tool`` for Blender's own Tool tab / popups.
 Reset = the active tool's operator options back to their defaults (every operator of the tool's keymap) and, for
@@ -18,7 +18,7 @@ import math
 
 import bpy
 
-from .. import results
+from .. import results, safe_reg
 from ..operators.edge_loops import INSERT_TOOL, OFFSET_TOOL, SLIDE_TOOL
 from ..operators.mesh_tools import CREASE_TOOL, TARGET_WELD_TOOL
 from ..operators.poly_draw import APPEND_TOOL, CREATE_TOOL
@@ -36,7 +36,7 @@ TOOL_OPERATORS = {"builtin.move": ("transform.translate",), "builtin.rotate": ("
                   "builtin.loop_cut": ("mesh.loopcut_slide",), "builtin.edge_slide": ("transform.edge_slide",)}
 
 # the other tools with Maya Tool Settings sections. Maya tool
-# (Maya runTimeCommand) -> Blender tool; sections as in Maya 2022.
+# (Maya runTimeCommand) -> Blender tool; sections as in Maya.
 TOOLS = {"builtin.select_box": 'SELECT', "builtin.select": 'SELECT',               # SelectTool (Marquee / Tweak)
          "builtin.select_lasso": 'LASSO', "builtin.select_circle": 'PAINT_SELECT',  # LassoTool, ArtPaintSelectTool
          # SplitEdgeRingTool, SlideEdgeTool, the kit tools of ui/mesh_tools_loop.py
@@ -101,7 +101,7 @@ def reset_maya_options(context, kind):
         from .. import preferences
         prefs = preferences.get(context)
         prefs.transform_constraint = 'NONE'
-        for name in ("smart_duplicate", "smart_extrude"):
+        for name in ("smart_duplicate", "smart_extrude", "manip_ctrl_snap"):
             setattr(prefs, name, prefs.bl_rna.properties[name].default)
 
 
@@ -125,6 +125,9 @@ def reset_tool(context):
     from ..operators import multi_cut
     if tool.idname == multi_cut.TOOL:       # Multi-Cut keeps its Maya options on the scene
         multi_cut.reset_settings(multi_cut.mesh_tools.settings(context))
+    from ..operators import connect_tool, edge_loops
+    if tool.idname == connect_tool.TOOL:    # so does the Connect Tool
+        edge_loops.reset_settings(edge_loops.settings(context), 'CONNECT')
     return tool.idname, n
 
 
@@ -188,15 +191,15 @@ def draw_reset_row(self, context):
 
 
 # --- Tool Settings dock: Maya sections -------------------------------------------------------------
-# Section order, default open state and rows as in Maya 2022 (Move / Rotate / Scale Tool Settings).
+# Section order, default open state and rows as in Maya (Move / Rotate / Scale Tool Settings).
 # Rows without kit state are greyed with a tooltip (TS_NOTICES).
 
 TOOL_NAMES = {'TRANSLATE': "Move Tool", 'ROTATE': "Rotate Tool", 'RESIZE': "Scale Tool",
-              # Maya 2022 Tool Settings titles
+              # Maya Tool Settings titles
               'SELECT': "Select Tool", 'LASSO': "Lasso Tool", 'PAINT_SELECT': "Paint Selection Tool",
               'INSERT_EDGE_LOOP': "Insert Edge Loop Tool", 'SLIDE_EDGE': "Slide Edge Tool",
               'TARGET_WELD': "Target Weld Tool", 'CREASE': "Crease Tool", 'QUAD_DRAW': "Quad Draw Tool",
-              # Maya 2022 Tool Settings titles
+              # Maya Tool Settings titles
               'CREATE_POLYGON': "Create Polygon Tool", 'APPEND_POLYGON': "Append To Polygon Tool",
               'OFFSET_EDGE_LOOP': "Offset Edge Loop Tool"}
 SETTINGS = {'TRANSLATE': "Move Settings", 'ROTATE': "Rotate Settings", 'RESIZE': "Scale Settings"}
@@ -257,7 +260,7 @@ TS_NOTICES = {
     f"{TS}/Free Rotate": ("the white ring / trackball",
                           "Blender's rotate manipulator has the free trackball rotation built in"),
 }
-# greyed rows of the other tools (Maya 2022 rows) -> (substitute, one line).
+# greyed rows of the other tools (Maya rows) -> (substitute, one line).
 _SPACE = "Blender's selection tools work in screen space"
 TS_NOTICES.update({f"{TS}/{k}": v for k, v in {
     "Lasso/Open": ("Closed lasso", "Blender's lasso always closes the shape from the last point to the first"),
@@ -410,6 +413,9 @@ def draw_settings(layout, context, kind):
     else:
         # Blender's increment is the grid step: 1 Maya unit in the Maya Workflow Kit template.
         _labelled(layout, "").label(text="Step: one grid unit", icon='SNAP_INCREMENT')
+        from .. import preferences
+        # off: Ctrl+drag on an axis moves in the other two axes, like Maya
+        _labelled(layout, "").prop(preferences.get(context), "manip_ctrl_snap")
     _labelled(layout, "Preserve Children:").prop(ts, "use_transform_skip_children", text="")
     _labelled(layout, "Preserve UVs:").prop(ts, "use_transform_correct_face_attributes", text="")
     _grey(_labelled(layout, "Tweak Mode:"), "Tweak Mode", text=" ", check=False)
@@ -685,7 +691,7 @@ OTHER_SECTIONS = {"lasso": draw_lasso, "brush": draw_brush, "paint_ops": draw_pa
                   "description": draw_description, "tool": draw_tool, "slide_snap": draw_slide_snap,
                   "live": draw_live, "shortcuts": draw_shortcuts}
 
-_paint_add = [True]    # Maya "Add to current selection" kept while Unselect is picked (factory: on)
+_paint_add = [True]    # Maya "Add to current selection" kept while Unselect is picked (default: on)
 
 
 def _select_all(context, action):
@@ -764,8 +770,8 @@ def draw_dock(layout, context):
             blue_pencil.draw_settings(layout, context, tool.idname)
         return    # Blender's own tool panels follow (dock_tabs hides them only for tools with Maya sections)
     for key, title, is_open in sections(kind):
-        header, body = layout.panel(f"allset_ts_{kind.lower()}_{key}", default_closed=not is_open)
-        header.label(text=title)
+        from .maya_dock import section
+        body = section(layout, f"allset_ts_{kind.lower()}_{key}", title, default_closed=not is_open)
         if body is not None:
             draw_section(body.column(), context, key, kind)
 
@@ -792,7 +798,11 @@ class ALLSET_PT_tool_settings(bpy.types.Panel):
 
 def hides_blender_panels(context):
     """True in the Tool Settings dock while the Maya sections replace Blender's tool panels (dock_tabs)."""
-    return in_dock(context) and (context.mode == 'PAINT_WEIGHT' or tool_kind(context) is not None)
+    return in_dock(context) and has_maya_sections(context)
+
+
+def has_maya_sections(context):
+    return context.mode == 'PAINT_WEIGHT' or tool_kind(context) is not None
 
 
 classes = (ALLSET_OT_reset_tool, ALLSET_OT_ts_option, ALLSET_PT_tool_settings)
@@ -801,7 +811,7 @@ classes = (ALLSET_OT_reset_tool, ALLSET_OT_ts_option, ALLSET_PT_tool_settings)
 def register():
     for cls in classes:
         bpy.utils.register_class(cls)
-    bpy.types.VIEW3D_PT_active_tool.prepend(draw_reset_row)
+    safe_reg.blender_class("VIEW3D_PT_active_tool").prepend(draw_reset_row)
     from . import notices
     notices.PANEL_NOTICES.update(TS_NOTICES)
 
@@ -810,6 +820,6 @@ def unregister():
     from . import notices
     for key in TS_NOTICES:
         notices.PANEL_NOTICES.pop(key, None)
-    bpy.types.VIEW3D_PT_active_tool.remove(draw_reset_row)
+    safe_reg.blender_class("VIEW3D_PT_active_tool").remove(draw_reset_row)
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)

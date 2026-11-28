@@ -4,7 +4,7 @@
 Like Maya:
 - Blue Pencil frames are the annotation's drawn frames (every shown layer of the scene's annotation). The Time
   Slider marks each one with a light blue triangle (``FRAME_RGB``, 8 x 11 px at UI scale 1.0, its upright edge 2 px
-  right of the frame's tick, standing on the ticks' bottom end: ``time_slider._draw_blue_pencil``).
+  right of the frame's tick, standing on the ticks' bottom end: ``time_slider_ruler._draw_blue_pencil``).
 - Alt+< / Alt+> go to the previous / next frame and wrap around at the ends (``allset.blue_pencil_frame``).
 - Ghost Previous / Ghost Next (on, 3 frames each; add-on preferences ``bp_ghost_*``): the drawings of the nearest
   frames before / after the one on screen are drawn in their own colour at opacity 0.4 * (n + 1 - k) / n for the
@@ -112,8 +112,9 @@ def _prefs():
 
 def draw_settings(layout, context, tool_id):
     """The Blue Pencil section of the Tool Settings while an annotate tool is active."""
-    header, body = layout.panel("allset_ts_blue_pencil", default_closed=False)
-    header.label(text="Blue Pencil")
+    from .maya_dock_strip import section     # a plain row in the dock's tab stack (Tool Settings tab)
+    from .. import i18n
+    body = section(layout, "allset_ts_blue_pencil", i18n.mark("Blue Pencil"))
     if body is None:
         return
     row = body.row(align=True)
@@ -165,9 +166,11 @@ def ghost_strokes(scene, space_2d):
 
 
 def _view_ok(context):
+    if _playing(context):              # first: while playing nothing more is read
+        return False
     space = context.space_data
     return space is not None and space.type == 'VIEW_3D' and space.overlay.show_overlays \
-        and getattr(space.overlay, "show_annotation", True) and not _playing(context)
+        and getattr(space.overlay, "show_annotation", True)
 
 
 def _draw_lines(strokes, to_px=None):

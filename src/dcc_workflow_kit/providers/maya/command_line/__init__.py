@@ -12,7 +12,7 @@ runs the entry (``runner.prepare``).
 import bpy
 from bpy.props import StringProperty
 
-from .. import results
+from .. import live_refs, results
 from . import runner, undo_text
 from ..ui import own_draw
 
@@ -160,7 +160,7 @@ def modal_help(context):
     window = getattr(context, "window", None)
     if window is None or not MODAL_HELP:
         return ""
-    for op in window.modal_operators:
+    for op in live_refs.running_modals(window):
         text = MODAL_HELP.get(op.bl_idname)
         if text:
             return text
@@ -249,15 +249,67 @@ def draw_command_line(layout, context):
     row.operator(ALLSET_OT_script_editor.bl_idname, text="", icon='CONSOLE')
 
 
+# --- the bottom row itself ------------------------------------------------------------
+# Maya hides the row when both Help Line and Command Line are off and nothing takes its place: the kit hides the
+# status bar of every screen then (``Screen.show_statusbar``, kept in the file) and marks the screens it hid, so it
+# shows only those again: when one of the two is turned on, and when the kit's Maya mode goes off.
+
+HIDDEN = "allset_statusbar_hidden"      # Screen ID property: the kit hid this screen's status bar
+
+
+def _bottom_row_wanted():
+    from .. import preferences
+    try:
+        prefs = preferences.get(bpy.context)
+    except KeyError:
+        return True
+    return prefs.show_help_line or prefs.show_command_line
+
+
+def sync_status_bar(restore=False):
+    """Hide every screen's status bar while Help Line and Command Line are both off, else show the ones the kit
+    hid. ``restore``: show the ones the kit hid whatever the preferences say (the kit is going off)."""
+    hide = not restore and not _bottom_row_wanted()
+    try:
+        screens = list(bpy.data.screens)
+    except AttributeError:            # restricted data (registering while Blender starts): the timer runs later
+        return False
+    for screen in screens:
+        if hide:
+            if screen.show_statusbar:
+                screen.show_statusbar = False
+                screen[HIDDEN] = True
+        elif screen.get(HIDDEN):
+            screen.show_statusbar = True
+            del screen[HIDDEN]
+    return True
+
+
+def _sync_later():
+    if not sync_status_bar():
+        return 0.2
+    return None
+
+
+@bpy.app.handlers.persistent
+def _on_load(_dummy=None):
+    if not bpy.app.timers.is_registered(_sync_later):
+        bpy.app.timers.register(_sync_later, first_interval=0.0)
+
+
+@own_draw.kit_draw("STATUSBAR_HT_header")
 def draw_status_bar(self, context):
     """STATUSBAR_HT_header.draw while the kit is on: Help Line | Command Line, then Blender's
-    scene statistics if there is room; Blender's own draw when both are off."""
+    scene statistics if there is room. With both off the status bar goes (``sync_status_bar``; a screen made since,
+    e.g. a new workspace, is hidden from here); Blender's own draw meanwhile."""
     from .. import preferences
     try:
         prefs = preferences.get(context)
     except KeyError:
         prefs = None
     if prefs is None or not (prefs.show_help_line or prefs.show_command_line):
+        if prefs is not None:
+            _on_load()
         return own_draw.original("STATUSBAR_HT_header", draw_status_bar)(self, context)
     layout = self.layout
     if prefs.show_help_line:
@@ -286,9 +338,16 @@ def register():
     # Only Blender's own status bar draw is swapped: other add-ons' appended items keep drawing.
     own_draw.swap("STATUSBAR_HT_header", draw_status_bar)
     undo_text.register()
+    bpy.app.handlers.load_post.append(_on_load)
+    _on_load()
 
 
 def unregister():
+    if _on_load in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.remove(_on_load)
+    if bpy.app.timers.is_registered(_sync_later):
+        bpy.app.timers.unregister(_sync_later)
+    sync_status_bar(restore=True)         # the status bars the kit hid come back
     undo_text.unregister()
     own_draw.restore("STATUSBAR_HT_header", draw_status_bar)
     del bpy.types.WindowManager.allset_cmd

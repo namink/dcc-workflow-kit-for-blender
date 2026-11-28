@@ -117,10 +117,27 @@ def dock(context, window, side):
     wm = context.window_manager
     if not maya_dock.is_floating(window, wm):
         return False
-    area = window.screen.areas[0]
     main = maya_dock.main_window(wm)
     if main is None or main == window:
         return False
+    from . import four_view
+    if four_view.is_four(main.screen):
+        # beside the whole four view, never inside one of its panels (the window closes once docked)
+        win_ptr = window.as_pointer()
+
+        def into(ctx, win, _panel):
+            from .. import live_refs
+            floating = live_refs.window(win_ptr)
+            if floating is not None:
+                _dock_into(ctx, floating, win, side)
+        return four_view.in_one_panel(context, main, into)
+    return _dock_into(context, window, main, side)
+
+
+def _dock_into(context, window, main, side):
+    """``dock`` into ``main``'s largest 3D View (one panel)."""
+    from . import maya_dock
+    area = window.screen.areas[0]
     target = target_area(main)
     if target is None:
         return False

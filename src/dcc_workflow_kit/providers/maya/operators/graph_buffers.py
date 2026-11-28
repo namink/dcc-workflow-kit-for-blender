@@ -17,8 +17,6 @@ extrapolation to the view edges. Normalized views (``use_normalization``) draw n
 factor per curve isn't exposed to Python), NLA time mapping is ignored. The grey is not Maya's exact colour.
 """
 
-import math
-
 import bpy
 
 from .. import results
@@ -165,8 +163,8 @@ def sample(rec, steps=STEPS):
 
 def _value_factor(context, owner_id, fc):
     """Graph Editor display factor of the curve's values: degrees for rotations when the scene shows degrees
-    (C ``ANIM_unit_mapping_get_factor``)."""
-    if owner_id is None or context.scene.unit_settings.system_rotation != 'DEGREES':
+    (C ``ANIM_unit_mapping_get_factor``), lengths in the scene's length unit where Blender draws them so (5.3)."""
+    if owner_id is None:
         return 1.0
     path = fc.data_path
     base, _dot, name = path.rpartition(".")
@@ -175,7 +173,10 @@ def _value_factor(context, owner_id, fc):
         prop = holder.bl_rna.properties.get(name.split("[")[0])
     except (ValueError, AttributeError):
         return 1.0
-    return 180.0 / math.pi if prop is not None and prop.unit == 'ROTATION' else 1.0
+    if prop is None:
+        return 1.0
+    from ..ui import graph_units
+    return graph_units.display_factor(context.scene, prop.unit)
 
 
 def buffer_lines(context):

@@ -16,7 +16,7 @@ no module writes Blender's preferences or files outside the extension's folders,
 ``unregister()`` takes back everything ``register()`` added — there is nothing to restore on disable or Remove.
 """
 
-from . import i18n, preferences, translations, settings_io, switch, welcome, operators, ui, command_line, marking, first_start, keymap
+from . import i18n, preferences, translations, settings_io, switch, welcome, operators, ui, command_line, marking, first_start, update_summary, keymap
 
 
-MODE = (operators, ui, command_line, marking, first_start, keymap)
+MODE = (operators, ui, command_line, marking, first_start, update_summary, keymap)

@@ -4,7 +4,7 @@ cutKey, keyframe, playbackOptions.
 
 Maya's behaviour: return values (setKeyframe = keys set, cutKey /
 keyframe -e = curves changed, cutKey -clear = 0), values in Maya units / degrees, a keyed attribute takes its curve's
-value at the current time. Keys go on the Channel Box channels' F-curves (``ui/channel_box.py``) with the kit's
+value at the current time. Keys go on the Channel Box channels' F-curves (``ui/cb_keys.py``) with the kit's
 default tangents (``graph_key_menu.after_insert``). Maya's animation range = the scene frame range,
 its playback range = the preview range.
 """

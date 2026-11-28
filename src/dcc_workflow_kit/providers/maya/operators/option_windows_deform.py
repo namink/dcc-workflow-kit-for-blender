@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""#34: Maya option windows of the Deform menu: same spec as operators/option_windows.py (``F`` fields,
+"""#34: Maya option windows of the Deform menu: same spec as operators/option_windows_spec.py (``F`` fields,
 ``Window`` = one ``allset.opt_<key>`` operator; option_windows._extend appends ``WINDOWS``).
 
 Titles, buttons, Basic tab fields in screen order and default values match Maya's Deform
@@ -12,6 +12,7 @@ The deformers themselves: operators/deformers.py.
 import bpy
 from bpy.props import IntVectorProperty
 
+from . import scene_axes
 from .option_windows import F, Window
 from .option_windows_modify import FString
 
@@ -84,7 +85,7 @@ PAINT_MISSING = ("Radius(L) 0.001", "Min/Max value 0 / 1", "Rotate to stroke", "
 
 def _paint(kind):
     """Start painting this deformer's weights (Set Membership: Blender's Weight Paint toggle) with the window's
-    Maya tool values (operators/skin.apply_paint_settings; deformer weights are never normalized)."""
+    Maya tool values (operators/paint_skin_weights.apply_paint_settings; deformer weights are never normalized)."""
     def run(context, v):
         from . import option_windows_rig, skin
         if kind:
@@ -146,6 +147,7 @@ WINDOWS = [
         F("offset", "Offset:", "float", 0.0, lo=-10.0, hi=10.0),
         F("along_x", "", "bool", False, text="Along X"), F("along_y", "", "bool", False, text="Along Y"),
         F("along_z", "", "bool", False, text="Along Z")], _create('SHRINK_WRAP'), paths=("Deform/ShrinkWrap",),
+        old_axes=lambda v: scene_axes.old_swap(v, "along_y", "along_z"),
         missing=("Closest If No Intersection", "Target Inflation", "Bounding Box Center", "Axis Reference",
                  "Single ShrinkWrap Node (one modifier per object)", "Toward Center (Blender: closest point)",
                  ENVELOPE)),
@@ -161,9 +163,10 @@ WINDOWS = [
                  "Color Feedback", "Preserve history", "Mask unselected", "Falloff around selection",
                  "Falloff based on X / Y / Z")),
     # Nonlinear: Bend / Flare / Sine / Squash / Twist / Wave Options
+    # Curvature in degrees (Maya slider -180..180)
     Window("deform_bend", "Bend Options", "Create", _match('BEND'), _bounds() + [
-        F("curvature", "Curvature:", "float", 0.0, lo=-4.0, hi=4.0)], _create('BEND'),
-        paths=("Deform/Nonlinear/Bend",), missing=(_BOUNDS_NOTE, ENVELOPE) + ADVANCED),
+        F("curvature", "Curvature:", "float", 0.0, lo=-180.0, hi=180.0)], _create('BEND'),
+        paths=("Deform/Nonlinear/Bend",), missing=ADVANCED),
     Window("deform_flare", "Flare Options", "Create", _match('FLARE'), _bounds() + [
         F("end_flare", "End flare X:", "float", 1.0, lo=0.0, hi=10.0)], _create('FLARE'),
         paths=("Deform/Nonlinear/Flare",),
@@ -205,7 +208,7 @@ WINDOWS = [
     Window("deform_wire", "Wire Tool", "Create", _match('WIRE'), [
         F("envelope", "Envelope:", "float", 1.0, lo=0.0, hi=1.0),
         F("dropoff", "Dropoff distance:", "float", 1.0, lo=0.0, hi=100.0)], _create('WIRE'), paths=("Deform/Wire",),
-        missing=("Holders (Deform > Wire > Add Holder)", "Crossing effect 0 / Local influence 0 (the factory "
+        missing=("Holders (Deform > Wire > Add Holder)", "Crossing effect 0 / Local influence 0 (the default "
                  "values: no effect)", "Grouping: Group wire(s) and base wire(s) (Wire > Parent Base Wire)")
         + ADVANCED[:1]),
     *[Window(f"wire_{key.lower()}", title, "Apply and Close", None, [

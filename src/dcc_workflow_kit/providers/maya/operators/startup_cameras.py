@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Maya's startup cameras persp / top / front / side as hidden camera objects of a new Maya scene (#117).
 
-Maya 2022: a new scene's top DAG nodes are persp, top, front, side
+Maya: a new scene's top DAG nodes are persp, top, front, side
 (visibility off, ``cmds.camera(query=True, startupCamera=True)`` true), then the user's nodes in creation order; the
 Outliner lists them in that order and greys them (hidden). ``cmds.delete("persp")`` fails with "Non-deletable node
 'persp' cannot be deleted.".
@@ -23,8 +23,8 @@ from . import film_fit, units
 MARK = "allset_startup_camera"
 NAMES = ("persp", "top", "front", "side")
 MAYA_LENS, MAYA_FILM_MM, MAYA_FILM_H_MM, MAYA_ORTHO_WIDTH = 35.0, 36.0, 24.0, 30.0
-# Maya new-scene values (Y-up, Maya units): translate, rotate (XYZ degrees), orthographic
-MAYA = {
+# new-scene cameras (Y-up, Maya units): translate, rotate (XYZ degrees), orthographic
+START = {
     "persp": ((28.0, 21.0, 28.0), (-27.938352729602, 45.0, 0.0), False),
     "top": ((0.0, 1000.1, 0.0), (-90.0, 0.0, 0.0), True),
     "front": ((0.0, 0.0, 1000.1), (0.0, 0.0, 0.0), True),
@@ -59,7 +59,7 @@ def names(scene):
 
 def maya_matrix(name, unit):
     """Blender world matrix of Maya's camera ``name`` (a startup camera or one of ``SIDES``) for Maya unit ``unit``."""
-    t, r = MAYA[name][:2] if name in MAYA else SIDES[name]
+    t, r = START[name][:2] if name in START else SIDES[name]
     m = Euler(tuple(math.radians(a) for a in r), 'XYZ').to_matrix().to_4x4()
     m.translation = [c * unit for c in t]
     return Y_UP_TO_Z_UP @ m
@@ -78,7 +78,7 @@ def ensure(scene, view_layer=None):
         data.lens, data.sensor_width, data.sensor_height = MAYA_LENS, MAYA_FILM_MM, MAYA_FILM_H_MM
         film_fit.set_fit(data, 'HORIZONTAL', scene)   # Fit Resolution Gate of a new scene's cameras in Maya
         data.clip_start, data.clip_end = clip["clip_start"], clip["clip_end"]
-        if MAYA[name][2]:
+        if START[name][2]:
             data.type = 'ORTHO'
             data.ortho_scale = MAYA_ORTHO_WIDTH * unit
         ob = bpy.data.objects.new(name, data)
@@ -93,6 +93,8 @@ def ensure(scene, view_layer=None):
         ob.hide_viewport = True          # Maya startup cameras: visibility off
     from ..ui import outliner_order
     outliner_order.sync(scene, view_layer or bpy.context.view_layer)
+    from ..ui import startup_camera_views
+    startup_camera_views.remember(scene)     # their views follow later changes (#564)
     return made
 
 

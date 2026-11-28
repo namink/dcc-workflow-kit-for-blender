@@ -35,14 +35,15 @@ mesh symmetry apply exactly as in its own resize.
 import math
 
 import bpy
+from . import group
 
 # bl_idname of the modal, for code that waits while a transform runs (it is a transform without the TRANSFORM_OT_
 # prefix).
 MODAL_ID = "ALLSET_OT_manip_scale"
 # Modal transforms: Blender's and the kit's own drags (manipulator scale, pivot edit, component scale, live move,
-# Universal Manipulator).
+# Universal Manipulator, edge-constrained rotate).
 TRANSFORM_MODALS = ("TRANSFORM_OT_", MODAL_ID, "ALLSET_OT_pivot_translate", "ALLSET_OT_pivot_rotate", "ALLSET_OT_um_",
-                    "ALLSET_OT_component_scale", "ALLSET_OT_live_translate")
+                    "ALLSET_OT_component_scale", "ALLSET_OT_live_translate", "ALLSET_OT_edge_rotate")
 
 MODES = (('CENTER', "Centre", "Uniform scale (centre handle)"),
          ('AXIS', "Axis", "Scale along one axis (axis handle)"),
@@ -143,7 +144,7 @@ def supported(context):
     if context.mode == 'OBJECT':
         if ts.use_transform_data_origin or ts.use_transform_skip_children or ts.use_transform_pivot_point_align:
             return False
-        return any(ob.visible_get() for ob in context.selected_objects)
+        return bool(group.selected_objects(context))
     if context.mode == 'EDIT_MESH':
         return True
     return False
@@ -156,7 +157,7 @@ def _other_snap(ts):
 
 def lead_object(context):
     active = context.view_layer.objects.active
-    sel = [ob for ob in context.selected_objects if ob.visible_get()]
+    sel = group.selected_objects(context)
     if active is not None and active in sel:
         return active
     return sel[-1] if sel else None
@@ -369,6 +370,14 @@ def apply(context, f, mask=(True, True, True), orient_type='GLOBAL', final=False
         kwargs["orient_type"] = orient_type
     if context.mode == 'EDIT_MESH':
         kwargs["mirror"] = True     # transform.* exec reads the mesh mirror flags only with mirror
+        # an exec transform reads soft select (proportional editing) only from its own arguments: pass the tool
+        # settings so the points around the selection follow the scale, like Move and Rotate (#548)
+        ts = context.scene.tool_settings
+        kwargs.update(use_proportional_edit=ts.use_proportional_edit,
+                      proportional_edit_falloff=ts.proportional_edit_falloff,
+                      proportional_size=ts.proportional_size,
+                      use_proportional_connected=ts.use_proportional_connected,
+                      use_proportional_projected=ts.use_proportional_projected)
     if final:
         with _OwnPivots(context):
             res = bpy.ops.transform.resize('EXEC_DEFAULT', True, **kwargs)
@@ -412,6 +421,8 @@ class ALLSET_OT_manip_scale(bpy.types.Operator):
     orient_type: bpy.props.StringProperty(default="", options={'SKIP_SAVE'})
     button: bpy.props.EnumProperty(items=(('LEFTMOUSE', "Left", ""), ('MIDDLEMOUSE', "Middle", "")),
                                    default='LEFTMOUSE', options={'SKIP_SAVE'})
+    edge: bpy.props.BoolProperty(default=False, options={'SKIP_SAVE'},
+                                 description="Ctrl+Shift: keep every vertex on one of its edges (mesh edit mode)")
 
     @classmethod
     def poll(cls, context):
@@ -443,6 +454,10 @@ class ALLSET_OT_manip_scale(bpy.types.Operator):
         return screen_dir(region, rv3d, center, point), view_depth(rv3d, point)
 
     def invoke(self, context, event):
+        with group.selection_context(context):
+            return self._invoke(context, event)
+
+    def _invoke(self, context, event):
         from ..ui import manipulator
         region, rv3d = context.region, context.region_data
         if region is None or rv3d is None or not supported(context) or _other_snap(context.scene.tool_settings):
@@ -489,6 +504,10 @@ class ALLSET_OT_manip_scale(bpy.types.Operator):
             px, py = getattr(event, "mouse_prev_press_x", px), getattr(event, "mouse_prev_press_y", py)
         self._press = (px - region.x, py - region.y)
         self._state = save_state(context)
+        self._edge = None
+        if self.edge and context.mode == 'EDIT_MESH':
+            from . import edge_constraint
+            self._edge = edge_constraint.prepare(context)    # the mesh as it is before the drag
         self._zeros = zero_channels(context)
         self._f = 1.0
         self._region_xy = (region.x, region.y)
@@ -509,6 +528,9 @@ class ALLSET_OT_manip_scale(bpy.types.Operator):
         try:
             apply(context, f, self._channels, self.orient_type)
             fix_zero(self._zeros, self._channels)
+            if self._edge:
+                from . import edge_constraint
+                edge_constraint.apply(self._edge)
         except RuntimeError as ex:
             print("allset: scale preview failed", ex)
         if context.area is not None:
@@ -521,14 +543,26 @@ class ALLSET_OT_manip_scale(bpy.types.Operator):
             context.area.tag_redraw()
 
     def modal(self, context, event):
+        with group.selection_context(context):
+            return self._modal(context, event)
+
+    def _modal(self, context, event):
         if event.type in {'MOUSEMOVE', 'INBETWEEN_MOUSEMOVE'}:
             self._update(context, event)
             return {'RUNNING_MODAL'}
         if event.type == self.button and event.value == 'RELEASE':
             restore(self._state)
             try:
-                apply(context, self._f, self._channels, self.orient_type, final=True)
-                fix_zero(self._zeros, self._channels)
+                if self._edge:
+                    # the edge slide changes the points after the resize: one undo step for both
+                    from . import edge_constraint
+                    apply(context, self._f, self._channels, self.orient_type)
+                    fix_zero(self._zeros, self._channels)
+                    edge_constraint.apply(self._edge)
+                    bpy.ops.ed.undo_push(message="Scale")
+                else:
+                    apply(context, self._f, self._channels, self.orient_type, final=True)
+                    fix_zero(self._zeros, self._channels)
             except RuntimeError as ex:
                 print("allset: scale failed", ex)
             self._end(context)

@@ -11,7 +11,7 @@ import math
 import bpy
 from mathutils import Vector
 
-from .. import undo_steps
+from .. import live_refs, undo_steps
 from . import keystate
 
 # --- Alt+A: cycle display ------------------------------------------------------------------------------------
@@ -52,6 +52,8 @@ def apply_display(context, space, mode):
     space.show_object_viewport_mesh = True
     from ..ui import curve_controls        # curve-shaped bone controls follow
     curve_controls.sync(space, scene)
+    if show:
+        curve_controls.release_joints(scene)   # joints hidden by Show > Joints come back with them
 
 
 class ALLSET_OT_cycle_display(bpy.types.Operator):
@@ -203,7 +205,8 @@ class ALLSET_OT_tweak_hold(bpy.types.Operator):
         if event.type == 'TIMER' and keystate.is_down(self._key) is False:
             window = context.window
             from .manip_scale import TRANSFORM_MODALS
-            if window is not None and any(op.bl_idname.startswith(TRANSFORM_MODALS) for op in window.modal_operators):
+            if window is not None and any(op.bl_idname.startswith(TRANSFORM_MODALS)
+                                          for op in live_refs.running_modals(window)):
                 return {'PASS_THROUGH'}       # the release went to a tweak drag: wait for it to end
             return self._finish(context)
         return {'PASS_THROUGH'}

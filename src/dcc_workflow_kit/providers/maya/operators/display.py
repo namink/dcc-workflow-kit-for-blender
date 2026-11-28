@@ -286,7 +286,14 @@ class ALLSET_OT_component_mode(bpy.types.Operator):
         # out of Maya UV mode (F12 / Alt+F12: UV Sync Selection off), its mesh selection back (issue #80)
         from .uv_tools import leave_uv_mode
         leave_uv_mode(context)
-        context.scene.tool_settings.mesh_select_mode = _SELECT_MODE[self.type]
+        ts = context.scene.tool_settings
+        if self.type == "FACE" and ts.mesh_select_mode[1] and not ts.mesh_select_mode[2]:
+            # Maya keeps picked edges while faces are picked next (Wedge's hinge); Blender drops them
+            from . import wedge_hinge
+            wedge_hinge.remember(context)
+        ts.mesh_select_mode = _SELECT_MODE[self.type]
+        from .uv_tools import match_sticky
+        match_sticky(ts)
         return {'FINISHED'}
 
 

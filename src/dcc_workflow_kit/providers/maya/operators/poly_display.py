@@ -2,7 +2,7 @@
 """Display > Polygons, the items that are not check boxes.
 
 Maya sets polygon display on the selected meshes (polyOptions); Blender keeps it on each 3D View's overlays, drawn on
-the meshes in edit mode. Both act on the 3D View the menu reads (``ui/status_line.view3d_space``).
+the meshes in edit mode. Both act on the 3D View the menu reads (``ui/status_line_buttons.view3d_space``).
 
 - Normals Size...: Maya's small floating window with the normal length slider (polyOptions -sizeNormal), which
   changes the normals while it is dragged and stays open until it is closed. The kit window (``ui/marked_window``,

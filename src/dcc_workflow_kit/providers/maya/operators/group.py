@@ -10,11 +10,64 @@ way: world transform kept, ``matrix_parent_inverse``
 left at identity so the child's local values are relative to the group.
 """
 
+from contextlib import nullcontext
+
 import bpy
 from mathutils import Matrix
 
 from .. import results
 from . import units
+
+
+def hidden_groups(context):
+    """Selected group transforms omitted by the viewport's Locators filter."""
+    space = getattr(context, "space_data", None)
+    if (space is None or space.type != 'VIEW_3D'
+            or getattr(space, "show_object_viewport_empty", True)):
+        return []
+    selected = context.selected_objects
+    groups = [ob for ob in context.view_layer.objects.selected if ob.type == 'EMPTY' and ob not in selected]
+    if not groups:
+        return []
+    view_layer = context.view_layer
+    with bpy.context.temp_override(area=None, region=None):
+        groups = [ob for ob in groups if ob.visible_get(view_layer=view_layer)]
+    return [ob for ob in groups if not space.local_view or ob.local_view_get(space)]
+
+
+def selected_objects(context):
+    return context.selected_objects + hidden_groups(context)
+
+
+def selection_context(context):
+    """Let transforms operate on groups without displaying their locator axes or selecting children."""
+    groups = hidden_groups(context) if context.mode == 'OBJECT' else []
+    if not groups:
+        return nullcontext()
+    return context.temp_override(selected_objects=context.selected_objects + groups,
+                                 selected_editable_objects=list(context.selected_editable_objects) +
+                                 [ob for ob in groups if ob.is_editable and not ob.hide_select])
+
+
+class ALLSET_OT_group_transform(bpy.types.Operator):
+    """Drag the selected group's transform with its locator axes hidden"""
+    bl_idname = "allset.group_transform"
+    bl_label = "Transform Group"
+    bl_options = {'INTERNAL'}
+
+    operation: bpy.props.EnumProperty(items=[(n, n.title(), "") for n in ('translate', 'rotate', 'trackball')])
+    constraint_axis: bpy.props.BoolVectorProperty(size=3)
+    orient_type: bpy.props.StringProperty(default='GLOBAL')
+    orient_axis: bpy.props.EnumProperty(items=[(a, a, "") for a in 'XYZ'], default='Z')
+    orient_matrix_type: bpy.props.StringProperty(default='GLOBAL')
+    orient_matrix: bpy.props.FloatVectorProperty(size=(3, 3), subtype='MATRIX')
+    release_confirm: bpy.props.BoolProperty(default=True)
+
+    def invoke(self, context, _event):
+        kwargs = {name: getattr(self, name) for name in self.properties.keys() if name != 'operation'}
+        with selection_context(context):
+            res = getattr(bpy.ops.transform, self.operation)('INVOKE_DEFAULT', **kwargs)
+        return {'FINISHED'} if res & {'RUNNING_MODAL', 'FINISHED'} else {'CANCELLED'}
 
 
 def next_group_name(names):
@@ -28,11 +81,12 @@ def common_parent(objects):
     return parents.pop() if len(parents) == 1 else None
 
 
-def set_parent_keep_world(child, parent):
-    """Parent with identity parent-inverse while keeping the world matrix."""
+def set_parent_keep_world(child, parent, frame=None):
+    """Parent while keeping the world matrix; the parent inverse is ``frame`` (the parent's Maya frame,
+    ``freeze.frame_inverse``) or the identity."""
     world = child.matrix_world.copy()
     child.parent = parent
-    child.matrix_parent_inverse = Matrix.Identity(4)
+    child.matrix_parent_inverse = Matrix.Identity(4) if frame is None else frame
     child.matrix_world = world
 
 
@@ -79,8 +133,9 @@ def make_group(context, objects):
     if parent is not None:
         # Under the common parent with an identity local transform, so the
         # group pivot sits at the parent's origin (Maya zeroPivot).
+        from .freeze import frame_inverse
         grp.parent = parent
-        grp.matrix_parent_inverse = Matrix.Identity(4)
+        grp.matrix_parent_inverse = frame_inverse(parent)     # a frozen parent's frame, like Maya
     grp.matrix_basis = Matrix.Identity(4)
     context.view_layer.update()
 
@@ -92,30 +147,43 @@ def make_group(context, objects):
     return grp
 
 
+def frame_inverse(ob):
+    from .freeze import frame_inverse as frame
+    return frame(ob)
+
+
 def ungroup(context, groups, world=False, preserve=True):
     """Maya Edit > Ungroup (default Ungroup under Parent, Preserve position on): each group's
     children move under the group's parent (``world``: to the world; the world when it has none) keeping their world
-    transform, then the group goes. Preserve position off (``cmds.ungroup(relative=True)``) folds the group's local
-    transform into each child's local values instead (grp t 0 5 0, child t 1 2 3 -> child t 1 7 3).
+    transform, then the group goes. Preserve position off keeps each child's local values instead, so the child
+    moves by the group's transform (grp t 0 5 0, child t 1 2 3 -> child t 1 2 3 under the new parent).
     A selected object that has data of its own (a mesh with
-    children) only loses its children. Returns the moved children."""
+    children) only loses its children. Returns the moved children; like Maya they are listed last among their new
+    siblings, in the order they had in the group (Outliner order, ui/outliner_order.py)."""
+    from ..ui import outliner_order
+    scene = context.scene
     moved = []
     for grp in groups:
-        kids = list(grp.children)
+        if scene is not None:
+            outliner_order.number_new(list(scene.objects))
+        kids = sorted(grp.children, key=lambda o: o.get(outliner_order.ORDER, 0))
         target = None if world else grp.parent
         for child in kids:
             if not preserve:
-                local = grp.matrix_parent_inverse @ grp.matrix_basis @ child.matrix_parent_inverse @ child.matrix_basis
+                local = child.matrix_parent_inverse @ child.matrix_basis
+                frame = frame_inverse(target) if target is not None else Matrix.Identity(4)
                 child.parent = target
-                child.matrix_parent_inverse = Matrix.Identity(4)
-                child.matrix_basis = local
+                child.matrix_parent_inverse = frame         # values in the new parent's frame, like Maya
+                child.matrix_basis = frame.inverted_safe() @ local
             elif target is not None:
-                set_parent_keep_world(child, target)
+                set_parent_keep_world(child, target, frame_inverse(target))
             else:
                 world_m = child.matrix_world.copy()
                 child.parent = None
                 child.matrix_world = world_m
         moved.extend(kids)
+        if scene is not None and kids:
+            outliner_order.to_end(kids, scene)
         if grp.type == 'EMPTY':
             bpy.data.objects.remove(grp)
     return moved
@@ -133,7 +201,7 @@ class ALLSET_OT_ungroup(bpy.types.Operator):
                ('WORLD', "World", "At the top of the hierarchy")))
     preserve_position: bpy.props.BoolProperty(
         name="Preserve Position", default=True, options={'SKIP_SAVE'},
-        description="Keep the children where they are (off = the group's transform goes into their local values)")
+        description="Keep the children where they are (off = keep their local values)")
 
     @classmethod
     def poll(cls, context):
@@ -227,4 +295,4 @@ class ALLSET_OT_group(bpy.types.Operator):
         return {'FINISHED'}
 
 
-classes = (ALLSET_OT_group, ALLSET_OT_ungroup)
+classes = (ALLSET_OT_group, ALLSET_OT_ungroup, ALLSET_OT_group_transform)

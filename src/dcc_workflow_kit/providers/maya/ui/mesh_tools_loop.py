@@ -11,6 +11,7 @@ import bpy
 
 from . import notices
 from ..operators import connect_tool, edge_loops
+from ..keymap.ic_data import platform_tool
 
 # Maya rows the kit can't honour -> (substitute, one line); keys are "Tool Settings/<tool>/<row>" (Insert Edge Loop's
 # greyed rows are in ui/tool_settings.TS_NOTICES)
@@ -165,6 +166,12 @@ class ALLSET_TL_slide_edge(bpy.types.WorkSpaceTool):
 
 
 CONNECT_ROWS = (('SLIDE', "ct_slide"), ('SEGMENTS', "ct_segments"), ('PINCH', "ct_pinch"))
+CONNECT_SHORTCUTS = (     # the Connect Tool's keymap (ALLSET_TL_connect)
+    ("LMB", "click vertices / edges to connect them"),
+    ("Ctrl + LMB", "click an edge to connect its ring"),
+    ("MMB", "drag to change the picked value"),
+    ("Enter / Esc", "end the path"),
+)
 
 
 def draw_connect(layout, context, header=False):
@@ -176,12 +183,19 @@ def draw_connect(layout, context, header=False):
         for _mode, prop in CONNECT_ROWS:
             layout.prop(s, prop)
         return
+    draw_connect_rows(layout, context)
+    draw_description(layout, 'CONNECT')
+
+
+def draw_connect_rows(layout, context):
+    """Slide / Segments / Pinch, each with the radio that picks what a middle-drag changes (Tool Settings and the
+    Modeling Toolkit's Connect Options)."""
+    s = edge_loops.settings(context)
     col = layout.column(align=True)
     for mode, prop in CONNECT_ROWS:
         row = col.row(align=True)
         row.prop_enum(s, "ct_mode", mode, text="")
         row.prop(s, prop)
-    draw_description(layout, 'CONNECT')
 
 
 class ALLSET_TL_connect(bpy.types.WorkSpaceTool):
@@ -220,7 +234,7 @@ TOOLS = (ALLSET_TL_insert_edge_loop, ALLSET_TL_offset_edge_loop, ALLSET_TL_slide
 def register():
     notices.PANEL_NOTICES.update(GREY)
     for tool in TOOLS:
-        bpy.utils.register_tool(tool, after={"builtin.loop_cut"})
+        bpy.utils.register_tool(platform_tool(tool), after={"builtin.loop_cut"})
 
 
 def unregister():

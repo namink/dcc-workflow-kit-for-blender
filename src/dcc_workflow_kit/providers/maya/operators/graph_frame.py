@@ -172,7 +172,8 @@ def _rotation_factor(context):
 def _factors(context, fcurves):
     from ..ui import graph_units
     rot = _rotation_factor(context)
-    return [rot if u == 'ROTATION' else 1.0 for u in graph_units.curve_units(fcurves)]
+    length = graph_units.display_factor(context.scene, 'LENGTH')
+    return [rot if u == 'ROTATION' else length if u == 'LENGTH' else 1.0 for u in graph_units.curve_units(fcurves)]
 
 
 def drawn_curves(context):

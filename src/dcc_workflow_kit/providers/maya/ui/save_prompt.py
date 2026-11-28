@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Maya's "Save changes?" prompt before an action that replaces the open scene (#57).
 
-Maya 2022: when the scene is modified, a dialog with the buttons
+Maya: when the scene is modified, a dialog with the buttons
 Save / Don't Save / Cancel (default Save, Esc = Cancel):
 
 - a saved scene: title "Save Changes", message "Save changes to <scene path>?"; Save = File > Save Scene, then the

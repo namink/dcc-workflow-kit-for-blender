@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+# Large table file: search it (grep) or read line ranges; reading it whole is rarely needed.
 """Maya marking menus as plain data.
 
 Positions and labels follow Maya's own marking menus. Re-implemented: only labels, radial
@@ -119,13 +120,12 @@ SYMMETRY = ("Symmetry", Sub(radial={
 # Material items at the end of the RMB object list (Maya builds them when the RMB marking menu opens).
 # ``rmb``: with nothing selected
 # they act on the object the menu was opened on, like Maya.
-_FAVORITES = (("Lambert", 'LAMBERT'), ("Blinn", 'BLINN'), ("Phong", 'PHONG'),
-              ("Standard Surface", 'STANDARD_SURFACE'))
+# Assign Favorite Material: Blender's one material (Maya lists its favourite surface shaders here).
 
 
 def _material_items():
     """A fresh list per menu, so each menu gets its own submenu class."""
-    favorites = [(label, ("allset.shelf_material", {"kind": kind, "rmb": True})) for label, kind in _FAVORITES]
+    favorites = [("New Material", ("allset.shelf_material", {"rmb": True}))]
     return [
         DIVIDER,
         ("Material Attributes...", ("allset.material_attributes", {"rmb": True})),
@@ -137,10 +137,10 @@ def _material_items():
 
 
 # --- RMB: RMB_MESH --------------------------
-# Mesh radials follow Maya 2022's RMB marking menu over a mesh and its object select masks;
+# Mesh radials follow Maya's RMB marking menu over a mesh and its object select masks;
 # NE "Object Mode".
 
-# The list under the ring, Maya 2022 order
+# The list under the ring, Maya order
 #. The first row is the object's name
 # (``OBJECT_TITLE`` is replaced by it when the menu opens). An empty ``Sub`` is a greyed submenu: Maya's
 # dependency-graph / metadata / set editors have no Blender counterpart here.
@@ -199,7 +199,7 @@ def _object_items(mesh=True):
         (OBJECT_TITLE, ("allset.object_attributes", {"rmb": True})),
         DIVIDER,
         ("Select", ("allset.mm_component", {"type": 'NONE'})),
-        # SelectAll / SelectNone / InvertSelection = the Select menu's runTimeCommands (Maya 2022 RMB menu):
+        # SelectAll / SelectNone / InvertSelection = the Select menu's runTimeCommands (Maya RMB menu):
         # the same items, so component mode follows menu_map.EDIT_MODE (#62)
         ("Select All", _item("Select/All")),
         ("Deselect All", _item("Select/Deselect All")),
@@ -236,7 +236,7 @@ RMB_MESH = MarkingMenu(
         "N": ("Edge", _comp('EDGE')),
         "W": ("Vertex", _comp('VERT')),
         "S": ("Face", _comp('FACE')),
-        # A submenu, like Maya 2022's: the component at its own position, UV Shell at S (like Maya 2022's
+        # A submenu, like Maya's: the component at its own position, UV Shell at S (like Maya's
         # RMB marking menu); both open the UV Editor.
         "E": ("UV", Sub(radial={"E": ("UV", ("allset.uv_component", {"mode": 'UV'})),
                                 "S": ("UV Shell", ("allset.uv_component", {"mode": 'SHELL'}))})),
@@ -247,7 +247,7 @@ RMB_MESH = MarkingMenu(
     items=_object_items(),
     options=("Select Similar",))
 
-# Curve: N curve point, W CV, S edit point, E hull (Maya 2022 RMB marking menu over a curve). Blender
+# Curve: N curve point, W CV, S edit point, E hull (Maya RMB marking menu over a curve). Blender
 # curves edit control points only.
 RMB_CURVE = MarkingMenu(
     "RMB_CURVE", "Curve", "maya",
@@ -274,12 +274,49 @@ RMB_LATTICE = MarkingMenu(
     options=("Select Similar",))
 
 
+def _joint(action):
+    """An item run on the joint the RMB menu was opened on (else the selected joints): ``allset.mm_joint``."""
+    return ("allset.mm_joint", {"action": action})
+
+
+def _joint_items():
+    """The object list (the same rows and places as Maya's joint list); its title, Select and Select Hierarchy act on
+    the joint."""
+    rows = {OBJECT_TITLE: _joint('ATTRIBUTES'), "Select": _joint('SELECT'), "Select Hierarchy": _joint('HIERARCHY')}
+    return [e if e == DIVIDER or e[0] not in rows else (e[0], rows[e[0]]) for e in _object_items(mesh=False)]
+
+
+# Joint (#578): Maya's RMB marking menu over a joint (also over empty space while a joint is selected): Set /
+# Assume Preferred Angle at W / E, Edit Joints at N (Add, Insert, Remove), and the object list.
+RMB_JOINT = MarkingMenu(
+    "RMB_JOINT", "Joint", "maya",
+    radial={
+        "W": ("Set Preferred Angle", _joint('SET_PREFERRED')),
+        "E": ("Assume Preferred Angle", _joint('ASSUME_PREFERRED')),
+        "N": ("Edit Joints", Sub(radial={"N": ("Add", _item("Skeleton/Create Joints")),
+                                          "W": ("Insert", _item("Skeleton/Insert Joints")),
+                                          "E": ("Remove", _item("Skeleton/Remove Joints"))})),
+    },
+    items=_joint_items(),
+    options=("Select Similar",))
+
+
 def with_object_name(menu, name):
     """A copy of ``menu`` whose ``OBJECT_TITLE`` row shows ``name`` (Maya: "pCube1...")."""
     items = [(f"{name}...", e[1]) if e != DIVIDER and e[0] == OBJECT_TITLE else e for e in menu.items]
     if items == menu.items:
         return menu
     return MarkingMenu(menu.name, menu.label, menu.source, menu.radial, items, menu.options)
+
+
+def relabel(menu, label_of):
+    """A copy of ``menu`` whose top-level labels are ``label_of(label, action)`` (labels that change while the kit
+    runs, e.g. the UV brush menu's "Last Tool: <tool>"); ``menu`` itself when none changes."""
+    radial = {k: (label_of(e[0], e[1]), e[1]) for k, e in menu.radial.items()}
+    items = [e if e == DIVIDER else (label_of(e[0], e[1]), e[1]) for e in menu.items]
+    if radial == menu.radial and items == menu.items:
+        return menu
+    return MarkingMenu(menu.name, menu.label, menu.source, radial, items, menu.options)
 
 
 # --- DG Traversal / Inputs / Outputs ------------------------
@@ -397,7 +434,7 @@ PIVOT_EDIT = MarkingMenu(
 
 # --- Shift+RMB: Maya's polygon tool marking menus -------------------------------------
 
-SOFT_HARD = Sub(radial={  # Maya 2022 Shift+RMB object / edge marking menus
+SOFT_HARD = Sub(radial={  # Maya Shift+RMB object / edge marking menus
     "S": ("Toggle Soft Edge Display", SOFT_EDGE_DISPLAY),
     "SE": ("Harden Edge", _item("Mesh Display/Harden Edge")),
     "E": ("Soften/Harden", _item("Mesh Display/Soften/Harden Edges")),   # PolygonSoftenHarden
@@ -510,7 +547,10 @@ SHIFT_OBJECT = MarkingMenu(
                                 ("Difference (A - B)", _item("Mesh/Booleans/Difference (A - B)")),
                                 ("Difference (B - A)", _item("Mesh/Booleans/Difference (B - A)")),
                                 ("Intersection", _item("Mesh/Booleans/Intersection")),
-                                ("Slice", None), ("Hole Punch", None), ("Cut Out", None), ("Split Edges", None)],
+                                ("Slice", _item("Mesh/Booleans/Slice")),
+                                ("Hole Punch", _item("Mesh/Booleans/Hole Punch")),
+                                ("Cut Out", _item("Mesh/Booleans/Cut Out")),
+                                ("Split Edges", _item("Mesh/Booleans/Split Edges"))],
                          options={"Union", "Difference (A - B)", "Difference (B - A)", "Intersection", "Slice",
                                   "Hole Punch", "Cut Out", "Split Edges"})),
         DIVIDER,
@@ -544,7 +584,7 @@ SHIFT_VERTEX = MarkingMenu(
             "N": ("Merge Vertices To Center", MERGE_CENTER),
             "S": ("Target Weld Tool", TARGET_WELD),
         }, options={"Merge Vertices", "Target Weld Tool"})),
-        "NE": ("Average Vertices", "mesh.vertices_smooth"),
+        "NE": ("Average Vertices", _item("Edit Mesh/Average Vertices")),
         "W": ("Multi-Cut", MULTI_CUT),
         "NW": ("Paint Select Vertices", PAINT_SELECT),
     },
@@ -648,7 +688,7 @@ SHIFT_FACE = MarkingMenu(
         DIVIDER,
         ("Mirror", "allset.mirror"),
         ("Extract Faces", ("mesh.separate", {"type": 'SELECTED'})),
-        ("Duplicate Face", ("v3d", "mesh.duplicate_move", {})),
+        ("Duplicate Face", ("item", "Edit Mesh/Duplicate")),
         ("Transform Component", TRANSFORM_COMPONENT),
         ("Connect Tool", CONNECT_TOOL),
         ("Target Weld Tool", TARGET_WELD),
@@ -775,15 +815,20 @@ def _select_prefs():
         "NW": ("Marquee", ("tool", "builtin.select_box", False)),
         "W": ("Camera-Based Selection", ("allset.mm_camera_based", {})),
         "SW": ("Clear Selection", "allset.mm_clear_selection"),
-        "S": ("Soft Select", Sub(radial={
-            "N": ("Object", None),
-            "S": ("Soft Select", _toggle("scene.allset_soft_select")),
-            "SW": ("Volume", ("allset.soft_falloff_mode", {"surface": False})),
-            "W": ("Surface", ("allset.soft_falloff_mode", {"surface": True})),
-            "NW": ("Global", None),
-            "E": ("Color Feedback", None),
-        })),
+        "S": _soft_select(),
     }, items=[("Automatic Camera-Based Selection", None)]))
+
+
+def _soft_select():
+    """Maya's Soft Select submenu of the tool option menus (3D View and UV Editor)."""
+    return ("Soft Select", Sub(radial={
+        "N": ("Object", None),
+        "S": ("Soft Select", _toggle("scene.allset_soft_select")),
+        "SW": ("Volume", ("allset.soft_falloff_mode", {"surface": False})),
+        "W": ("Surface", ("allset.soft_falloff_mode", {"surface": True})),
+        "NW": ("Global", None),
+        "E": ("Color Feedback", None),
+    }))
 
 
 def _constraints():
@@ -791,7 +836,12 @@ def _constraints():
     constraint; Transform Constraints = the kit's Move-tool slide setting (operators/xform_constraint.py)."""
     def tc(mode):
         return ("allset.xform_constraint", {"mode": mode})
-    return [("Selection Constraints", unavailable()),
+
+    def sc(mode):          # operators/sel_constraint.py (#435)
+        return ("wm.context_set_enum", {"data_path": "window_manager.allset_sel_constraint", "value": mode})
+    return [("Selection Constraints", Sub(items=[("Off", sc('OFF')), ("Angle", sc('ANGLE')), ("Border", None),
+                                                 ("Edge Loop", None), ("Edge Ring", None), ("Shell", None),
+                                                 ("UV Edge Loop", None)])),
             ("Transform Constraints", Sub(items=[("Off", tc('NONE')), ("Edge Slide", tc('EDGE')),
                                                  ("Surface Slide", tc('SURFACE')),
                                                  ("Along Normals", tc('NORMAL'))]))]
@@ -1250,8 +1300,9 @@ _UV_MAPPING = Sub(radial={
 _UV_TOOLS = Sub(items=[
     ("Cut Tool", _uve("Tools/Cut")), ("Sew Tool", _uve("Tools/Sew")), DIVIDER,
     ("Optimize Tool", _uve("Tools/Optimize")), ("Unfold Tool", _uve("Tools/Unfold")), DIVIDER,
-    ("Grab Tool", _uve("Tools/Grab")), ("Lattice Tool", None), ("Pin Tool", _uve("Tools/Pin")),
-    ("Pinch Tool", _uve("Tools/Pinch")), ("Smear Tool", None), ("Symmetrize Tool", None),
+    ("Grab Tool", _uve("Tools/Grab")), ("Lattice Tool", _uve("Tools/Lattice")), ("Pin Tool", _uve("Tools/Pin")),
+    ("Pinch Tool", _uve("Tools/Pinch")), ("Smear Tool", _uve("Tools/Smear")),
+    ("Symmetrize Tool", _uve("Tools/Symmetrize")),
 ], options={"Optimize Tool", "Grab Tool", "Pinch Tool"})
 # Pinning also holds the editor's display switches, like Maya's
 _UV_PINNING = Sub(items=[
@@ -1288,25 +1339,26 @@ SHIFT_UV = MarkingMenu(
         "NW": ("Normalize", _uve("Modify/Normalize")),
     },
     items=[("Distribute", _uve("Modify/Distribute UVs")), ("Flip", _uve("Modify/Flip")),
-           ("Map Border", _uve("Modify/Map Border")), ("Symmetrize", None), ("Unitize", _uve("Modify/Unitize")),
+           ("Map Border", _uve("Modify/Map Border")), ("Symmetrize", _uve("Modify/Symmetrize")),
+           ("Unitize", _uve("Modify/Unitize")),
            DIVIDER, ("Auto Seams", _uve("Cut/Sew/Auto Seams")),
            DIVIDER, ("Create UV Shell", _uve("Cut/Sew/Create UV Shell")),
            DIVIDER, ("Cut UVs", _uve("Cut/Sew/Cut")), ("Delete UVs", _uve("Edit/Delete")),
            ("Merge UVs", _uve("Cut/Sew/Merge")), ("Sew UVs", _uve("Cut/Sew/Sew")),
-           DIVIDER, ("Measure Pixel Distance", None), *_UV_LIST_TAIL],
+           DIVIDER, ("Measure Pixel Distance", _uve("Image/Measure Pixel Distance")), *_UV_LIST_TAIL],
     options={"Optimize", "Normalize", "Distribute", "Flip", "Map Border", "Unitize", "Auto Seams", "Merge UVs"})
 
 SHIFT_UV_SHELL = MarkingMenu(
     "SHIFT_UV_SHELL", "UV Editor UV Shells", "maya",
     radial={
         "N": ("Mapping", _UV_MAPPING),
-        "NE": ("Flip Along V", ("transform.mirror", {"constraint_axis": (False, True, False)})),
+        "NE": ("Flip Along V", ("allset.uv_flip", {"direction": 'VERTICAL', "use_options": True})),
         "E": ("Optimize", _uve("Modify/Optimize")),
         "SE": ("Align Shells", _ALIGN),
         "S": ("Rotate Shell", _ROTATE),
         "SW": ("Layout", _LAYOUT),
         "W": ("Unfold", _UNFOLD),
-        "NW": ("Flip Along U", ("transform.mirror", {"constraint_axis": (True, False, False)})),
+        "NW": ("Flip Along U", ("allset.uv_flip", {"direction": 'HORIZONTAL', "use_options": True})),
     },
     items=[("Auto Seams", _uve("Cut/Sew/Auto Seams")),
            DIVIDER, ("Match Grid", _uve("Modify/Match Grid")), ("Match UVs", _uve("Modify/Match UVs")),
@@ -1337,16 +1389,265 @@ SHIFT_UV_FACE = MarkingMenu(
         "NW": ("Normalize", _uve("Modify/Normalize")),
     },
     items=[("Cycle", _uve("Modify/Cycle")), ("Flip", _uve("Modify/Flip")), ("Match Grid", _uve("Modify/Match Grid")),
-           ("Match UVs", _uve("Modify/Match UVs")), ("Symmetrize", None), *_UV_LIST_TAIL],
+           ("Match UVs", _uve("Modify/Match UVs")),
+           ("Symmetrize", _uve("Modify/Symmetrize")), *_UV_LIST_TAIL],
     options={"Straighten UVs", "Optimize", "Normalize", "Flip", "Match Grid", "Match UVs"})
 
+# Ctrl+RMB in the UV Editor: Maya's UV Editor selection conversion menu. Its To Vertices / Edges / Faces / UVs
+# convert like Maya's menu (to the touched vertices, edges and UVs, to the contained faces) and pick that component
+# type; every other entry runs the UV Editor's own Select menu item.
+_UVS = "UV Editor/Select/"
+_UVCS = _UVS + "Convert Selection/"
 
-MENUS = {m.name: m for m in (RMB_MESH, RMB_CURVE, RMB_LATTICE, RMB_EMPTY, PIVOT_EDIT, SHIFT_OBJECT, SHIFT_VERTEX,
+
+def _uv_to(to):
+    return ("allset.uv_convert", {"to": to})
+
+
+UV_CONVERT = MarkingMenu(
+    "UV_CONVERT", "UV Editor Convert Selection", "maya",
+    radial={
+        "S": ("To Faces", Sub(radial={
+            "S": ("To Faces", _uv_to('FACE')),
+            "E": ("To Connected Faces", _item(_UVCS + "To Connected Faces")),
+            "W": ("To Contained Faces", _item(_UVCS + "To Contained Faces")),
+            "SE": ("To Face Perimeter", _item(_UVCS + "To Face Perimeter")),
+            "N": ("To Face Path", _item(_UVCS + "To Face Path")),
+        })),
+        "N": ("To Edges", Sub(radial={
+            "N": ("To Edges", _uv_to('EDGE')),
+            "NE": ("To Edge Perimeter", _item(_UVCS + "To Edge Perimeter")),
+            "NW": ("To Edge Loop", _item(_UVCS + "To Edge Loop")),
+            "W": ("To Edge Ring", _item(_UVCS + "To Edge Ring")),
+            "E": ("To Contained Edges", _item(_UVCS + "To Contained Edges")),
+        })),
+        "E": ("To UVs", Sub(radial={
+            "E": ("To UVs", _uv_to('UV')),
+            "NE": ("To UV Perimeter", _item(_UVCS + "To UV Perimeter")),
+            "SE": ("To UV Edge Loop", _item(_UVCS + "To UV Edge Loop")),
+        })),
+        "W": ("To Vertices", Sub(radial={
+            "W": ("To Vertices", _uv_to('VERTEX')),
+            "NW": ("To Vertex Perimeter", _item(_UVCS + "To Vertex Perimeter")),
+        })),
+        "NE": ("Grow Selection", Sub(radial={
+            "NE": ("Grow", _item(_UVS + "Grow")),
+            "N": ("Grow Along Loop", _item(_UVS + "Grow Along Loop")),
+        })),
+        "NW": ("Shrink Selection", Sub(radial={
+            "NW": ("Shrink", _item(_UVS + "Shrink")),
+            "N": ("Shrink Along Loop", _item(_UVS + "Shrink Along Loop")),
+        })),
+        "SE": ("To UV Shell", _item(_UVCS + "To UV Shell")),
+        "SW": ("To UV Shell Border", _item(_UVCS + "To UV Shell Border")),
+    },
+    items=[
+        ("Select All", _item(_UVS + "All")),
+        ("Clear Selection", _item(_UVS + "Clear")),
+        ("Inverse Selection", _item(_UVS + "Inverse")),
+        DIVIDER,
+        ("Selection Constraints", unavailable()),
+        ("Transform Constraints", unavailable()),
+        DIVIDER,
+        ("Select Back-Facing", _item(_UVS + "Back-Facing")),
+        ("Select Front-Facing", _item(_UVS + "Front-Facing")),
+        ("Select Overlapping", _item(_UVS + "Overlapping")),
+        ("Select Non-Overlapping", _item(_UVS + "Non-Overlapping")),
+        ("Select Texture Borders", _item(_UVS + "Texture Borders")),
+        ("Select Unmapped Faces", _item(_UVS + "Unmapped Faces")),
+        DIVIDER,
+        ("Shortest Edge Path Tool", _item(_UVS + "Shortest Edge Path Tool")),
+    ])
+
+
+# Ctrl+Shift+RMB in the UV Editor: Maya's option menus of the UV Editor's own Move / Rotate / Scale / Select tools.
+# No UV selection / transform constraints in Blender (greyed submenus, like the Shift+RMB Pinning list).
+_UV_IMAGE = {"space_type": 'IMAGE_EDITOR'}
+UV_PICK_MARQUEE = ("tool", "builtin.select_box", _UV_IMAGE)     # the UV Toolkit's Pick/Marquee and Drag tools
+UV_DRAG_MARQUEE = ("tool", "builtin.select_circle", _UV_IMAGE)
+
+
+def _uv_tool_constraints():
+    return [("Selection Constraints", unavailable()), ("Transform Constraints", unavailable())]
+
+
+def _uv_step(kind):
+    return ("Step Snap", ("allset.uv_step_snap", {"kind": kind}))
+
+
+def _uv_options(label):
+    # the tool's settings (Maya: the tool's property window) = the UV Editor sidebar's Tool tab
+    return [*_uv_tool_constraints(), DIVIDER, (label, "allset.uv_tool_settings")]
+
+
+def _uv_select_prefs():
+    """The Select submenu (S) of the UV Move / Rotate / Scale option menus."""
+    return ("Select", Sub(radial={
+        "NE": ("Drag/Marquee", UV_DRAG_MARQUEE),
+        "E": ("Highlight Backfaces", None),
+        "NW": ("Pick/Marquee", UV_PICK_MARQUEE),
+        "S": _soft_select(),
+    }, items=_uv_options("Select Options")))
+
+
+UV_OPT_MOVE = MarkingMenu(
+    "UV_OPT_MOVE", "UV Move Options", "maya",
+    radial={"N": SYMMETRY, "E": _uv_step('TRANSLATE'), "SE": ("Keep Spacing", None), "S": _uv_select_prefs()},
+    items=_uv_options("Move Options"))
+
+UV_OPT_ROTATE = MarkingMenu(
+    "UV_OPT_ROTATE", "UV Rotate Options", "maya",
+    radial={"N": SYMMETRY, "E": _uv_step('ROTATE'), "S": _uv_select_prefs()},
+    items=_uv_options("Rotate Options"))
+
+UV_OPT_SCALE = MarkingMenu(
+    "UV_OPT_SCALE", "UV Scale Options", "maya",
+    radial={"N": SYMMETRY, "E": _uv_step('RESIZE'), "S": _uv_select_prefs(),
+            "W": ("Prevent Negative Scale", None)},
+    items=_uv_options("Scale Options"))
+
+UV_OPT_SELECT = MarkingMenu(
+    "UV_OPT_SELECT", "UV Select Options", "maya",
+    radial={"N": SYMMETRY, "NE": ("Drag/Marquee", UV_DRAG_MARQUEE), "E": ("Highlight Backfaces", None),
+            "S": _soft_select(), "NW": ("Pick/Marquee", UV_PICK_MARQUEE)},
+    items=_uv_options("Select Options"))
+
+
+UV_BRUSH_LAST = ("allset.uv_brush_last", {})
+
+
+def _uv_falloff(kind):
+    return ("wm.context_set_enum", {"data_path": "scene.allset_uv_brush.falloff_type", "value": kind})     # its label names the tool it goes back to (marking.live_label)
+
+# RMB in the UV Editor while one of its brush tools is active (Tools > Unfold, Optimize, Cut, Sew, Pin, Smear,
+# Smudge): Maya's UV brush marking menu.
+UV_BRUSH = MarkingMenu(
+    "UV_BRUSH", "UV Brush", "maya",
+    radial={
+        "N": ("Invert Pin", ("allset.uv_invert_pin", {})),
+        "NE": ("Cut UV Tool", _uve("Tools/Cut")),
+        "E": ("Last Tool", UV_BRUSH_LAST),
+        "SE": ("Grab UV Tool", _uve("Tools/Grab")),
+        "S": ("Pin UV Tool", _uve("Tools/Pin")),
+        "W": ("Falloff Type", Sub(radial={"W": ("Surface/Volume", _uv_falloff('SURFACE_VOLUME')),
+                                          "SW": ("Surface", _uv_falloff('SURFACE')),
+                                          "S": ("Volume", _uv_falloff('VOLUME'))})),
+    })
+
+
+# --- Hypershade graph / Shader Editor RMB (ui/hypershade_hands.py picks the node under the mouse) ---------------------
+# Maya 2026's graph marking menus: empty graph, material, texture, utility (2d placement) and shading group (Blender's
+# Material Output). ``NODE_TITLE`` / ``NODE_HELP`` rows and the ``GraphNodes`` Inputs / Outputs submenus are filled
+# from the node when the menu opens (``hypershade_hands.fill_menu``).
+NODE_TITLE = "<node>..."
+NODE_HELP = 'Help on "<type>"'
+
+
+class GraphNodes(NodeList):
+    """Inputs / Outputs of the graph node under the menu, filled when the menu opens."""
+
+
+def _hsn(action):
+    return ("allset.hs_node_cmd", {"action": action})
+
+
+_STREAM_SELECT = Sub(radial={"W": ("Select Upstream and Downstream", _hsn("STREAM_BOTH")),
+                             "N": ("Select Upstream", _hsn("STREAM_UP")),
+                             "S": ("Select Downstream", _hsn("STREAM_DOWN"))})
+
+
+def _node_list(material=False):
+    """The list under the ring of every node menu (Maya order)."""
+    return [
+        (NODE_TITLE, _hsn("SELECT_NODE")),
+        DIVIDER,
+        *([("Frame Objects with Material", _hsn("FRAME_OBJECTS")), DIVIDER] if material else []),
+        ("Inputs", GraphNodes("GRAPH_INPUTS")),
+        ("Outputs", GraphNodes("GRAPH_OUTPUTS")),
+        DIVIDER,
+        ("Rename", _hsn("RENAME")),
+        ("Toggle Swatch Size", _hsn("SWATCH")),
+        ("Toggle Selection Swatch Size", _hsn("SELECT_SWATCH")),
+        DIVIDER,
+        ("Edit Custom Attribute List", None),
+        ("Show All Attributes", _hsn("SHOW_ALL")),
+        ("Add Attributes...", None),
+        ("Delete Attributes...", None),
+        DIVIDER,
+        (NODE_HELP, _hsn("HELP")),
+    ]
+
+
+NODE_EMPTY = MarkingMenu(
+    "NODE_EMPTY", "Graph", "maya",
+    radial={
+        "N": ("Create Node...", ("allset.hs_tab_create", {})),
+        "E": ("Select All in Graph", ("node.select_all", {"action": 'SELECT'})),
+        "W": ("Select Items in Stream", _STREAM_SELECT),
+        "SE": ("Remove Material Soloing", None),
+        "SW": ("Solo Last Connection", None),
+        "S": ("Graph Materials on Viewport Selection", ("allset.hs_edit", {"action": "FROM_OBJECT"})),
+    },
+    items=[
+        ("Sync Node Editor/Viewport Selection", None),
+        ("Add to Graph on Create", None),
+        ("Regraph Connected Nodes", None),
+        ("Additive Graphing Mode", None),
+        ("Pin all nodes by default", None),
+        ("Display", unavailable()),
+        ("Show", unavailable()),
+        DIVIDER,
+        ("Toggle Selection Swatch Size", _hsn("SELECT_SWATCH")),
+        DIVIDER,
+        ("Hypergraph...", "allset.hypergraph"),
+    ])
+
+NODE_MATERIAL = MarkingMenu(
+    "NODE_MATERIAL", "Material", "maya",
+    radial={
+        "SW": ("Refresh Swatch", _hsn("REFRESH")),
+        "N": ("Assign Material To Viewport Selection", _hsn("ASSIGN")),
+        "NE": ("Paint Assign Shader", None),
+        "E": ("Select Objects with Material", _hsn("SELECT_OBJECTS")),
+        "S": ("Solo", None),
+        "SE": ("Remove Material Soloing", None),
+    },
+    items=_node_list(material=True))
+
+_TEXTURE_RING = {
+    "N": ("Assign Texture's Material to Viewport Selection", _hsn("ASSIGN")),
+    "S": ("Solo", None),
+    "SE": ("Remove Material Soloing", None),
+    "W": ("Test Texture", None),
+    "E": ("Render Texture Range", None),
+}
+
+NODE_TEXTURE = MarkingMenu(
+    "NODE_TEXTURE", "Texture", "maya",
+    radial={**_TEXTURE_RING, "SW": ("Refresh Swatch", _hsn("REFRESH"))},
+    items=[("Edit Texture", _hsn("EDIT_TEXTURE")), ("Reload Image File", _hsn("RELOAD")), DIVIDER, *_node_list()])
+
+NODE_UTILITY = MarkingMenu("NODE_UTILITY", "Utility", "maya", radial=dict(_TEXTURE_RING), items=_node_list())
+
+NODE_OUTPUT = MarkingMenu(
+    "NODE_OUTPUT", "Shading Group", "maya",
+    radial={
+        "N": ("Regraph Stream Nodes", Sub(radial={"W": ("Regraph Upstream and Downstream", _hsn("GRAPH_BOTH")),
+                                                  "N": ("Regraph Upstream", _hsn("GRAPH_UP")),
+                                                  "S": ("Regraph Downstream", _hsn("GRAPH_DOWN"))})),
+        "E": ("Remove Stream Nodes", unavailable()),
+    },
+    items=_node_list())
+
+
+MENUS = {m.name: m for m in (RMB_MESH, RMB_CURVE, RMB_LATTICE, RMB_JOINT, RMB_EMPTY, PIVOT_EDIT, SHIFT_OBJECT, SHIFT_VERTEX,
                              SHIFT_EDGE, SHIFT_FACE, SHIFT_DEFAULT, CTRL_CONVERT,
                              OPT_MOVE, OPT_ROTATE, OPT_SCALE, OPT_SELECT, OPT_QUAD_DRAW, SELECT_ALL,
                              HB_NORTH, HB_SOUTH, HB_EAST, HB_WEST, HB_CENTER,
-                             UV_EDITOR_RMB, SHIFT_UV, SHIFT_UV_SHELL, SHIFT_UV_FACE, KEY_TANGENT,
-                             SELECT_COMPONENT, SELECT_POLYGON)}
+                             UV_EDITOR_RMB, SHIFT_UV, SHIFT_UV_SHELL, SHIFT_UV_FACE, UV_CONVERT,
+                             UV_OPT_MOVE, UV_OPT_ROTATE, UV_OPT_SCALE, UV_OPT_SELECT, UV_BRUSH, KEY_TANGENT,
+                             SELECT_COMPONENT, SELECT_POLYGON,
+                             NODE_EMPTY, NODE_MATERIAL, NODE_TEXTURE, NODE_UTILITY, NODE_OUTPUT)}
 # The kit's own menus. MENUS is what opens: user_menus.apply (Marking Menu Editor) puts rebuilt copies of the
 # menus the user changed and the user's own menus into it; these factory objects are never changed.
 FACTORY = dict(MENUS)
@@ -1356,6 +1657,10 @@ TOOL_OPTIONS = {"builtin.move": "OPT_MOVE", "builtin.rotate": "OPT_ROTATE",
                 "builtin.scale": "OPT_SCALE", "builtin.transform": "OPT_MOVE",
                 "allset.quad_draw_tool": "OPT_QUAD_DRAW"}
 SELECT_OPTIONS = "OPT_SELECT"
+# The UV Editor's active tool -> its options marking menu (Ctrl+Shift+RMB there); its select tools share one.
+UV_TOOL_OPTIONS = {"builtin.move": "UV_OPT_MOVE", "builtin.rotate": "UV_OPT_ROTATE",
+                   "builtin.scale": "UV_OPT_SCALE", "builtin.transform": "UV_OPT_MOVE"}
+UV_SELECT_OPTIONS = "UV_OPT_SELECT"
 
 
 def walk(sub, path):

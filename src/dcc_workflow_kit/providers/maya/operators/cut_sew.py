@@ -2,7 +2,7 @@
 """Maya 3D Cut and Sew UV Tool.
 
 UV > 3D Cut and Sew UV Tool switches to edge mode; in the 3D View an LMB drag
-along edges cuts the UVs there, Ctrl+drag sews; tool keys x / s / d = Cut / Sew / Unfold + Layout (Maya
+along edges cuts the UVs there, Ctrl+drag sews; a double-click cuts the edge's whole edge loop (Ctrl: sews it); tool keys x / s / d = Cut / Sew / Unfold + Layout (Maya
 hotkeys); shell borders (Texture Borders) show thick. The cut / sew themselves are ``uv_tools.cut`` /
 ``sew``; the edge under the mouse is the pre-selection pick, so the red highlight is the edge a press takes.
 """
@@ -13,6 +13,7 @@ import gpu
 from gpu_extras.batch import batch_for_shader
 
 from .. import results
+from .. import update_summary
 from . import preselect, uv_tools
 
 TOOL = "allset.cut_sew_tool"
@@ -65,7 +66,7 @@ def apply(bm, uv, edges, action):
         uv_tools.cut(bm, uv, edges)
         return len(edges)
     if action == "SEW":
-        return uv_tools.sew(bm, uv, edges)
+        return uv_tools.sew(bm, uv, edges, move=True)
     for e in edges:
         e.select_set(True)
     return len(edges)
@@ -137,7 +138,7 @@ def _draw():
 def _invalidate(_scene=None, depsgraph=None):
     if depsgraph is not None and not any(
             isinstance(u.id, (bpy.types.Mesh, bpy.types.Object)) and (u.is_updated_geometry or u.is_updated_transform)
-            for u in depsgraph.updates):
+            for u in update_summary.updates(depsgraph, _invalidate)):
         return
     _border_cache.clear()
 
@@ -228,6 +229,61 @@ class ALLSET_OT_cut_sew_stroke(bpy.types.Operator):
         return {'FINISHED'}
 
 
+def loop_edges(edge):
+    """The edge loop through ``edge`` (across each 4-edge vertex; stops at borders and poles)."""
+    from .quad_draw_geometry import edge_loop
+    return edge_loop(edge)
+
+
+class ALLSET_OT_cut_sew_loop(bpy.types.Operator):
+    """Double-click an edge to cut its whole edge loop; Ctrl = sew the loop (Maya 3D Cut and Sew UV Tool)"""
+    bl_idname = "allset.cut_sew_loop"
+    bl_label = "Cut / Sew UV Edge Loop"
+    bl_options = {'UNDO'}
+
+    action: bpy.props.EnumProperty(items=ACTIONS[:2], name="Action", options={'SKIP_SAVE'})
+    # set by tests / scripts: the edge (index on the active object) instead of the one under the mouse
+    edge_index: bpy.props.IntProperty(default=-1, options={'SKIP_SAVE', 'HIDDEN'})
+
+    @classmethod
+    def poll(cls, context):
+        return context.mode == 'EDIT_MESH'
+
+    def invoke(self, context, event):
+        if context.region is None or context.region.type != 'WINDOW' or context.region_data is None:
+            return {'PASS_THROUGH'}
+        hit = preselect.pick(context, context.region, context.region_data,
+                             (event.mouse_region_x, event.mouse_region_y))
+        if hit is None or hit[1] != 'EDGE':
+            return {'PASS_THROUGH'}
+        ob = _objects_by_ptr(context).get(hit[0])
+        if ob is None:
+            return {'PASS_THROUGH'}
+        return self._run(context, ob, hit[2])
+
+    def execute(self, context):
+        ob = context.object
+        if ob is None or ob.type != 'MESH' or self.edge_index < 0:
+            return {'CANCELLED'}
+        return self._run(context, ob, self.edge_index)
+
+    def _run(self, context, ob, index):
+        bm = bmesh.from_edit_mesh(ob.data)
+        bm.edges.ensure_lookup_table()
+        if index >= len(bm.edges):
+            return {'CANCELLED'}
+        uv = bm.loops.layers.uv.verify()
+        done = apply(bm, uv, loop_edges(bm.edges[index]), self.action)
+        bmesh.update_edit_mesh(ob.data)
+        preselect.invalidate()
+        _border_cache.clear()
+        if context.area is not None:
+            context.area.tag_redraw()
+        if not done and self.action == "SEW":
+            results.result(self, "No UV shells to sew along these edges")
+        return {'FINISHED'}
+
+
 class ALLSET_OT_uv_unfold_layout(bpy.types.Operator):
     """Unfold the UV shells, then lay them out (Maya 3D Cut and Sew d: UnfoldUV + LayoutUV)"""
     bl_idname = "allset.uv_unfold_layout"
@@ -239,11 +295,11 @@ class ALLSET_OT_uv_unfold_layout(bpy.types.Operator):
         return context.mode == 'EDIT_MESH'
 
     def execute(self, context):
-        s = uv_tools.settings(context)
-        n = 0
-        for ob in uv_tools._edit_meshes(context):
-            n += uv_tools.unfold(context, ob)
-            uv_tools.layout(context, ob, s.shell_padding, s.map_size)
+        # both with their saved option values (the Unfold / Layout option windows)
+        v = uv_tools.option_values("uv_unfold")
+        n = sum(uv_tools.unfold(context, ob, True, v["iterations"], v["prevent_flips"])
+                for ob in uv_tools._edit_meshes(context))
+        uv_tools.layout(context)
         return {'FINISHED'} if n else {'CANCELLED'}
 
 
@@ -284,7 +340,7 @@ class ALLSET_OT_cut_sew_tool_set(bpy.types.Operator):
         return {'FINISHED'}
 
 
-classes = (ALLSET_OT_cut_sew_stroke, ALLSET_OT_uv_unfold_layout, ALLSET_OT_cut_sew_tool_set)
+classes = (ALLSET_OT_cut_sew_stroke, ALLSET_OT_cut_sew_loop, ALLSET_OT_uv_unfold_layout, ALLSET_OT_cut_sew_tool_set)
 
 
 def register_handlers():

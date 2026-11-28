@@ -33,7 +33,7 @@ from .. import live_refs
 from ..operators import keystate
 from ..operators import material as material_ops
 
-PICK_PROP = "allset_hs_pick"      # = hypershade.PICK_PROP
+PICK_PROP = "allset_hs_pick"      # = hypershade_ops.PICK_PROP
 DRAG = {"window": 0, "point": None, "material": ""}   # screen point (x, y) of the cursor while a drag runs
 
 

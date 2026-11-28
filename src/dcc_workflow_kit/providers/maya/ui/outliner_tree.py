@@ -26,45 +26,40 @@ skeleton the user named, or a Rigify rig, is an object row with its root joints 
 shape row (object data, e.g. pCubeShape1) under each transform. Display > Children off lists every node flat; the
 search field keeps the matching rows and the rows above them.
 
-Expanded rows and the scroll position are session state (``EXPANDED`` / ``SCROLL``): nothing goes into the scene.
+Expanded rows and the scroll position are session state (``EXPANDED`` / ``SCROLL`` / ``SCROLL_X``): nothing goes
+into the scene. Maya's search field is a row the kit draws above the rows (Blender's Outliner header has one row
+only); a click on it opens the real field in a popup (``maya_outliner.ALLSET_PT_outliner_search``).
+
+Code: outliner_tree_rows (row model, expanded rows), outliner_tree_select (row selection),
+outliner_tree_geometry (row geometry and shapes); this module keeps which Outliners show the tree, the rows
+and row states each redraw reads, the draw, the mouse operators and register.
 """
 
-import fnmatch
 import math
-import re
-from collections import namedtuple
 
 import bpy
 from bpy.app.handlers import persistent
 from bpy.props import IntProperty
 
+from . import draw_replay
+from .draw_replay import call
+from .outliner_tree_rows import (ALL_TYPES, CAMERAS, DEFAULT_SETS, EXPANDED, Options, Row, STATS,  # noqa: F401
+                                 TYPE_PROPS, WHEEL_ROWS, _Bones, _bump_expand, _cache, _drop_old_heads, _state, build,
+                                 default_options, default_set_members, icon_kind, is_kit_skeleton, kit_skeleton_name,
+                                 natural_key, options, set_expanded, subtree_keys, tail_rows, type_group)
+from .outliner_tree_select import (_keep_hidden, active_row, deselect_all, is_picked, picked_unselectable,  # noqa: F401
+                                   select_row, unselectable, visible_signature)
+from .outliner_tree_geometry import (CHILD_SELECTED, COLUMNS, ICON_RGB, INSTANCE_RGB, JOINT_RGB, SCROLL,  # noqa: F401
+                                     SCROLLBAR, SCROLL_X, SEARCH_ROW, _ICON_PARTS, _draw_restrict, _font_size, _icon,
+                                     _quad, _restrict_textures, _triangle, column_xs, eye_x, first_row, page_rows,
+                                     restrict_texture, row_index_at, row_rect, scrollbar, shift_x, top, unit)
+
 # The kit tree replaces Blender's rows in Maya Outliners (tests switch it off to see Blender's rows).
 ENABLED = True
 
-Row = namedtuple("Row", "kind ob sub depth kids open label icon key top", defaults=(False,))
-# kind: 'CAMERA' (a startup camera the scene has no object for), 'OBJECT', 'JOINT', 'SHAPE', 'DEFAULT_SET', 'SET',
-#       'MEMBER'; ob: object / armature / set / camera name; sub: bone name (JOINT), data name (SHAPE), set (MEMBER);
-# kids: has an expand arrow; open: expanded; icon: icon kind; key: expanded-state key (None: can't expand);
-# top: a kit skeleton's root joint (the skeleton's own row: picked whenever the skeleton object is)
-Options = namedtuple("Options", "children sort_alpha shapes types search case complete")
-
-TYPE_PROPS = (('MESH', "use_filter_object_mesh"), ('ARMATURE', "use_filter_object_armature"),
-              ('EMPTY', "use_filter_object_empty"), ('LIGHT', "use_filter_object_light"),
-              ('CAMERA', "use_filter_object_camera"), ('GREASEPENCIL', "use_filter_object_grease_pencil"),
-              ('OTHERS', "use_filter_object_others"))
-ALL_TYPES = frozenset(t for t, _p in TYPE_PROPS)
-CAMERAS = ("persp", "top", "front", "side")
-DEFAULT_SETS = ("defaultLightSet", "defaultObjectSet")
-WHEEL_ROWS = 3
-
-EXPANDED = set()          # ('O', object session_uid) / ('B', armature session_uid, bone name)
-SCROLL = {}               # area pointer -> first shown row
 HOVER = {}                # area pointer -> row under the mouse (drawn lighter, like Blender's Outliner)
 SEEN = {}                 # region pointer -> [(kind, label, row on screen, depth)] of the last draw (tests read it)
 DRAWN = {}                # region pointer -> [(y0, y1, Row)] of the last draw: where each shown row is
-STATS = {"builds": 0, "draws": 0}
-_state = {"expand": 0, "camera": ""}
-_cache = {}               # (structure, expand, scene, view layer, options) -> head rows
 _handle = [None]
 
 
@@ -85,7 +80,11 @@ def is_tree(space):
 
 def hide_rows(space):
     """Hide Blender's rows of a Maya Outliner (the kit draws them). True when it changed something."""
-    if wants_tree(space) and space.use_filter_object:
+    if not wants_tree(space):
+        return False
+    from .maya_outliner import mark
+    mark(space)
+    if space.use_filter_object:
         space.use_filter_object = False
         return True
     return False
@@ -147,260 +146,6 @@ def _first_hide():
     return None
 
 
-# --- row model -----------------------------------------------------------------------------------------------------
-
-def options(space):
-    types = frozenset(t for t, prop in TYPE_PROPS if getattr(space, prop, True))
-    return Options(space.use_filter_children, space.sort_method == "ALPHA", space.use_filter_object_content, types,
-                   space.filter_text, space.use_filter_case_sensitive, space.use_filter_complete)
-
-
-def default_options(**kw):
-    base = dict(children=True, sort_alpha=False, shapes=False, types=ALL_TYPES, search="", case=False,
-                complete=False)
-    base.update(kw)
-    return Options(**base)
-
-
-def type_group(ob):
-    return _type_group(ob.type)
-
-
-def _type_group(t):
-    """``type_group`` of an object of type ``t``."""
-    if t in ('MESH', 'ARMATURE', 'EMPTY', 'LIGHT', 'CAMERA'):
-        return t
-    if t in ('GREASEPENCIL', 'GPENCIL'):
-        return 'GREASEPENCIL'
-    return 'OTHERS'
-
-
-def natural_key(name):
-    """Blender's natural, case-insensitive name order (pCube2 before pCube10)."""
-    return [(0, int(t), "") if t.isdigit() else (1, 0, t.lower()) for t in re.split(r"(\d+)", name) if t]
-
-
-def icon_kind(ob):
-    from ..operators import create
-    from .hypergraph_layout import node_kind
-    return node_kind(ob.type, bool(ob.get(create.LOCATOR_PROP)))
-
-
-def _icon_kinds():
-    """``icon_kind`` as a function of (object, its type) for one rows build: the imports are done once, and only an
-    empty's kind depends on the locator property (``node_kind``), so only empties read it."""
-    from ..operators import create
-    from .hypergraph_layout import node_kind
-    prop = create.LOCATOR_PROP
-    kinds = {}
-
-    def kind(ob, t):
-        if t == 'EMPTY':
-            return node_kind(t, bool(ob.get(prop)))
-        got = kinds.get(t)
-        if got is None:
-            got = kinds[t] = node_kind(t)
-        return got
-    return kind
-
-
-class _Bones:
-    """An armature's joints: the bone list (edit bones in Edit Mode), roots and children by name, in Maya child
-    order (``joints.child_order_key``: creation order, a re-parented joint last)."""
-
-    def __init__(self, ob, sort_alpha=False):
-        from ..operators.joints import CHILD_ORDER
-        data = ob.data
-        self.coll = data.edit_bones if data.is_editmode else data.bones
-        index = {}
-        stamp = {}
-        kids = {}
-        roots = []
-        for i, b in enumerate(self.coll):
-            index[b.name] = i
-            s = b.get(CHILD_ORDER)
-            stamp[b.name] = float(s) if s is not None else float(i)
-            parent = b.parent
-            (kids.setdefault(parent.name, []) if parent is not None else roots).append(b.name)
-        key = natural_key if sort_alpha else stamp.__getitem__
-        self.roots = sorted(roots, key=key)
-        self.kids = {n: sorted(v, key=key) for n, v in kids.items()}
-        self.names = set(index)
-
-
-def kit_skeleton_name(ob):
-    """``ob`` is an armature named like a skeleton the kit made (``skeleton<N>``, ``skeleton<N>.001``)."""
-    from ..operators import joints
-    if ob.type != 'ARMATURE' or not ob.name.startswith(joints.SKELETON_BASE):
-        return False
-    tail = ob.name[len(joints.SKELETON_BASE):].split(".")[0]
-    return not tail or tail.isdigit()
-
-
-def is_kit_skeleton(ob, bones):
-    """A skeleton the kit named (``skeleton<N>``) with a root joint: Maya's root joint is its top node, so the
-    skeleton gets no row of its own."""
-    return kit_skeleton_name(ob) and bool(bones.roots)
-
-
-def _matcher(opts):
-    text = opts.search
-    if not text:
-        return None
-    pattern = text if opts.complete else f"*{text}*"
-    if opts.case:
-        return lambda label: fnmatch.fnmatchcase(label, pattern)
-    pattern = pattern.lower()
-    return lambda label: fnmatch.fnmatchcase(label.lower(), pattern)
-
-
-def build(scene, view_layer, opts, expand_all=False, reuse=None):
-    """Startup camera + DAG rows of ``view_layer`` for the filters ``opts`` (an ``Options``).
-
-    ``reuse``: {row: row} of rows built before; a new row equal to one of them is that row. A rebuild after an edit
-    then makes new rows only for what changed: Python's garbage collector counts every row that lives on as a new
-    long-lived object, and enough of those start a full pass over every object."""
-    from ..operators import startup_cameras
-    from . import outliner_order
-    STATS["builds"] += 1
-    keep = (reuse or {}).get
-    match = _matcher(opts)
-    flat = not opts.children
-    open_all = expand_all or flat or match is not None
-    shown = opts.types
-    layer = [o for o in view_layer.objects if o is not None]    # None: a base removed since the last sync
-    in_layer = set(layer)
-    if opts.sort_alpha:
-        def order(o):
-            return natural_key(o.name)
-    else:
-        numbers = dict(outliner_order.numbers(list(scene.objects)))
-        big = 1 << 40
-
-        def order(o):
-            return (numbers.get(o, big), o.name)
-    bones = {}
-
-    def bones_of(ob):
-        got = bones.get(ob)
-        if got is None:
-            got = bones[ob] = _Bones(ob, opts.sort_alpha)
-        return got
-
-    hidden = "allset_hidden_in_outliner"      # Maya Hide In Outliner (outliner_tree_edit.HIDDEN)
-    kids, bone_kids, roots = {}, {}, []
-    for ob in layer:
-        if ob.get(hidden):
-            continue
-        p = ob.parent
-        if p is None or p not in in_layer:
-            roots.append(ob)
-        elif ob.parent_type == 'BONE' and p.type == 'ARMATURE' and ob.parent_bone in bones_of(p).names:
-            bone_kids.setdefault((p, ob.parent_bone), []).append(ob)
-        else:
-            kids.setdefault(p, []).append(ob)
-    for d in (kids, bone_kids):
-        for v in d.values():
-            v.sort(key=order)
-    roots.sort(key=order)
-
-    def node(kind, ob_name, sub, depth, key, label, icon, children, type_ok=True, top=False):
-        """Rows of one node and what's under it; ``children(depth)`` -> rows of its children."""
-        has = children is not None
-        is_open = has and (open_all or key in EXPANDED)
-        below = children(depth if flat or not type_ok else depth + 1) if is_open or (has and not type_ok) else []
-        if not type_ok:          # filtered out by Show: its children take its place
-            return below
-        if match is not None and not match(label) and not below:
-            return []
-        row = Row(kind, ob_name, sub, 0 if flat else depth, has and not flat, is_open, label, icon, key, top)
-        return [keep(row, row)] + below
-
-    def visit_bone(ob, b, name, depth, extra=(), top=False):
-        child_names = b.kids.get(name, ())
-        objs = list(bone_kids.get((ob, name), ())) + list(extra)
-
-        def children(d):
-            rows = []
-            for c in child_names:
-                rows += visit_bone(ob, b, c, d)
-            for o in objs:
-                rows += visit(o, d)
-            return rows
-        return node('JOINT', ob.name, name, depth, ('B', ob.session_uid, name), name, 'JOINT',
-                    children if child_names or objs else None, 'ARMATURE' in shown, top)
-
-    kind_of = _icon_kinds()
-
-    def visit(ob, depth):
-        t = ob.type
-        b = bones_of(ob) if t == 'ARMATURE' else None
-        obj_kids = kids.get(ob, ())
-        if b is not None and is_kit_skeleton(ob, b):
-            rows = []
-            for i, root in enumerate(b.roots):
-                rows += visit_bone(ob, b, root, depth, obj_kids if i == 0 else (), top=True)
-            return rows
-        shape = opts.shapes and ob.data is not None and t not in ('ARMATURE', 'EMPTY')
-        roots_b = b.roots if b is not None else ()
-        name = ob.name
-        icon = kind_of(ob, t)
-        type_ok = _type_group(t) in shown
-        if not (shape or roots_b or obj_kids):
-            # = node() of a row without children: no arrow, never open
-            if not type_ok or (match is not None and not match(name)):
-                return []
-            row = Row('OBJECT', name, "", 0 if flat else depth, False, False, name, icon, ('O', ob.session_uid), False)
-            return [keep(row, row)]
-
-        def children(d):
-            rows = []
-            if shape:
-                label = ob.data.name
-                if match is None or match(label):
-                    row = Row('SHAPE', name, label, 0 if flat else d, False, False, label, icon, None)
-                    rows.append(keep(row, row))
-            for r in roots_b:
-                rows += visit_bone(ob, b, r, d)
-            for o in obj_kids:
-                rows += visit(o, d)
-            return rows
-        return node('OBJECT', name, "", depth, ('O', ob.session_uid), name, icon, children, type_ok)
-
-    rows = []
-    real = startup_cameras.names(scene)
-    if 'CAMERA' in shown:
-        for name in CAMERAS:
-            if name not in real and (match is None or match(name)):
-                row = Row('CAMERA', name, "", 0, False, False, name, 'CAMERA_ROW', None)
-                rows.append(keep(row, row))
-    for ob in roots:
-        rows += visit(ob, 0)
-    return rows
-
-
-def tail_rows(scene, opts):
-    """defaultLightSet / defaultObjectSet and the kit sets (members under an expanded set)."""
-    from ..operators import sets
-    match = _matcher(opts)
-    rows = [Row('DEFAULT_SET', n, "", 0, False, False, n, 'SET', None) for n in DEFAULT_SETS
-            if match is None or match(n)]
-    for coll in sets.all_sets():
-        mem = sets.members(coll, scene)
-        opened = bool(mem) and (coll.allset_expanded or match is not None)
-        below = [Row('MEMBER', ob.name, coll.name, 1, False, False, ob.name, icon_kind(ob), None) for ob in mem
-                 if match is None or match(ob.name)] if opened else []
-        if match is not None and not match(coll.name) and not below:
-            continue
-        rows.append(Row('SET', coll.name, "", 0, bool(mem), opened, coll.name, 'SET', ('S', coll.name)))
-        rows += below
-    return rows
-
-
-def _bump_expand():
-    _state["expand"] += 1
-
-
 def rows_for(context, space):
     """The rows of a kit tree: cached head (cameras + DAG) + sets."""
     from .outliner import structure_version
@@ -416,47 +161,6 @@ def rows_for(context, space):
             _cache.clear()
         head = _cache[key] = build(scene, view_layer, opts, reuse=reuse)
     return head + tail_rows(scene, opts)
-
-
-def _drop_old_heads(version):
-    """Forget the heads of an older structure or expanded state. Both numbers only go up, so no Outliner asks for
-    those rows again; kept, a big scene's old heads would pile up (thousands of rows each) for Python's garbage
-    collector to walk on every full pass."""
-    for k in [k for k in _cache if k[:2] != version]:
-        del _cache[k]
-
-
-def subtree_keys(context, space, row):
-    """Expanded-state keys of ``row`` and everything below it (Shift+click on an arrow)."""
-    rows = build(context.scene, context.view_layer, options(space)._replace(search="", children=True),
-                 expand_all=True)
-    out = []
-    start = next((i for i, r in enumerate(rows) if r.kind == row.kind and r.ob == row.ob and r.sub == row.sub), None)
-    if start is None:
-        return [row.key] if row.key else []
-    for r in rows[start:]:
-        if r is not rows[start] and r.depth <= row.depth:
-            break
-        if r.kids and r.key is not None:
-            out.append(r.key)
-    return out
-
-
-def set_expanded(keys, state):
-    for key in keys:
-        if key is None:
-            continue
-        if key[0] == 'S':
-            from ..operators import sets
-            coll = sets.get(key[1])
-            if coll is not None:
-                coll.allset_expanded = state
-            continue
-        if state:
-            EXPANDED.add(key)
-        else:
-            EXPANDED.discard(key)
-    _bump_expand()
 
 
 # --- row state (drawn per visible row) ------------------------------------------------------------------------------
@@ -528,18 +232,6 @@ def _pose_or_edit_bone(ob, name):
     return pb, None
 
 
-def visible_signature(context):
-    """The visible selection as text (``visibility._signature``) from the context's selection."""
-    return "\n".join(sorted(o.name for o in context.selected_objects if o.visible_get()))
-
-
-def _kept(ob, signature):
-    """A hidden object that still counts as selected (Maya: hidden by h while selected, or picked hidden in the
-    Outliner; ``visibility.KEPT``)."""
-    from ..operators import visibility
-    return ob.hide_viewport and visibility.KEPT in ob and visibility._kept(ob, signature)
-
-
 def row_state(context, row, live_objects, selected_set=None, signature=None, names=None):
     """(selected, active, hidden, live) of a row (``names``: ``object_names()`` read for the redraw)."""
     vl = context.view_layer
@@ -606,13 +298,6 @@ def row_state(context, row, live_objects, selected_set=None, signature=None, nam
     return False, False, False, False
 
 
-def default_set_members(name, scene):
-    """defaultLightSet = every light in the scene; defaultObjectSet is empty in a new scene."""
-    if name == "defaultLightSet":
-        return [ob for ob in scene.objects if ob.type == 'LIGHT']
-    return []
-
-
 _lights = {"key": None, "members": []}
 
 
@@ -629,162 +314,29 @@ def _default_set_members(name, scene):
     return list(_lights["members"])
 
 
-# --- geometry ------------------------------------------------------------------------------------------------------
-
-def unit(prefs=None):
-    """Blender's Outliner row height UI_UNIT_Y in pixels."""
-    system = (prefs or bpy.context.preferences).system
-    return int(int(18.0 * system.ui_scale + 0.5) + 2 * system.pixel_size)
-
-
-def _font_size(prefs):
-    styles = prefs.ui_styles
-    points = getattr(styles[0].widget, "points", 11.0) if len(styles) else 11.0
-    return points * prefs.system.ui_scale
-
-
-def page_rows(region, u):
-    return max(1, region.height // u)
-
-
-def first_row(area, region, n, u):
-    """First shown row of ``area`` (scroll), clamped so the last page is full."""
-    top = max(0, n - page_rows(region, u))
-    first = min(max(0, SCROLL.get(area.as_pointer(), 0)), top)
-    SCROLL[area.as_pointer()] = first
-    return first
-
-
-def row_index_at(area, region, y, u, n):
-    """Row under region y, or None (below the last row)."""
-    if y < 0 or y >= region.height:
-        return None
-    k = first_row(area, region, n, u) + int((region.height - 1 - y) // u)
-    return k if 0 <= k < n else None
-
-
-def row_rect(area, region, k, u, n):
-    """(y0, y1) region pixels of row ``k`` (it may lie outside the region)."""
-    j = k - first_row(area, region, n, u)
-    y1 = region.height - j * u
-    return y1 - u, y1
-
-
-SCROLLBAR = 0.35      # x UI unit: the scrollbar width at the right edge
-
-
-def scrollbar(region, u, n, first):
-    """(x0, x1, thumb y0, thumb y1) of the scrollbar, or None when every row fits."""
-    page = page_rows(region, u)
-    if n <= page:
-        return None
-    h = region.height
-    thumb = max(u, h * page / n)
-    y1 = h - (h - thumb) * first / max(1, n - page)
-    x1 = region.width - 2
-    return x1 - max(4, round(SCROLLBAR * u)), x1, y1 - thumb, y1
-
-
-# --- drawing -------------------------------------------------------------------------------------------------------
-
-def _quad(pos, col, x0, y0, x1, y1, rgba):
-    pos.extend(((x0, y0), (x1, y0), (x1, y1), (x0, y0), (x1, y1), (x0, y1)))
-    col.extend((rgba,) * 6)
-
-
-_ICON_PARTS = {}          # (kind, cx, cy, r, rgba) -> the icon's (tris, tcol, lines, lcol) made by ``_icon_parts``
-
-
-def _icon(tris, tcol, lines, lcol, kind, cx, cy, r, rgba):
-    """Add a node icon's shapes; an icon drawn at the same place and colour before reuses the points made then."""
-    key = (kind, cx, cy, r, rgba)
-    got = _ICON_PARTS.get(key)
-    if got is None:
-        made = ([], [], [], [])
-        _icon_parts(*made, kind, cx, cy, r, rgba)
-        if len(_ICON_PARTS) > 1024:
-            _ICON_PARTS.clear()
-        got = _ICON_PARTS[key] = tuple(tuple(m) for m in made)
-    tris.extend(got[0])
-    tcol.extend(got[1])
-    lines.extend(got[2])
-    lcol.extend(got[3])
-
-
-def _icon_parts(tris, tcol, lines, lcol, kind, cx, cy, r, rgba):
-    from .hypergraph_layout import icon_shapes
-    for prim in icon_shapes(kind):
-        name, a = prim[0], prim[1:]
-        if name == "rect":
-            _quad(tris, tcol, cx + a[0] * r, cy + a[1] * r, cx + a[2] * r, cy + a[3] * r, rgba)
-        elif name == "frame":
-            x0, y0, x1, y1 = cx + a[0] * r, cy + a[1] * r, cx + a[2] * r, cy + a[3] * r
-            lines.extend(((x0, y0), (x1, y0), (x1, y0), (x1, y1), (x1, y1), (x0, y1), (x0, y1), (x0, y0)))
-            lcol.extend((rgba,) * 8)
-        elif name == "line":
-            lines.extend(((cx + a[0] * r, cy + a[1] * r), (cx + a[2] * r, cy + a[3] * r)))
-            lcol.extend((rgba,) * 2)
-        elif name in ("ring", "disc"):
-            ox, oy, rr = cx + a[0] * r, cy + a[1] * r, a[2] * r
-            pts = [(ox + rr * math.cos(2 * math.pi * i / 12), oy + rr * math.sin(2 * math.pi * i / 12))
-                   for i in range(12)]
-            for i in range(12):
-                p, q = pts[i], pts[(i + 1) % 12]
-                if name == "ring":
-                    lines.extend((p, q))
-                    lcol.extend((rgba,) * 2)
-                else:
-                    tris.extend(((ox, oy), p, q))
-                    tcol.extend((rgba,) * 3)
-        elif name == "tri":
-            tris.extend(((cx + a[0] * r, cy + a[1] * r), (cx + a[2] * r, cy + a[3] * r),
-                         (cx + a[4] * r, cy + a[5] * r)))
-            tcol.extend((rgba,) * 3)
-
-
-def _triangle(tris, tcol, cx, cy, r, down, rgba):
-    if down:
-        pts = ((cx - r, cy + r * 0.5), (cx + r, cy + r * 0.5), (cx, cy - r * 0.7))
-    else:
-        pts = ((cx - r * 0.5, cy + r), (cx - r * 0.5, cy - r), (cx + r * 0.7, cy))
-    tris.extend(pts)
-    tcol.extend((rgba,) * 3)
-
-
-ICON_RGB = (0.741, 0.741, 0.741)      # kit icon grey
-JOINT_RGB = (0.282, 0.667, 0.710)     # kit icon teal
-CHILD_SELECTED = 0.33                 # share of the selection highlight on a row with a selected node below it
-
-
-def _eye(tris, tcol, lines, lcol, cx, cy, u, shown, rgba):
-    """An eye (open: outline + pupil; closed: the lower lid only)."""
-    rx, ry = 0.36 * u, 0.2 * u
-    n = 12
-    upper = [(cx - rx + 2 * rx * i / n, cy + ry * math.sin(math.pi * i / n)) for i in range(n + 1)]
-    lower = [(cx - rx + 2 * rx * i / n, cy - ry * math.sin(math.pi * i / n)) for i in range(n + 1)]
-    for pts in ((upper, lower) if shown else (lower,)):
-        for i in range(n):
-            lines.extend((pts[i], pts[i + 1]))
-            lcol.extend((rgba,) * 2)
-    if shown:
-        r = 0.1 * u
-        pts = [(cx + r * math.cos(2 * math.pi * i / 10), cy + r * math.sin(2 * math.pi * i / 10)) for i in range(10)]
-        for i in range(10):
-            tris.extend(((cx, cy), pts[i], pts[(i + 1) % 10]))
-            tcol.extend((rgba,) * 3)
-
-
-def eye_x(region, u, n, first):
-    """Centre x of the visibility column (Display > Visibility Column), left of the scrollbar."""
-    bar = scrollbar(region, u, n, first)
-    right = bar[0] if bar is not None else region.width
-    return right - 0.9 * u
-
-
 def eye_state(row, names=None):
     """True / False = shown / hidden for an object or joint row, None for rows without an eye."""
     from .outliner_tree_edit import eye_state as state
     return state(row, names)
+
+
+def sort_alpha(space):
+    """The Outliner sorts its rows by name (compat: Blender 5.3's sort_method)."""
+    from .. import compat
+    return compat.outliner_sort_alpha(space)
+
+
+def set_sort_alpha(space, on):
+    from .. import compat
+    compat.set_outliner_sort_alpha(space, on)
+
+
+def column_state(row, col, names=None):
+    """True / False = on / off for a row's column, None when the row has none (``names``: ``object_names()``)."""
+    if col == 'EYE':
+        return eye_state(row, names)
+    from .outliner_tree_edit import restrict_state
+    return restrict_state(row, col, names)
 
 
 def selected_ancestors(context, limit=2000):
@@ -812,19 +364,71 @@ def draw():
             traceback.print_exc()
 
 
+def instance_keys(context):
+    """Row keys of the instance copies (made by Duplicate Special > Instance, still sharing their data) and of the
+    instance groups above them; the originals and the groups holding them stay unmarked."""
+    from ..operators.duplicate import INSTANCE_TAG, is_instance
+    keys = set()
+    for ob in context.view_layer.objects:
+        if ob.get(INSTANCE_TAG) and is_instance(ob):
+            while ob is not None and ob.get(INSTANCE_TAG) and ('O', ob.session_uid) not in keys:
+                keys.add(('O', ob.session_uid))
+                ob = ob.parent
+    return keys
+
+
+def _draw_instance_tip(prefs, region, u, dy, x, y0, y1, ob_name, by_name):
+    """A tooltip box "Instance of <source>" under the hovered instance row (above it at the bottom edge)."""
+    import blf
+    import gpu
+    from gpu_extras.batch import batch_for_shader
+    from ..operators.duplicate import instance_source
+    try:
+        ob = object_named(ob_name, by_name)
+        source = instance_source(ob) if ob is not None else ""
+    except ReferenceError:
+        return
+    from .. import i18n
+    label = bpy.app.translations.pgettext_iface(i18n.mark("Instance of"))
+    label = f"{label} {source}" if source else bpy.app.translations.pgettext_iface(i18n.mark("Instance"))
+    wcol = prefs.themes[0].user_interface.wcol_tooltip
+    pad, w = 0.3 * u, blf.dimensions(0, label)[0]
+    bx0 = max(0.0, min(x, region.width - w - 2 * pad))
+    by1 = y0 - 2 if y0 - u - 2 >= 0 else y1 + u + 2
+    by0 = by1 - u
+    tris, tcol = [], []
+    _quad(tris, tcol, bx0, by0, bx0 + w + 2 * pad, by1, (*tuple(wcol.outline)[:3], 1.0))
+    _quad(tris, tcol, bx0 + 1, by0 + 1, bx0 + w + 2 * pad - 1, by1 - 1, (*tuple(wcol.inner)[:3], 1.0))
+    sh = gpu.shader.from_builtin('SMOOTH_COLOR')
+    call(batch_for_shader(sh, 'TRIS', {"pos": tris, "color": tcol}).draw, sh)
+    call(blf.color, 0, *tuple(wcol.text)[:3], 1.0)
+    call(blf.position, 0, round(bx0 + pad), round((by0 + by1) / 2 - dy), 0)
+    call(blf.draw, 0, label)
+
+
 def _draw(context, space, region, area):
+    STATS["draws"] += 1
+    key = ("outliner", region.as_pointer())
+    sig = (region.width, region.height, context.preferences.system.ui_scale, HOVER.get(area.as_pointer()))
+    if draw_replay.again(key, sig):     # a window moves: the rows as drawn last
+        return
+    with draw_replay.recording(key, sig):
+        _draw_rows(context, space, region, area)
+
+
+def _draw_rows(context, space, region, area):
     import blf
     import gpu
     from gpu_extras.batch import batch_for_shader
     from . import kit_icons
     from ..operators import live
-    STATS["draws"] += 1
     prefs = context.preferences
     u = unit(prefs)
     rows = rows_for(context, space)
     n = len(rows)
     first = first_row(area, region, n, u)
-    last = min(n, first + region.height // u + 1)
+    last = min(n, first + top(region, u) // u + 1)
+    sx = shift_x(area, rows, u)
     th = prefs.themes[0].outliner
     text = tuple(th.space.text)[:3]
     text_hi = tuple(th.space.text_hi)[:3]
@@ -844,16 +448,19 @@ def _draw(context, space, region, area):
     back = tuple(th.space.back)[:3]
     child_rgba = (*(b + (c - b) * CHILD_SELECTED for b, c in zip(back, sel_rgba[:3])), 1.0)
     above = selected_ancestors(context)
+    from .. import preferences
+    # instance copies purple with a chain-link badge: an add-on preference (Maya draws them like other objects)
+    instances = instance_keys(context) if preferences.get(context).outliner_instance_marks else ()
     by_name = object_names()
-    eyes = space.show_restrict_column_hide
-    ex = eye_x(region, u, n, first) if eyes else 0.0
-    tris, tcol, lines, lcol, textures, names = [], [], [], [], [], []
+    cols = column_xs(space, region, u, n, first)
+    tris, tcol, lines, lcol, textures, names, icons = [], [], [], [], [], [], []
     seen, drawn = [], []
+    tip = None                 # the hovered instance row: (name x, y0, y1, object name) for its "Instance of" tip
     r_icon = 0.36 * u
     for k in range(first, last):
         row = rows[k]
         j = k - first
-        y1 = region.height - j * u
+        y1 = top(region, u) - j * u
         y0 = y1 - u
         cy = (y0 + y1) / 2.0
         sel, act, hidden, is_live = row_state(context, row, live_objects, selected_set, signature, by_name)
@@ -863,27 +470,37 @@ def _draw(context, space, region, area):
             _quad(tris, tcol, 0, y0, region.width, y1, child_rgba)
         if HOVER.get(area.as_pointer()) == k:
             _quad(tris, tcol, 0, y0, region.width, y1, (*text_hi, 0.05))
-        if eyes:
-            shown = eye_state(row, by_name)
-            if shown is not None:
-                _eye(tris, tcol, lines, lcol, ex, cy, u, shown, (*text, 0.9 if shown else 0.45))
-        x = row.depth * u
-        alpha = 0.5 if hidden and not sel else 1.0
+        alpha = 0.5 if hidden and not sel else 1.0      # greyed row: name, icon and column icons
+        for col, cx in cols.items():
+            # a drawn startup camera (no object) shows a real one's state: selectable, hidden, not rendered
+            on = (col == 'SELECT') if row.kind == 'CAMERA' else column_state(row, col, by_name)
+            if on is not None:
+                icons.append((col, on, int(cx) - u // 2, y0, alpha))
+        x = row.depth * u - sx
         if row.kids:
             _triangle(tris, tcol, x + 0.6 * u, cy, u * 0.17, row.open, (*text, 0.8))
         ix = x + 1.5 * u
         if row.icon in ('SET', 'CAMERA_ROW'):
             textures.append(("outliner:SET" if row.icon == 'SET' else "outliner:CAMERA", ix, cy, hidden and not sel))
         else:
-            rgb = JOINT_RGB if row.icon == 'JOINT' else ICON_RGB
+            rgb = INSTANCE_RGB if row.key in instances else JOINT_RGB if row.icon == 'JOINT' else ICON_RGB
             _icon(tris, tcol, lines, lcol, row.icon, ix, cy, r_icon * (0.8 if row.kind == 'SHAPE' else 1.0),
                   (*rgb, alpha))
+            if row.key in instances:     # chain-link badge on the icon's lower right corner
+                bx, by, br = ix + 0.6 * r_icon, cy - 0.55 * r_icon, 0.75 * r_icon
+                under = (act_rgba if act else sel_rgba)[:3] if sel else back
+                _icon(tris, tcol, lines, lcol, 'INSTANCE_BACK', bx, by, br, (*under, 1.0))
+                _icon(tris, tcol, lines, lcol, 'INSTANCE', bx, by, br, (*INSTANCE_RGB, alpha))
+                if HOVER.get(area.as_pointer()) == k:
+                    tip = (x + 2.25 * u, y0, y1, row.ob)
         if is_live:
             rgb = live.COLOR
         elif act and row.kind in ('OBJECT', 'JOINT'):
             rgb = act_text
         elif sel and row.kind in ('OBJECT', 'JOINT'):
             rgb = sel_text
+        elif row.key in instances:
+            rgb = INSTANCE_RGB
         else:
             rgb = text_hi if sel else text
         names.append((x + 2.25 * u, cy, row.label, (*rgb, alpha)))
@@ -893,23 +510,42 @@ def _draw(context, space, region, area):
     if bar is not None:
         x0, x1, b0, b1 = bar
         _quad(tris, tcol, x0, b0, x1, b1, (*text, 0.35))
-    gpu.state.blend_set('ALPHA')
+    # Maya's search field on its own row (drawn; a click opens the real field, ``ALLSET_PT_outliner_search``)
+    field = prefs.themes[0].user_interface.wcol_text
+    pad = max(2, round(0.15 * u))
+    fy0, fy1, fx1 = top(region, u) + pad, region.height - pad, region.width - pad
+    _quad(tris, tcol, pad, fy0, fx1, fy1, (*tuple(field.outline)[:3], 1.0))
+    _quad(tris, tcol, pad + 1, fy0 + 1, fx1 - 1, fy1 - 1, (*tuple(field.inner)[:3], 1.0))
+    fcy, glass = (fy0 + fy1) / 2.0, 0.2 * u       # magnifier: ring + handle
+    gx, grgba = pad + 0.6 * u, (*tuple(field.text)[:3], 0.8)
+    ring = [(gx + glass * math.cos(a * math.pi / 6), fcy + 1 + glass * math.sin(a * math.pi / 6)) for a in range(13)]
+    for a, b in zip(ring, ring[1:]):
+        lines.extend((a, b))
+    lines.extend(((gx + 0.7 * glass, fcy + 1 - 0.7 * glass), (gx + 1.8 * glass, fcy + 1 - 1.8 * glass)))
+    lcol.extend((grgba,) * 26)
+    query = space.filter_text
+    names.append((pad + 1.3 * u, fcy, query or bpy.app.translations.pgettext_iface("Search..."),
+                  (*tuple(field.text)[:3], 1.0 if query else 0.5)))
+    call(gpu.state.blend_set, 'ALPHA')
     if tris:
         sh = gpu.shader.from_builtin('SMOOTH_COLOR')
-        batch_for_shader(sh, 'TRIS', {"pos": tris, "color": tcol}).draw(sh)
+        call(batch_for_shader(sh, 'TRIS', {"pos": tris, "color": tcol}).draw, sh)
     if lines:
         sh = gpu.shader.from_builtin('SMOOTH_COLOR')
-        batch_for_shader(sh, 'LINES', {"pos": lines, "color": lcol}).draw(sh)
+        call(batch_for_shader(sh, 'LINES', {"pos": lines, "color": lcol}).draw, sh)
     for name, cx, cy, greyed in textures:
         size = kit_icons.size_for(name, prefs.system.ui_scale)
         kit_icons.draw_texture(name, math.floor(cx - size / 2), math.floor(cy - size / 2), size, greyed)
-    blf.size(0, _font_size(prefs))
+    _draw_restrict(icons, text, u)
+    call(blf.size, 0, _font_size(prefs))
     dy = 0.32 * blf.dimensions(0, "Xg")[1] + 1
     for x, cy, label, rgba in names:
-        blf.color(0, *rgba)
-        blf.position(0, round(x), round(cy - dy), 0)
-        blf.draw(0, label)
-    gpu.state.blend_set('NONE')
+        call(blf.color, 0, *rgba)
+        call(blf.position, 0, round(x), round(cy - dy), 0)
+        call(blf.draw, 0, label)
+    if tip is not None:
+        _draw_instance_tip(prefs, region, u, dy, *tip, by_name)
+    call(gpu.state.blend_set, 'NONE')
     SEEN[region.as_pointer()] = seen
     DRAWN[region.as_pointer()] = drawn
     for d in (SEEN, DRAWN):
@@ -942,235 +578,6 @@ def redraw_outliners(context=None):
         for a in w.screen.areas if w.screen else ():
             if a.type == 'OUTLINER':
                 a.tag_redraw()
-
-
-# --- selection -----------------------------------------------------------------------------------------------------
-
-def _select(ob, state=True):
-    try:
-        ob.select_set(state)
-        return True
-    except RuntimeError:      # not in the view layer
-        return False
-
-
-def _object_mode(context, clear):
-    from ..operators import joint_selection
-    if context.mode != 'OBJECT' and context.view_layer.objects.active is not None:
-        try:
-            joint_selection.leave(context, clear_selection=clear)
-        except RuntimeError:
-            pass
-
-
-def _keep_hidden(context, obs, replace):
-    """Objects Blender can't select (hidden, or selection-locked like a live surface) stay picked when their row is
-    picked: a hidden one gets the visibility module's kept mark for the visible selection left now, so h / Shift+H
-    act on it like on Maya's hidden-but-selected nodes, and every one is remembered with that visible selection
-    (``picked``: Delete, the live list). ``replace`` drops every other pick first."""
-    from ..operators import visibility
-    if replace:
-        visibility._clear(list(context.view_layer.objects), visibility.KEPT)
-    signature = visible_signature(context)
-    names = set() if replace or _state.get("picks", ("", set()))[0] != signature else set(_state["picks"][1])
-    for ob in obs:
-        if ob.hide_viewport:
-            ob[visibility.KEPT] = signature
-        names.add(ob.name)
-    _state["picks"] = (signature, names)
-
-
-def _drop_kept(obs):
-    from ..operators import visibility
-    visibility._clear(obs, visibility.KEPT)
-    sig, names = _state.get("picks", ("", set()))
-    _state["picks"] = (sig, names - {ob.name for ob in obs})
-
-
-def unselectable(ob):
-    """Blender can't select this object (hidden or selection-locked): its row is picked through ``_keep_hidden``."""
-    try:
-        return not ob.visible_get() or ob.hide_select
-    except RuntimeError:
-        return True
-
-
-def is_picked(ob, signature):
-    """An unselectable object picked in the Outliner while the visible selection is still ``signature``."""
-    if _kept(ob, signature):
-        return True
-    sig, names = _state.get("picks", ("", set()))
-    return sig == signature and ob.name in names
-
-
-def picked_unselectable(context):
-    """The unselectable objects picked in a kit Outliner tree (Blender's Outliner keeps such rows highlighted; the
-    kit's tree keeps them here while the visible selection stays the same)."""
-    signature = visible_signature(context)
-    sig, names = _state.get("picks", ("", set()))
-    if sig != signature:
-        return []
-    return [ob for ob in (bpy.data.objects.get(n) for n in sorted(names)) if ob is not None]
-
-
-def deselect_all(context):
-    """Maya: a click on empty Outliner space selects nothing."""
-    _object_mode(context, True)
-    for ob in context.selected_objects:
-        _select(ob, False)
-    _keep_hidden(context, (), True)
-    _state["camera"] = ""
-
-
-def active_row(context, rows):
-    """Index of the row of the active object / joint (the range anchor), or None."""
-    ob = context.view_layer.objects.active
-    if ob is None:
-        return None
-    bone = None
-    if ob.type == 'ARMATURE' and ob.mode == 'POSE' and ob.data.bones.active is not None:
-        bone = ob.data.bones.active.name
-    elif ob.type == 'ARMATURE' and ob.mode == 'EDIT' and ob.data.edit_bones.active is not None:
-        bone = ob.data.edit_bones.active.name
-    for i, r in enumerate(rows):
-        if r.ob != ob.name:
-            continue
-        if bone is not None and r.kind == 'JOINT' and r.sub == bone:
-            return i
-        if bone is None and (r.kind == 'OBJECT' or (r.kind == 'JOINT' and r.top)):   # a kit skeleton = its root row
-            return i
-    return None
-
-
-def _pick_joint(context, ob, name, add):
-    """Pick joint ``name`` the way a viewport click does (Pose Mode, or Edit Mode with the Move tool on an unskinned
-    skeleton); ``add`` keeps the joints already picked."""
-    from ..operators import joint_selection
-    try:
-        joint_selection.select(context, ob, name, shift=add, ctrl=add)
-        return True
-    except (RuntimeError, KeyError):
-        return False
-
-
-def select_row(context, rows, index, mode, anchor=None):
-    """Maya Outliner selection of row ``index``: 'REPLACE' (click), 'TOGGLE' (Ctrl), 'RANGE' (Shift, from
-    ``anchor``), 'RANGE_ADD' (Ctrl+Shift). The pick order (``operators/pick_order``: Maya's selection list, the
-    last pick leads) is brought up to date before and after, like after one of Blender's own Outliner clicks."""
-    from ..operators import pick_order
-    pick_order.ordered(context)
-    try:
-        _select_row(context, rows, index, mode, anchor)
-    finally:
-        pick_order.ordered(context)
-
-
-def _select_row(context, rows, index, mode, anchor=None):
-    from ..operators import sets
-    row = rows[index]
-    vl = context.view_layer
-    kind = row.kind
-    if kind == 'CAMERA':
-        _object_mode(context, mode == 'REPLACE')
-        if mode == 'REPLACE':
-            for o in context.selected_objects:
-                _select(o, False)
-        _state["camera"] = row.ob
-        return
-    _state["camera"] = ""
-    if kind == 'DEFAULT_SET':
-        _object_mode(context, mode == 'REPLACE')
-        mem = [o for o in default_set_members(row.ob, context.scene) if sets._selectable(o)]
-        if mode == 'REPLACE':
-            for o in context.selected_objects:
-                _select(o, False)
-        for o in mem:
-            _select(o, not o.select_get() if mode == 'TOGGLE' else True)
-        if mem and mem[-1].select_get():
-            vl.objects.active = mem[-1]
-        return
-    if kind == 'SET':
-        coll = sets.get(row.ob)
-        if coll is not None:
-            sets.select_members(context, coll, {'TOGGLE': 'TOGGLE', 'RANGE': 'ADD', 'RANGE_ADD': 'ADD'}.get(
-                mode, 'REPLACE'))
-        return
-    ranged = mode in ('RANGE', 'RANGE_ADD') and anchor is not None and 0 <= anchor < len(rows)
-    span = rows[min(anchor, index):max(anchor, index) + 1] if ranged else ()
-    # a range over joints of one skeleton picks those joints; a range that also holds other rows picks objects (a
-    # joint row then stands for its skeleton: Blender can't pick joints and objects together)
-    joints_only = ranged and all(r.kind == 'JOINT' and r.ob == row.ob for r in span)
-    if kind == 'JOINT' and (not ranged or joints_only):
-        ob = bpy.data.objects.get(row.ob)
-        if ob is None or ob.type != 'ARMATURE':
-            return
-        if mode == 'TOGGLE':
-            from ..operators import joint_selection
-            try:
-                joint_selection.select(context, ob, row.sub, shift=True, ctrl=False)
-            except (RuntimeError, KeyError):
-                pass
-            return
-        if ranged:
-            names = [r.sub for r in span if r.sub != row.sub]
-            add = mode == 'RANGE_ADD'
-            for name in names:
-                add = _pick_joint(context, ob, name, add) or add
-            _pick_joint(context, ob, row.sub, add)
-            return
-        _pick_joint(context, ob, row.sub, mode == 'RANGE_ADD')
-        return
-    # OBJECT / SHAPE / MEMBER rows pick their object
-    ob = bpy.data.objects.get(row.ob)
-    if ob is None:
-        return
-    _object_mode(context, mode in ('REPLACE', 'RANGE'))
-    hidden = unselectable(ob)
-    if mode == 'TOGGLE':
-        if hidden:          # a hidden / locked row: picked / unpicked through the kept mark
-            if is_picked(ob, visible_signature(context)):
-                _drop_kept([ob])
-            else:
-                _keep_hidden(context, [ob], False)
-                vl.objects.active = ob
-            return
-        kept = picked_unselectable(context)
-        if _select(ob, not ob.select_get()) and ob.select_get():
-            vl.objects.active = ob
-        _keep_hidden(context, kept, False)          # the visible selection changed: hidden picks stay picked
-        return
-    if ranged:
-        if mode == 'RANGE':
-            for o in context.selected_objects:
-                _select(o, False)
-        else:
-            kept = picked_unselectable(context)
-        picked_hidden = []
-        for r in span:
-            if r.kind in ('OBJECT', 'SHAPE', 'MEMBER', 'JOINT'):
-                o = bpy.data.objects.get(r.ob)
-                if o is None:
-                    continue
-                if unselectable(o):
-                    picked_hidden.append(o)
-                else:
-                    _select(o)
-        _keep_hidden(context, picked_hidden + (kept if mode == 'RANGE_ADD' else []), mode == 'RANGE')
-        if ob.select_get() or hidden:
-            vl.objects.active = ob
-        return
-    if mode != 'RANGE_ADD':
-        for o in context.selected_objects:
-            if o != ob:
-                _select(o, False)
-    if hidden:
-        _keep_hidden(context, [ob], mode != 'RANGE_ADD')
-        vl.objects.active = ob
-        return
-    if mode != 'RANGE_ADD':
-        _keep_hidden(context, (), True)
-    if _select(ob):
-        vl.objects.active = ob
 
 
 # --- operators -----------------------------------------------------------------------------------------------------
@@ -1221,9 +628,13 @@ class ALLSET_OT_outliner_tree_click(bpy.types.Operator):
         rows = rows_for(context, space)
         n = len(rows)
         x, y = event.mouse_region_x, event.mouse_region_y
+        if y >= top(region, u):     # the search row: a real text field can only live in a popup
+            bpy.ops.wm.call_panel(name="ALLSET_PT_outliner_search", keep_open=False)
+            return {'FINISHED'}
         first = first_row(area, region, n, u)
         bar = scrollbar(region, u, n, first)
         self.scrolling = False
+        self.column = None
         if bar is not None and bar[0] - 2 <= x <= region.width:
             return self._start_scroll(context, event, bar, n, u)
         k = row_index_at(area, region, y, u, n)
@@ -1235,14 +646,16 @@ class ALLSET_OT_outliner_tree_click(bpy.types.Operator):
             redraw_outliners(context)
             return {'FINISHED'}
         row = rows[k]
-        x0 = row.depth * u
-        on_eye = space.show_restrict_column_hide and abs(x - eye_x(region, u, n, first)) <= 0.55 * u
-        if on_eye and eye_state(row) is not None:
-            from .outliner_tree_edit import toggle_eye
+        x0 = row.depth * u - shift_x(area, rows, u)
+        hit = next((c for c, cx in column_xs(space, region, u, n, first).items() if abs(x - cx) <= 0.5 * u), None)
+        if hit is not None and column_state(row, hit) is not None:
+            # Blender: the press flips the icon, dragging gives every icon passed (any row, any column) the same
+            # state, Shift takes everything below each row too
             _click.update(key=None, time=0.0)
-            done = toggle_eye(context, row)
-            redraw_outliners(context)
-            return {'FINISHED'} if done else {'CANCELLED'}
+            self.column, self.column_cells, self.column_last, self.u = not column_state(row, hit), {(k, hit)}, (x, y), u
+            self._set_column(context, rows, k, hit, event.shift)
+            context.window_manager.modal_handler_add(self)
+            return {'RUNNING_MODAL'}
         if row.kids and x0 <= x < x0 + 1.1 * u:
             _click.update(key=None, time=0.0)
             keys = subtree_keys(context, space, row) if event.shift else [row.key]
@@ -1275,21 +688,43 @@ class ALLSET_OT_outliner_tree_click(bpy.types.Operator):
         self.dragging = True
         rows = rows_for(context, space)
         n = len(rows)
-        if y >= region.height and SCROLL.get(area.as_pointer(), 0) > 0:      # past the top / bottom: scroll
+        if y >= top(region, u) and SCROLL.get(area.as_pointer(), 0) > 0:      # past the top / bottom: scroll
             SCROLL[area.as_pointer()] -= 1
         elif y < 0:
             SCROLL[area.as_pointer()] = SCROLL.get(area.as_pointer(), 0) + 1
         first = first_row(area, region, n, u)
-        yy = min(max(y, 0), region.height - 1)
+        yy = min(max(y, 0), top(region, u) - 1)
         k = row_index_at(area, region, yy, u, n)
         if k is None:
-            k = n - 1 if yy < region.height / 2 else first
+            k = n - 1 if yy < top(region, u) / 2 else first
         if k == self.last or n == 0:
             return
         self.last = k
         mode = 'RANGE_ADD' if self.mode in ('TOGGLE', 'RANGE_ADD') else 'RANGE'
         select_row(context, rows, k, mode, anchor=self.pressed)
         redraw_outliners(context)
+
+    def _set_column(self, context, rows, k, col, recursive):
+        from .outliner_tree_edit import set_column
+        if column_state(rows[k], col) is not None:
+            set_column(context, rows[k], col, self.column, recursive)
+            redraw_outliners(context)
+
+    def _drag_column(self, context, event):
+        area, region, space = context.area, context.region, context.space_data
+        rows = rows_for(context, space)
+        n, u = len(rows), self.u
+        xs = column_xs(space, region, u, n, first_row(area, region, n, u))
+        (x0, y0), (x1, y1) = self.column_last, (event.mouse_region_x, event.mouse_region_y)
+        self.column_last = (x1, y1)
+        steps = max(1, int(max(abs(x1 - x0), abs(y1 - y0)) * 4 / u))     # a fast move skips no icon
+        for i in range(1, steps + 1):
+            x, y = x0 + (x1 - x0) * i / steps, y0 + (y1 - y0) * i / steps
+            k = row_index_at(area, region, y, u, n)
+            col = next((c for c, cx in xs.items() if abs(x - cx) <= 0.5 * u), None)
+            if k is not None and col is not None and (k, col) not in self.column_cells:
+                self.column_cells.add((k, col))
+                self._set_column(context, rows, k, col, event.shift)
 
     # the scrollbar: drag the thumb, a click above / below it pages
     def _start_scroll(self, context, event, bar, n, u):
@@ -1309,6 +744,12 @@ class ALLSET_OT_outliner_tree_click(bpy.types.Operator):
         return {'RUNNING_MODAL'}
 
     def modal(self, context, event):
+        if self.column is not None:
+            if event.type == 'MOUSEMOVE':
+                self._drag_column(context, event)
+            elif event.type == 'LEFTMOUSE' and event.value == 'RELEASE' or event.type == 'ESC':
+                return {'FINISHED'}                # one undo step for the press and the drag
+            return {'RUNNING_MODAL'}
         if not self.scrolling:
             if event.type == 'MOUSEMOVE':
                 self._drag(context, event)
@@ -1319,7 +760,7 @@ class ALLSET_OT_outliner_tree_click(bpy.types.Operator):
             y0, first0, n, u, thumb = self.grab
             region, area = context.region, context.area
             page = page_rows(region, u)
-            span = max(1.0, region.height - thumb)
+            span = max(1.0, top(region, u) - thumb)
             SCROLL[area.as_pointer()] = int(round(first0 + (y0 - event.mouse_region_y) / span * (n - page)))
             first_row(area, region, n, u)
             area.tag_redraw()
@@ -1386,7 +827,53 @@ class ALLSET_OT_outliner_tree_scroll(bpy.types.Operator):
         return {'FINISHED'}
 
 
-classes = (ALLSET_OT_outliner_tree_click, ALLSET_OT_outliner_tree_hover, ALLSET_OT_outliner_tree_scroll)
+class ALLSET_OT_outliner_tree_pan(bpy.types.Operator):
+    """Pan the Maya Outliner rows in both directions (Maya: Alt+middle-drag, like a 2D view)"""
+    bl_idname = "allset.outliner_tree_pan"
+    bl_label = "Outliner Pan"
+    bl_options = {'INTERNAL'}
+
+    @classmethod
+    def poll(cls, context):
+        return context.region is not None and context.region.type == 'WINDOW'
+
+    def invoke(self, context, event):
+        if not _poll(context):
+            return {'PASS_THROUGH'}
+        key = context.area.as_pointer()
+        self.start = (event.mouse_x, event.mouse_y, SCROLL_X.get(key, 0), SCROLL.get(key, 0))
+        context.window.cursor_modal_set('SCROLL_XY')
+        context.window_manager.modal_handler_add(self)
+        return {'RUNNING_MODAL'}
+
+    def pan(self, context, dx, dy):
+        """Move the rows by (dx, dy) pixels from where the drag started (+x right, +y up)."""
+        x0, y0, sx0, first0 = self.start
+        area, region = context.area, context.region
+        u = unit(context.preferences)
+        rows = rows_for(context, context.space_data)
+        key = area.as_pointer()
+        SCROLL_X[key] = sx0 - dx
+        SCROLL[key] = first0 + round(dy / u)
+        shift_x(area, rows, u)
+        first_row(area, region, len(rows), u)
+        redraw_rows(context, area)
+
+    def modal(self, context, event):
+        if event.type == 'MOUSEMOVE':
+            self.pan(context, event.mouse_x - self.start[0], event.mouse_y - self.start[1])
+        elif event.type in ('ESC', 'RIGHTMOUSE'):
+            self.pan(context, 0, 0)
+            context.window.cursor_modal_restore()
+            return {'CANCELLED'}
+        elif event.type == 'MIDDLEMOUSE' and event.value == 'RELEASE':
+            context.window.cursor_modal_restore()
+            return {'FINISHED'}
+        return {'RUNNING_MODAL'}
+
+
+classes = (ALLSET_OT_outliner_tree_click, ALLSET_OT_outliner_tree_hover, ALLSET_OT_outliner_tree_scroll,
+           ALLSET_OT_outliner_tree_pan)
 
 
 def register():
@@ -1420,6 +907,8 @@ def unregister():
     SEEN.clear()
     DRAWN.clear()
     SCROLL.clear()
+    SCROLL_X.clear()
     HOVER.clear()
+    _restrict_textures.clear()      # Blender's column icons as GPU textures
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)

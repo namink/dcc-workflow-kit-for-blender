@@ -2,7 +2,8 @@
 """Render > Render Sequence with its Maya options: renderable cameras and Skip existing frames.
 
 - Each camera has Maya's Renderable check (``Camera.allset_renderable``, kept on the camera data like Maya's
-  camera shape attribute; on by default, off for the startup top / front / side cameras of a new Maya scene). It
+  camera shape attribute; on for the startup persp and for cameras made outside the kit, off for the startup
+  top / front / side cameras and, like Maya, for a camera the kit creates). It
   shows in the Attribute Editor camera tab (Output Settings) and in the Render Sequence option window.
 - Render Sequence with All Render-Enabled Cameras renders the frame range once per renderable camera, one after
   another. With more than one camera each camera's frames go into a folder named after the camera inside the

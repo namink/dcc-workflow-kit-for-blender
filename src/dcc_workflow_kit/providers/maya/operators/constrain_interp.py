@@ -18,7 +18,7 @@ The kit (Blender constraints only blend by influence = a shortest slerp):
 - the other types: the rotation members get influence 0 and one Copy Rotation ``<group> blend`` (after the group) reads
   a hidden empty ``<owner>_<group>Blend`` whose world rotation the kit computes from the targets (depsgraph / frame
   handlers, like the pole helper). Frames are the Maya node frames: an object's Maya axes are its Blender X / Z /
-  -Y (joints.MAYA_WORLD), a joint's are its bone's Y / Z / X (joints.JOINT_AXES); the own rotation is the node's
+  -Y (joint_frames.MAYA_WORLD), a joint's are its bone's Y / Z / X (joint_frames.JOINT_AXES); the own rotation is the node's
   rotation channels (the sign of q_Euler).
 - every weight 0: member 0 and the blend turn off too (constrain_multi.drive_group), so the node shows its own
   rotation channels, which hold the rest position (constrain_multi.build writes the output at creation into them when
@@ -37,6 +37,8 @@ import math
 import bpy
 from bpy.app.handlers import persistent
 from mathutils import Quaternion, Vector
+
+from .. import update_summary
 
 NO_FLIP, AVERAGE, SHORTEST, LONGEST, CACHE = range(5)
 NAMES = ("No Flip", "Average", "Shortest", "Longest", "Cache")
@@ -518,6 +520,7 @@ def _on_update(*_args):
         for h in blend_helpers():
             owner = owner_of_helper(h)
             if owner is not None and blend_constraint(owner, h[H_GROUP]) is not None:
+                update_summary.wrote()
                 update(owner, h[H_GROUP])
     except (ReferenceError, AttributeError, RuntimeError, KeyError, TypeError):
         pass

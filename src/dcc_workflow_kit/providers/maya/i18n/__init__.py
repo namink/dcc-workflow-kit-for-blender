@@ -14,6 +14,12 @@ translation, so a user file also changes a menu item Blender happens to know (Ce
 ``<locale>.py`` = ``STRINGS = {English: translation}`` (no ``bpy``: ``tools/i18n_strings.py`` reads them for its
 coverage report). Add a language by adding a module and listing it in ``LANGUAGES``.
 
+One English text can mean different things in different places ("Drag" = the drag selection style in the toolkits,
+the air resistance field in Fields / Solvers). Such a place draws its text with a kit translation context (``CTX_*``,
+``text_ctxt=`` in Blender layouts, ``iface(text, ctxt)`` for text the kit draws itself), and ``<locale>.py`` gives
+its translation in ``CONTEXT_STRINGS = {(context, English): translation}``; everywhere else the text keeps its
+``STRINGS`` translation.
+
 Users add or correct languages with ``<language code>.json`` files in the kit's user folder (``user_files``; the
 English template ``template_en.json`` lists every string by menu / window / file); they are read on register and by
 ``reload``, and their entries go over the built-in table of that language.
@@ -22,6 +28,11 @@ English template ``template_en.json`` lists every string by menu / window / file
 from . import ja_JP, zh_HANS, zh_HANT
 
 LANGUAGES = {"ja_JP": ja_JP.STRINGS, "zh_HANS": zh_HANS.STRINGS, "zh_HANT": zh_HANT.STRINGS}
+# {locale: {(context, English): translation}}: texts whose translation depends on where they are shown
+CONTEXT_LANGUAGES = {"ja_JP": ja_JP.CONTEXT_STRINGS, "zh_HANS": zh_HANS.CONTEXT_STRINGS,
+                     "zh_HANT": zh_HANT.CONTEXT_STRINGS}
+# the kit's translation contexts
+CTX_SELECT_STYLE = "Maya Select Style"      # Pick/Marquee · Drag · Tweak/Marquee rows of the toolkits
 # Blender's default context ("*": labels, menus, panels, properties) and its operator context (operator buttons
 # with their own text, operator names)
 CONTEXTS = ("*", "Operator")
@@ -37,9 +48,10 @@ def _merged(user=None):
     return merged
 
 
-def own(text, tooltip=False):
+def own(text, tooltip=False, ctxt=None):
     """The kit's translation of ``text`` in the interface language, or None (not translated, or the "Translate"
-    toggle for interface / tooltips is off)."""
+    toggle for interface / tooltips is off). ``ctxt``: a kit translation context (``CTX_*``) whose own translation
+    wins."""
     try:
         import bpy
         view = bpy.context.preferences.view
@@ -49,6 +61,10 @@ def own(text, tooltip=False):
         strings = _own.get(language)
     except (ImportError, AttributeError):
         return None
+    if ctxt is not None:
+        found = CONTEXT_LANGUAGES.get(language, {}).get((ctxt, text))
+        if found is not None:
+            return found
     return strings.get(text) if strings else None
 
 
@@ -56,8 +72,11 @@ def table(user=None):
     """{locale: {(context, English): translation}} for ``bpy.app.translations.register``: the built-in tables with
     ``user`` ({locale: {English: translation}}, the user's translation files) over them."""
     merged = _merged(user)
-    return {locale: {(ctx, en): tr for en, tr in strings.items() for ctx in CONTEXTS}
-            for locale, strings in merged.items()}
+    out = {locale: {(ctx, en): tr for en, tr in strings.items() for ctx in CONTEXTS}
+           for locale, strings in merged.items()}
+    for locale, strings in CONTEXT_LANGUAGES.items():
+        out.setdefault(locale, {}).update(strings)
+    return out
 
 
 def mark(text):
@@ -65,16 +84,17 @@ def mark(text):
     return text
 
 
-def iface(text):
-    """``text`` as the interface shows it (the language and "Translate Interface" decide)."""
+def iface(text, ctxt=None):
+    """``text`` as the interface shows it (the language and "Translate Interface" decide); ``ctxt`` = a kit
+    translation context (``CTX_*``)."""
     if not text:
         return text
-    mine = own(text)
+    mine = own(text, ctxt=ctxt)
     if mine is not None:
         return mine
     try:
         import bpy
-        return bpy.app.translations.pgettext_iface(text)
+        return bpy.app.translations.pgettext_iface(text, ctxt) if ctxt else bpy.app.translations.pgettext_iface(text)
     except (ImportError, AttributeError):
         return text
 

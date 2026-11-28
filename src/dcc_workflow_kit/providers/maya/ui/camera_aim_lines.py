@@ -111,12 +111,15 @@ def is_maya_view(space, workspace):
 def _draw():
     context = bpy.context
     try:
+        view_layer = context.view_layer
+        cams = cameras(view_layer)
+        if not cams:                # the usual case first: no camera, nothing more is read in this draw
+            return
         space = context.space_data
         if not is_maya_view(space, context.window.workspace):
             return
-        view_layer = context.view_layer
         try:
-            segs = segments(view_layer, space, cameras(view_layer))
+            segs = segments(view_layer, space, cams)
         except ReferenceError:      # a camera removed before the next depsgraph update: read the view layer again
             _CAMERAS.clear()
             segs = segments(view_layer, space, cameras(view_layer))

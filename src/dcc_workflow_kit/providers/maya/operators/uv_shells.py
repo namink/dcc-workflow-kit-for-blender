@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Maya UV Editor shell commands.
 
-Shell = the kit island rule (`uv_tools.islands`, shared UV coordinates); any selected UV / edge / face of a shell picks
+Shell = the kit island rule (`uv_islands.islands`, shared UV coordinates); any selected UV / edge / face of a shell picks
 the whole shell for the shell commands. A "UV" = the loops of one vertex that share
 one coordinate inside one face set (Maya's UV id); UVs are ordered by their first loop index, which is Maya's UV-index order
 for meshes built face by face (the test meshes).
@@ -11,7 +11,7 @@ import math
 
 import bmesh
 import bpy
-from bpy.props import EnumProperty, FloatProperty
+from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty
 from mathutils import Vector
 
 from .. import compat, undo_steps
@@ -52,11 +52,33 @@ def _all_loops(bm):
     return [l for f in bm.faces if not f.hide for l in f.loops]
 
 
+def synced_test(bm):
+    """With UV Sync Selection the mesh selection picks the UVs like Maya converts it: a selected vertex = every UV
+    on it, a selected edge = the UVs at its ends on the faces beside it, a selected face = the UVs of its corners
+    (UVs of other faces on the same vertex stay out)."""
+    mode = bm.select_mode
+    if 'VERT' in mode:
+        return lambda l: l.vert.select
+    if 'EDGE' in mode:
+        return lambda l: l.edge.select or l.link_loop_prev.edge.select
+    return lambda l: l.face.select
+
+
+def selected_loops(bm, uv, synced):
+    """The loops of the selected UVs (a UV shared by several faces of a shell: all its loops), on shown faces."""
+    if not synced:
+        return {l for f in bm.faces if not f.hide and f.select for l in f.loops if compat.uv_vert_selected(l, uv)}
+    if 'VERT' in bm.select_mode:
+        return {l for f in bm.faces if not f.hide for l in f.loops if l.vert.select}
+    test = synced_test(bm)
+    _index_loops(bm)
+    return {l for ls in uv_points(bm, uv, _all_loops(bm)) if any(test(l) for l in ls) for l in ls}
+
+
 def selected_points(bm, uv, synced):
     """Selected UVs (lists of loops), Maya UV-index order."""
     _index_loops(bm)
-    loops = [l for f in bm.faces if not f.hide and (synced or f.select) for l in f.loops if _loop_selected(l, uv, synced)]
-    return uv_points(bm, uv, loops)
+    return uv_points(bm, uv, selected_loops(bm, uv, synced))
 
 
 def _index_loops(bm):
@@ -195,10 +217,15 @@ def orient_edges(bm, uv, synced, edges=None):
     where = owner_map(groups)
     pairs = []          # (shell index, loop a, loop b)
     edges = uv_tools.selected_edges(bm, uv, synced) if edges is None else edges
+    # selected faces (UV Sync Selection, face mode) bring only their own UV edges, not the neighbour's side
+    own = synced and set(bm.select_mode) == {'FACE'}
     for e in sorted(edges, key=lambda e: e.index):
         seen = set()
         for f in e.link_faces:
-            if f.hide or f not in where:
+            if f.hide or f not in where or (own and not f.select):
+                continue
+            # without UV Sync Selection a UV edge belongs to one face: the other face's side of it is its own
+            if not synced and not compat.uv_edge_selected(next(l for l in f.loops if l.edge is e), uv):
                 continue
             la = next(l for l in f.loops if l.vert is e.verts[0])
             lb = next(l for l in f.loops if l.vert is e.verts[1])
@@ -251,41 +278,57 @@ def snap_together(bm, uv, synced, method=0):
     return 1
 
 
-def distribute(groups, uv, padding=0.0):
-    """Right: widest shell first at the selection centre, the others to its right, no gap, centred on its v."""
+DIRECTIONS = {'RIGHT': (0, 1), 'LEFT': (0, -1), 'UP': (1, 1), 'DOWN': (1, -1)}
+
+
+def distribute(groups, uv, padding=0.0, direction='RIGHT'):
+    """Right: widest shell first at the selection centre, the others to its right, ``padding`` apart, centred on its
+    v. Left the same to the left; Up / Down: tallest first, the others above / below, centred on its u."""
     if not groups:
         return 0
+    k, sign = DIRECTIONS[direction]
+    o = 1 - k
     lo = Vector((min(uv_bounds(g, uv)[0].x for g in groups), min(uv_bounds(g, uv)[0].y for g in groups)))
     hi = Vector((max(uv_bounds(g, uv)[1].x for g in groups), max(uv_bounds(g, uv)[1].y for g in groups)))
     centre = (lo + hi) / 2
 
-    def width(g):
+    def size(g):
         a, b = uv_bounds(g, uv)
-        return b.x - a.x
-    order = sorted(groups, key=width, reverse=True)
+        return b[k] - a[k]
+    order = sorted(groups, key=size, reverse=True)
     _move(order[0], uv, centre - bbox_centre(order[0], uv))
-    v_mid = centre.y
-    prev_u1 = uv_bounds(order[0], uv)[1].x
+    mid = centre[o]
+    a, b = uv_bounds(order[0], uv)
+    edge = b[k] if sign > 0 else a[k]
     for g in order[1:]:
         a, b = uv_bounds(g, uv)
-        _move(g, uv, Vector((prev_u1 + padding - a.x, v_mid - (a.y + b.y) / 2)))
-        prev_u1 = uv_bounds(g, uv)[1].x
+        d = Vector((0.0, 0.0))
+        d[k] = edge + padding - a[k] if sign > 0 else edge - padding - b[k]
+        d[o] = mid - (a[o] + b[o]) / 2
+        _move(g, uv, d)
+        a, b = uv_bounds(g, uv)
+        edge = b[k] if sign > 0 else a[k]
     return len(groups)
 
 
-def normalize(loops, uv):
-    """The bbox of ``loops`` stretched to the tile under its centre, u and v separately (collective)."""
+def normalize(loops, uv, along='UV', keep_aspect=False, closest_tile=True):
+    """The bbox of ``loops`` stretched to the tile under its centre (``closest_tile``; else the 0-1 tile), u and v
+    separately (``along`` 'UV'; 'U' / 'V' = only that direction), or by one factor when ``keep_aspect``."""
     if not loops:
         return 0
     xs = [l[uv].uv.x for l in loops]
     ys = [l[uv].uv.y for l in loops]
     x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
-    tu, tv = math.floor((x0 + x1) / 2), math.floor((y0 + y1) / 2)
+    tu, tv = (math.floor((x0 + x1) / 2), math.floor((y0 + y1) / 2)) if closest_tile else (0, 0)
     sx = 1.0 / (x1 - x0) if x1 - x0 > 1e-12 else 1.0
     sy = 1.0 / (y1 - y0) if y1 - y0 > 1e-12 else 1.0
+    if keep_aspect:
+        sx = sy = min(sx if along != 'V' else sy, sy if along != 'U' else sx)
     for l in loops:
         p = l[uv].uv
-        l[uv].uv = Vector((tu + (p.x - x0) * sx, tv + (p.y - y0) * sy))
+        u = tu + (p.x - x0) * sx if along != 'V' or keep_aspect else p.x
+        v = tv + (p.y - y0) * sy if along != 'U' or keep_aspect else p.y
+        l[uv].uv = Vector((u, v))
     return len(loops)
 
 
@@ -301,22 +344,45 @@ def _rigid_fit(src, dst):
     return math.atan2(sxy, sxx), cs, cd
 
 
-def move_sew(bm, uv, edges):
+def _along(e, fs):
+    """Of the two faces ``fs`` of ``e``, the one whose corners run along the edge from its first vertex to its
+    second."""
+    v0 = e.verts[0]
+    for f in fs:
+        for l in f.loops:
+            if l.edge is e:
+                if l.vert is v0:
+                    return f
+                break
+    return fs[0]
+
+
+def move_sew(bm, uv, edges, max_faces=None):
     """Maya Move and Sew: per pair of shells the one with fewer faces moves rigidly onto the other along the selected
-    seam edges (seams centred), then each seam UV pair merges at its average. Returns the edges sewn."""
+    seam edges (seams centred), then each seam UV pair merges at its average. With equal face counts the shell on the
+    side of the first seam edge whose face runs along the edge's own direction moves, like Maya. A border inside one shell is sewn
+    like Sew UV Edges (its UV pairs meet half-way). ``max_faces`` = the Limit shell size option: a pair whose moving
+    shell has more faces than that stays apart. Returns the edges sewn."""
     groups = shells(bm, uv)
     where = owner_map(groups)
     by_pair = {}
+    inside = []
     for e in sorted(edges, key=lambda e: e.index):
         fs = [f for f in e.link_faces if not f.hide]
-        if len(fs) != 2 or where[fs[0]] == where[fs[1]]:
+        if len(fs) != 2:
+            continue
+        if where[fs[0]] == where[fs[1]]:
+            inside.append((e, fs))
             continue
         by_pair.setdefault(tuple(sorted((where[fs[0]], where[fs[1]]))), []).append((e, fs))
     sewn = 0
     for (i, j), items in by_pair.items():
         mover, fixed = (i, j) if len(groups[i]) < len(groups[j]) else (j, i)
         if len(groups[i]) == len(groups[j]):
-            mover, fixed = (j, i)           # equal face counts: Maya's choice unknown; the later shell moves
+            mover = where[_along(*items[0])]
+            fixed = j if mover == i else i
+        if max_faces is not None and len(groups[mover]) > max_faces:
+            continue
         verts = []
         for e, fs in items:
             fm = fs[0] if where[fs[0]] == mover else fs[1]
@@ -347,12 +413,16 @@ def move_sew(bm, uv, edges):
         for e, _fs in items:
             e.seam = False
         sewn += len(items)
+    for e, (a, b) in inside:
+        if uv_tools.weld_edge(e, a, b, uv):
+            e.seam = False
+            sewn += 1
     return sewn
 
 
 def create_shell(bm, uv, faces):
     """Maya Create UV Shell: cut along the border of ``faces`` (edges to unselected faces); uv_tools.cut nudges the
-    smaller side by uv_tools.NUDGE so the island rule sees two shells."""
+    smaller side by uv_islands.NUDGE so the island rule sees two shells."""
     fs = set(faces)
     border = [e for f in faces for e in f.edges
               if len([g for g in e.link_faces if not g.hide]) == 2 and any(g not in fs for g in e.link_faces)]
@@ -399,7 +469,7 @@ class _ShellOp:
     # with nothing picked is left alone while another mesh has a pick
     _fallback = True
     # a main UV menu command: with UV Sync Selection off it can take the 3D View selection
-    # (uv_tools.mesh_selection_wanted)
+    # (uv_components.mesh_selection_wanted)
     reads_3d = False
 
     poll = classmethod(lambda cls, context: _poll(context))
@@ -505,8 +575,12 @@ class ALLSET_OT_uv_distribute(_ShellOp, bpy.types.Operator):
     bl_idname = "allset.uv_distribute"
     bl_label = "Distribute Shells"
 
+    # the Distribute Shells options
+    direction: EnumProperty(items=[(d, d.title(), "") for d in DIRECTIONS], default='RIGHT', options={'SKIP_SAVE'})
+    padding: FloatProperty(name="Shell Padding", default=0.0, options={'SKIP_SAVE'})
+
     def run(self, context, bm, uv, synced):
-        return distribute(target_shells(bm, uv, synced, self._fallback), uv)
+        return distribute(target_shells(bm, uv, synced, self._fallback), uv, self.padding, self.direction)
 
 
 @undo_steps.no_redo_panel
@@ -516,13 +590,22 @@ class ALLSET_OT_uv_normalize(_ShellOp, bpy.types.Operator):
     bl_idname = "allset.uv_normalize"
     bl_label = "Normalize"
 
+    # the Normalize options
+    along: EnumProperty(items=[('UV', "UV", ""), ('U', "U", ""), ('V', "V", "")], default='UV', options={'SKIP_SAVE'})
+    each_face: BoolProperty(name="Each face separately", default=False, options={'SKIP_SAVE'})
+    keep_aspect: BoolProperty(name="Preserve aspect ratio", default=False, options={'SKIP_SAVE'})
+    closest_tile: BoolProperty(name="Center on closest tile", default=True, options={'SKIP_SAVE'})
+
     def run(self, context, bm, uv, synced):
         faces = uv_tools.selected_faces(bm, uv, synced)
         if not faces:
             # selected UVs / edges: every face using one of them, like Maya
             touched = {l.face for p in selected_points(bm, uv, synced) for l in p}
             faces = sorted(touched, key=lambda f: f.index)
-        return normalize([l for f in faces for l in f.loops], uv)
+        groups = [[f] for f in faces] if self.each_face else [faces]
+        for fs in groups:
+            normalize([l for f in fs for l in f.loops], uv, self.along, self.keep_aspect, self.closest_tile)
+        return len(faces)
 
 
 @undo_steps.no_redo_panel
@@ -531,6 +614,9 @@ class ALLSET_OT_uv_unstack(_ShellOp, bpy.types.Operator):
     (Maya Unstack Shells; Blender Pack Islands without scaling)"""
     bl_idname = "allset.uv_unstack"
     bl_label = "Unstack Shells"
+
+    # the Unstack option: mirrored (reversed) shells are flipped back first, like Maya
+    flip_reversed: BoolProperty(name="Flip reversed UV shells", default=True, options={'SKIP_SAVE'})
 
     def execute(self, context):
         done = 0
@@ -541,6 +627,13 @@ class ALLSET_OT_uv_unstack(_ShellOp, bpy.types.Operator):
             groups = target_shells(bm, uv, sync(context), fallback)
             if len(groups) < 2:
                 continue
+            if self.flip_reversed:
+                from .uv_modify import _signed_area
+                for g in groups:
+                    if _signed_area(g, uv) < 0:
+                        c = bbox_centre(g, uv)
+                        for loop in _loops_of(g):
+                            loop[uv].uv.x = 2 * c.x - loop[uv].uv.x
             faces = [f for g in groups for f in g]
             bm.faces.index_update()
             idx = [f.index for f in faces]
@@ -575,12 +668,16 @@ class ALLSET_OT_uv_move_sew(_ShellOp, bpy.types.Operator):
     bl_label = "Move and Sew"
     empty = "Select UV edges between two shells"
 
+    # the Move and Sew options: Limit shell size, Number of faces
+    limit: BoolProperty(name="Limit shell size", default=False, options={'SKIP_SAVE'})
+    faces: IntProperty(name="Number of faces", default=10, min=0, options={'SKIP_SAVE'})
+
     def run(self, context, bm, uv, synced):
         edges = uv_tools.selected_edges(bm, uv, synced)
         if not edges:
             fs = set(uv_tools.selected_faces(bm, uv, synced))
             edges = [e for f in fs for e in f.edges]
-        return move_sew(bm, uv, edges)
+        return move_sew(bm, uv, edges, self.faces if self.limit else None)
 
 
 @undo_steps.no_redo_panel

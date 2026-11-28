@@ -67,7 +67,7 @@ def _text_get(name):
         owner, node = prim_history.node_of(_lead(context))
         if node is None or name not in prim_history.attrs(owner):
             return ""
-        return format_attr(node, name, prim_history.attrs(owner)[name], context.scene)
+        return format_attr(node, name, prim_history.shown_attrs(owner)[name], context.scene)
     return get
 
 
@@ -91,10 +91,20 @@ def _sel_set(name):
     return set_
 
 
+def _on_get(_self):
+    return True
+
+
+def _on_set(_self, _value):
+    pass
+
+
 class ALLSET_PG_creation(bpy.types.PropertyGroup):
     __annotations__ = {
         **{f"{n}_text": StringProperty(name=n, get=_text_get(n), set=_text_set(n), options={'SKIP_SAVE'})
            for n in ALL_ATTRS},
+        # a selected attribute's blue value cell (cb_selection.value_cell)
+        **{f"{n}_text_on": BoolProperty(name=n, get=_on_get, set=_on_set, options={'SKIP_SAVE'}) for n in ALL_ATTRS},
         **{f"{n}{suffix}": BoolProperty(name=n, get=_sel_get(n), set=_sel_set(n), options={'SKIP_SAVE'},
                                     description="Select this attribute: click, Ctrl toggle, Shift range, drag "
                                                 "over the rows; then middle-drag in the viewport changes it")
@@ -126,7 +136,7 @@ def draw_cb(layout, context, ob):
         channel_box.sel_toggle(split, props, f"{name}_sel", selected, prim_shapes.spec(node["type"], name)[1])
         cell = split.row()
         cell.enabled = not channel_box.is_locked(ob, channel_box.HISTORY_PREFIX+name)
-        cell.prop(props, f"{name}_text", text="")
+        channel_box.value_cell(cell, props, f"{name}_text", selected)
     return True
 
 
@@ -152,8 +162,8 @@ def draw_ae(layout, context, ob):
     _owner, node = prim_history.node_of(ob)
     if node is None:
         return
-    header, body = layout.panel("allset_ae_creation", default_closed=False)
-    header.label(text=f"{nice_type(node['type'])} History")
+    from .maya_dock import section
+    body = section(layout, "allset_ae_creation", f"{nice_type(node['type'])} History")
     if body is not None:
         from .attribute_editor import section_body
         _rows(section_body(body).column(align=True), context, node, 0.42)     # inset content area (#194)

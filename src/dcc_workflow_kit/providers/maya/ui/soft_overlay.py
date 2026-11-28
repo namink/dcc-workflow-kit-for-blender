@@ -23,6 +23,9 @@ import gpu
 import numpy as np
 from gpu_extras.batch import batch_for_shader
 
+from .. import live_refs
+from .. import update_summary
+
 LINE_PX = 2.0
 POINT_PX = 5.0
 CIRCLE_RGBA = (1.0, 1.0, 1.0, 0.85)
@@ -89,7 +92,7 @@ def _transform_running():
         return False
     try:
         from ..operators.manip_scale import TRANSFORM_MODALS
-        return any(op.bl_idname.startswith(TRANSFORM_MODALS) for op in win.modal_operators)
+        return any(op.bl_idname.startswith(TRANSFORM_MODALS) for op in live_refs.running_modals(win))
     except (AttributeError, ReferenceError):
         return False
 
@@ -176,7 +179,7 @@ def invalidate_all():
 def _on_depsgraph(_scene=None, depsgraph=None):
     if depsgraph is None:
         return
-    for u in depsgraph.updates:
+    for u in update_summary.updates(depsgraph, _on_depsgraph):
         if isinstance(u.id, (bpy.types.Mesh, bpy.types.Object)):
             name = u.id.original.name if u.id.original is not None else u.id.name
             _dirty["any"].add(name)

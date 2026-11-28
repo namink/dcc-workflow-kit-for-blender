@@ -48,27 +48,27 @@ class FApplyColor(FColor):
 
 
 WINDOWS = [
-    # Mesh Display > Set Vertex Normal (factory: 1, 0, 0)
+    # Mesh Display > Set Vertex Normal (default: 1, 0, 0)
     Window("set_vertex_normal", "Set Vertex Normal Options", "Set Normal", ("allset.set_vertex_normal", {}), [
         F("normal", "Vertex normal:", "vec3", (1.0, 0.0, 0.0)),
     ], _run_set_normal, paths=("Mesh Display/Set Vertex Normal",)),
-    # Mesh Display > Average (factory: prenormalize, no zero normals, distance 0.1)
+    # Mesh Display > Average (default: prenormalize, no zero normals, distance 0.1)
     Window("average_normals", "Average Normals Options", "Average", ("allset.average_normals", {}), [
         F("distance", "Distance:", "float", 0.1, lo=0.0, hi=10.0),
     ], _run_average, paths=("Mesh Display/Average",),
         missing=("Normalize: Before / After / Not (Before)", "Allow zero normals / Replace zero normal with (1, 0, 0)")),
-    # Mesh Display > Set to Face (factory: user normal off)
+    # Mesh Display > Set to Face (default: user normal off)
     Window("set_to_face", "Set to Face Normal Options", "Set to Face", ("allset.set_to_face_normal", {}), [
         F("user_normal", "", "bool", False, text="Set user normal"),
     ], _run_to_face, paths=("Mesh Display/Set to Face",)),
-    # Mesh Display > Apply Color (factory: Replace, all channels, 0.5 grey, alpha 1)
+    # Mesh Display > Apply Color (default: Replace, all channels, 0.5 grey, alpha 1)
     Window("apply_color", "Apply Color Options", "Apply Color", ("allset.apply_color", {}), [
         F("operation", "Operation:", "enum", "Replace", items=tuple(_OPS)),
         FApplyColor(),
         F("alpha", "Alpha value:", "float", 1.0, lo=0.0, hi=1.0),
     ], _run_apply_color, paths=("Mesh Display/Apply Color",),
         missing=("Individual channels (Red / Green / Blue / Alpha each on its own)",)),
-    # Mesh Display > Prelight (Maya) (values = vertexBakeSet factory attributes)
+    # Mesh Display > Prelight (Maya) (values = the vertexBakeSet node's defaults)
     Window("prelight", "Prelight (Maya) Options", "Prelight", ("allset.prelight", {}), [
         F("bake_color", "", "bool", True, text="Bake shading group lighting"),
         F("bake_alpha", "", "bool", False, text="Bake alpha"),

@@ -34,7 +34,7 @@ from mathutils import Euler, Quaternion, Vector
 from .. import results, undo_steps
 from . import naming, prim_history
 from .freeze import hierarchy
-from .group import make_group
+from .group import make_group, selected_objects as group_selection   # + groups the Locators filter hides
 
 # Last duplicates made by this module: {copy name: source name} (smart transform).
 PAIRS = {}
@@ -43,6 +43,39 @@ PAIRS = {}
 PLAIN, INPUT_GRAPH, INPUT_CONNECTIONS = 'PLAIN', 'INPUT_GRAPH', 'INPUT_CONNECTIONS'
 # Object types whose points take a shape-key mix and deforming modifiers in place (meshes get a baked mesh)
 _POINT_TYPES = {'CURVE', 'SURFACE', 'LATTICE'}
+
+
+# Set on the objects a Duplicate Special > Instance made (not on the originals): the Outliner marks only these
+INSTANCE_TAG = "allset_instance"
+
+
+def instance_source(ob):
+    """Name of the object ``ob`` is an instance of, or "" if unknown: an object sharing its data that is no copy
+    itself (follows renames), else the name recorded when the copy was made (groups have no data to follow)."""
+    if ob.data is not None:
+        for other in bpy.data.objects:
+            if other.data is ob.data and other is not ob and not other.get(INSTANCE_TAG):
+                return other.name
+    name = ob.get(INSTANCE_TAG)
+    return name if isinstance(name, str) and name in bpy.data.objects else ""
+
+
+def is_instance(ob):
+    """``ob`` shares its data with another object (Duplicate Special > Instance, Blender linked duplicate)."""
+    data = ob.data
+    return data is not None and data.users - data.use_fake_user > 1
+
+
+def unshare(objects):
+    """Give ``objects`` and their descendants their own copy of shared data, so edits on the original no longer
+    show on them (Freeze / Delete History on an instance). Returns how many were copied."""
+    n = 0
+    for ob in hierarchy(objects):
+        ob.pop(INSTANCE_TAG, None)
+        if is_instance(ob):          # checked per object: the last one sharing a mesh keeps the original
+            ob.data = ob.data.copy()
+            n += 1
+    return n
 
 
 def selected_roots(objects):
@@ -63,6 +96,10 @@ def copy_subtree(root, instance=False, inputs=PLAIN):
     new_of = {}
     for ob in hierarchy([root]):
         new = ob.copy()
+        if instance:
+            new[INSTANCE_TAG] = ob.name     # the source, for the Outliner's "Instance of" tip
+        else:
+            new.pop(INSTANCE_TAG, None)     # a plain copy of an instance is no instance
         if ob.data is not None and not instance:
             new.data = ob.data.copy()
         if not instance and inputs != INPUT_GRAPH:   # no polyCube1 on pCube2: the creation node is an input
@@ -425,7 +462,7 @@ def offset_channels(ob, k, translate, rotate, scale):
 
 
 def _select(context, objects):
-    for ob in context.selected_objects:
+    for ob in list(context.view_layer.objects.selected):     # also a group the Locators filter hides
         ob.select_set(False)
     for ob in objects:
         ob.select_set(True)
@@ -436,7 +473,7 @@ def _select(context, objects):
 def duplicate(context, instance=False):
     """Copy every selected root with its subtree in place, Maya names; returns the copies (Maya Duplicate: the
     geometry as it shows now, no inputs). Records source pairs so a following Shift+D repeats the move between them."""
-    roots = selected_roots(context.selected_objects)
+    roots = selected_roots(group_selection(context))
     made, pairs = [], {}
     for root in roots:
         new = copy_subtree(root, instance)
@@ -509,7 +546,7 @@ class ALLSET_OT_duplicate_special(bpy.types.Operator):
     def execute(self, context):
         if context.mode != 'OBJECT':
             return self._joints(context)
-        roots = selected_roots(context.selected_objects)
+        roots = selected_roots(group_selection(context))
         if not roots:
             self.report({'WARNING'}, "Nothing selected")
             return {'CANCELLED'}
@@ -578,7 +615,7 @@ class ALLSET_OT_duplicate_with_transform(bpy.types.Operator):
                 self.report({'WARNING'}, "Nothing selected")
                 return {'CANCELLED'}
             return {'FINISHED'}
-        roots = selected_roots(context.selected_objects)
+        roots = selected_roots(group_selection(context))
         if not roots:
             self.report({'WARNING'}, "Nothing selected")
             return {'CANCELLED'}

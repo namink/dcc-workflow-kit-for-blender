@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Maya option windows: modeling, parenting and key commands (issues #33, #35).
 
-Same spec as operators/option_windows.py (``F`` fields, ``Window`` = one ``allset.opt_<key>`` operator); labels and
+Same spec as operators/option_windows_spec.py (``F`` fields, ``Window`` = one ``allset.opt_<key>`` operator); labels and
 what the values do follow Maya.
 option_windows.py appends ``WINDOWS`` to its own list, so this
 module only imports ``F`` / ``Window`` / helpers from it. Maya fields Blender can't honour are listed in ``missing``
@@ -13,6 +13,7 @@ import math
 import bpy
 from mathutils import Vector
 
+from . import scene_axes
 from .option_windows import F, Window, _components, _k  # noqa: F401  (option_windows imports this module at its end)
 
 # --- key commands (Key / Edit > Keys) -------------------------------
@@ -216,10 +217,9 @@ def _run_duplicate_special(context, v):
     k = _k(context)
     return bpy.ops.allset.duplicate_special(
         'EXEC_DEFAULT', geometry_type=v["geometry_type"].upper(), group_under=group,
-        # Maya Y up: Maya Y -> Blender Z, Maya Z -> Blender -Y
-        translate=Vector((v["translate"][0], -v["translate"][2], v["translate"][1])) * k,
-        rotate=tuple(math.radians(a) for a in (v["rotate"][0], -v["rotate"][2], v["rotate"][1])),
-        scale=(v["scale"][0], v["scale"][2], v["scale"][1]), copies=v["copies"],
+        # X / Y / Z = the copy's Translate / Rotate / Scale X / Y / Z in the Channel Box
+        translate=Vector(v["translate"]) * k, rotate=tuple(math.radians(a) for a in v["rotate"]),
+        scale=tuple(v["scale"]), copies=v["copies"],
         input_graph=False, input_connections=False)
 
 
@@ -260,6 +260,8 @@ EDIT_WINDOWS = [
         F("input_graph", "", "bool", False, text="Duplicate input graph"),
         F("input_connections", "", "bool", False, text="Duplicate input connections")],
         _run_duplicate_special, paths=("Edit/Duplicate Special",),
+        old_axes=lambda v: (scene_axes.old_vector(v, "translate"), scene_axes.old_vector(v, "rotate"),
+                            scene_axes.old_vector(v, "scale", "scale")),
         missing=("Instance leaf nodes", "Assign unique name to children nodes"),
         enabled=_duplicate_special_enabled),
 ]
@@ -277,6 +279,15 @@ def _run_connect(context, v):
     _edit_only(context)
     return bpy.ops.allset.connect('EXEC_DEFAULT', insert_with_edge_flow=v["edge_flow"],
                                   adjust_edge_flow=v["adjust_edge_flow"])
+
+
+def _run_duplicate_face(context, v):
+    """Edit Mesh > Duplicate with the window's values (run in a 3D View, like the menu item)."""
+    import json
+    props = {"separate": bool(v["separate"]), "offset": float(v["offset"])}
+    if context.area is not None and context.area.type == 'VIEW_3D':
+        return bpy.ops.allset.duplicate_face('EXEC_DEFAULT', **props)
+    return bpy.ops.allset.menu_run('EXEC_DEFAULT', op="allset.duplicate_face", props=json.dumps(props))
 
 
 def _run_connect_tool(context, v):
@@ -348,6 +359,10 @@ MESH_WINDOWS = [
         F("slide", "Slide:", "float", 0.5, lo=0.0, hi=1.0), F("segments", "Segments:", "int", 1, lo=1, hi=10)],
         _run_connect_tool, paths=("Mesh Tools/Connect",),
         missing=("Pinch", "Active option (MMB drag) / Keyboard and mouse shortcuts")),
+    Window("duplicate_face", "Duplicate Face Options", "Duplicate", ("allset.duplicate_face", {}), [
+        F("separate", "", "bool", True, text="Separate duplicated faces"),
+        F("offset", "Offset:", "float", 0.0, lo=-2.0, hi=2.0)], _run_duplicate_face,
+        paths=("Edit Mesh/Duplicate",)),
     Window("circularize", "Polygon Circularize Options", "Circularize", ("allset.circularize", {}), [
         F("normal_offset", "Normal Offset:", "length", 0.0, lo=-100.0, hi=100.0),
         F("radial_offset", "Radial Offset:", "length", 0.0, lo=-100.0, hi=100.0),

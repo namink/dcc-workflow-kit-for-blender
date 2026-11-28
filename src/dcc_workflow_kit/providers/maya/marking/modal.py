@@ -3,7 +3,7 @@
 
 ``allset.mm_engine``: one marking menu (``marking/menus.py``) drawn with the
 GPU, driven by ``engine.Session``. ``allset.hotbox``: Space hold (menu rows,
-centre and N/S/E/W zones); a quick tap toggles the pane (Maya 2022 hotbox).
+centre and N/S/E/W zones); a quick tap toggles the pane (Maya hotbox).
 Plus the small operators the hotbox zone menus run.
 """
 
@@ -14,7 +14,6 @@ import traceback
 import bpy
 from bpy.props import EnumProperty, StringProperty
 
-from .. import live_refs
 from ..names import PRODUCT
 from ..operators import keystate
 from ..ui import menu_data, menu_map, menu_sets
@@ -24,6 +23,52 @@ from . import menus as mm
 BUTTONS = (("RIGHTMOUSE", "RMB", ""), ("LEFTMOUSE", "LMB", ""), ("MIDDLEMOUSE", "MMB", ""))
 MOUSE_BUTTONS = {"LEFTMOUSE", "RIGHTMOUSE", "MIDDLEMOUSE"}
 _TIMER = 0.05
+
+# Press clock: Blender gives Python no time for the press event, and a press that comes during a slow frame is
+# handled only after it, so counting from the handling makes a real flick look too quick (``quick_none_time``).
+# A light heartbeat notes when the event loop last ran. A press handled while the beats are late (the loop busy
+# since the last beat) is taken to have come at that last beat; one handled right after a gap in the beats (a slow
+# frame the heartbeat already came out of) at the beat before the gap.
+BEAT = 0.02
+STALE = 0.5                  # no beat for this long: the heartbeat is not running
+_beats = [0.0, 0.0]          # the two latest heartbeat times
+
+
+def _beat():
+    _beats[0], _beats[1] = _beats[1], time.monotonic()
+    return BEAT
+
+
+def press_time(now, beats=None):
+    """When the press being handled at ``now`` most likely came (see the press clock above)."""
+    prev, last = beats if beats is not None else _beats
+    if not last or now - last > STALE:
+        return now           # the heartbeat is not running
+    if now - last > 2 * BEAT:
+        return last          # the loop was busy since the last beat: the press came in that time
+    if 2 * BEAT < last - prev <= STALE:
+        return min(now, prev)    # a slow frame just before: the press came in it
+    # (a longer gap: the heartbeat had just started or was not running then, so it says nothing about the press)
+    return now               # the loop ran on time: handled at once
+
+
+def held_time(now, handled, beat_then, beats=None):
+    """How long the button was down for a release handled at ``now`` whose press was handled at ``handled``, the
+    latest beat then being ``beat_then``: with no beat since, both came in during one slow frame and were handled
+    together, so the press lasted about the time between handling them (not since the press dated back into that
+    frame); else None (counted from the press time)."""
+    last = (beats if beats is not None else _beats)[1]
+    return now - handled if last == beat_then else None
+
+
+def register_clock():
+    if not bpy.app.timers.is_registered(_beat):
+        bpy.app.timers.register(_beat, first_interval=BEAT, persistent=True)
+
+
+def unregister_clock():
+    if bpy.app.timers.is_registered(_beat):
+        bpy.app.timers.unregister(_beat)
 
 
 def _prefs(context):
@@ -89,16 +134,31 @@ def run_action(context, action, option=False, path=None):
     menu item runs with its option values); ``path`` = the Maya menu path, for windows tied to a path. A finished
     command is one undo step named after the item (``undo_steps.command``)."""
     from .. import undo_steps
+    action = for_this_blender(action)
     outer = undo_steps.depth() == 0
     label = _label(action, path)
     res = undo_steps.command(label, lambda: _run_action(context, action, option, path))
     if outer and isinstance(res, set) and 'FINISHED' in res:
         from ..command_line import runner         # Script Editor History > Echo All Commands
         runner.echo_action(action)
-    if outer and not option and isinstance(res, set) and 'FINISHED' in res:
+    if outer and not option and isinstance(res, set) and res & {'FINISHED', 'RUNNING_MODAL'}:
         from ..operators import repeat_maya       # Maya G / Recent Commands
         repeat_maya.record(label, action, path, context)
     return res
+
+
+def for_this_blender(action):
+    """``action`` as it runs here: a link to Blender's manual / API / release notes opens the running Blender's pages
+    (``compat.docs_url``: the tables name the main target's). Every menu, marking menu, hotbox, option box, shelf and
+    repeat run comes through ``run_action``."""
+    try:
+        kind, target, props = menu_map.normalize(action)
+    except (TypeError, ValueError, IndexError, KeyError):
+        return action
+    if kind == "op" and target == "wm.url_open" and "url" in props:
+        from .. import compat
+        return (target, dict(props, url=compat.docs_url(props["url"])))
+    return action
 
 
 def _label(action, path):
@@ -152,6 +212,11 @@ def _run_action(context, action, option, path):
         return res
     if kind == "v3d" and (context.area is None or context.area.type != 'VIEW_3D'):
         return bpy.ops.allset.menu_run(op=target, props=json.dumps(props))
+    if target == "wm.tool_set_by_id" and props.get("space_type") == 'IMAGE_EDITOR':
+        # a UV Editor tool picked over another editor (main UV menu over the 3D View): set it in the UV Editor
+        from ..operators import uv_components
+        if not uv_components.in_uv_editor(context):
+            return uv_components.set_uv_editor_tool(context, props["name"])
     mod, name = target.split(".")
     op = getattr(getattr(bpy.ops, mod), name)
     if target == "object.modifier_add":
@@ -214,11 +279,17 @@ class ALLSET_OT_mm_engine(bpy.types.Operator):
         origin = tuple(self.origin) if self.origin[0] >= 0 else (event.mouse_region_x, event.mouse_region_y)
         menu = mm.MENUS[self.menu]
         target = getattr(context.window_manager, "allset_mm_target", "") or             (context.active_object.name if context.active_object else "")
-        menu = mm.with_object_name(menu, target)
+        joint = getattr(context.window_manager, "allset_mm_joint", "")
+        menu = mm.with_object_name(menu, joint if joint and self.menu == "RMB_JOINT" else target)
+        if self.menu.startswith("NODE_"):
+            from ..ui import hypershade_hands      # the graph node's name, type and Inputs / Outputs
+            menu = hypershade_hands.fill_menu(menu, context)
         if any(e != mm.DIVIDER and isinstance(e[1], mm.NodeList) for e in menu.items):
             from . import rmb_nodes      # DG Traversal / Inputs / Outputs of that object
             menu = mm.with_nodes(menu, rmb_nodes.nodes(bpy.data.objects.get(target)) if target else None)
         menu = mm.with_materials(menu, mm.scene_material_names())    # Assign Existing Material
+        from . import live_label
+        menu = mm.relabel(menu, live_label)
         # Drawn over the whole window like Maya's menus: bounds = the window's editors.
         # Rows / boxes stay off the area borders Blender draws over every region.
         bounds = draw.window_bounds(context.window, region)
@@ -227,7 +298,9 @@ class ALLSET_OT_mm_engine(bpy.types.Operator):
         # run after entering component mode with everything selected (_finish).
         self._from_object = self.menu == CONVERT_FROM_OBJECT and context.mode == 'OBJECT'
         enabled = (lambda a: a is not None and not mm.is_unavailable(a)) if self._from_object else poll_action
-        self._session = engine.Session(menu, origin, time.monotonic(),
+        handled = time.monotonic()
+        self._handled = (handled, _beats[1])
+        self._session = engine.Session(menu, origin, press_time(handled),
                                        draw.measure, _params(), enabled, bounds, edges)
         self._region = region
         self._shown = False
@@ -294,7 +367,7 @@ class ALLSET_OT_mm_engine(bpy.types.Operator):
                 draw.redraw()
                 self._show_notice()
             elif event.type == self.button and event.value == 'RELEASE':
-                res = s.release(x, y, now)
+                res = s.release(x, y, now, held_time(now, *self._handled))
                 draw.redraw()
             elif event.type in MOUSE_BUTTONS and event.value == 'PRESS' and s.mode == "CLICK":
                 res = s.click(x, y, now)
@@ -337,7 +410,7 @@ def open_menu(menu_name, button, origin=None):
 # --- hotbox ---------------------------------------------------------------------------
 
 def hotbox_rows(context, area_type=None):
-    """(rows above, cursor row sides, rows below) like Maya 2022's hotbox:
+    """(rows above, cursor row sides, rows below) like Maya's hotbox:
     common menus (+ Cache, Help), the 3D View's panel menus, then the menu set rows (every set when
     Hotbox Controls > Show All Menu Sets is on, the default like Maya; else the current one)."""
     prefs = _prefs(context)
@@ -373,7 +446,7 @@ def pane_tap(context):
         view_message.show(context, "Space: this pane can't be maximized here")
 
 
-_LAST_HOLD_END = [None]   # monotonic time the last hotbox hold ended (engine.restart_too_soon)
+_LAST_HOLD_END = [None]   # monotonic time the last hotbox hold ended (hotbox_engine.restart_too_soon)
 
 
 class ALLSET_OT_hotbox(bpy.types.Operator):
@@ -496,7 +569,7 @@ class ALLSET_OT_hotbox(bpy.types.Operator):
 
 
 class ALLSET_MT_hotbox_controls(bpy.types.Menu):
-    """Hotbox Controls (Maya 2022 hotbox): menu sets, rows, style"""
+    """Hotbox Controls (Maya hotbox): menu sets, rows, style"""
     bl_idname = "ALLSET_MT_hotbox_controls"
     bl_label = "Hotbox Controls"
 
@@ -527,7 +600,7 @@ _persp_views = {}  # area pointer -> (rotation, location, distance) of the last 
 
 
 class ALLSET_OT_hb_view(bpy.types.Operator):
-    """Switch the pane to a Maya camera view (Maya 2022 hotbox centre zone)"""
+    """Switch the pane to a Maya camera view (Maya hotbox centre zone)"""
     bl_idname = "allset.hb_view"
     bl_label = "Switch View"
     bl_options = {'INTERNAL'}
@@ -555,7 +628,7 @@ class ALLSET_OT_hb_view(bpy.types.Operator):
 
 
 class ALLSET_OT_hb_pane(bpy.types.Operator):
-    """Turn the pane under the hotbox into another editor (Maya 2022 hotbox South zone)"""
+    """Turn the pane under the hotbox into another editor (Maya hotbox South zone)"""
     bl_idname = "allset.hb_pane"
     bl_label = "Switch Panel Type"
     bl_options = {'INTERNAL'}
@@ -615,7 +688,7 @@ _PREF_ELEMENTS = {"HELP_LINE": "show_help_line", "STATUS_LINE": "show_status_lin
 
 
 class ALLSET_OT_hb_ui(bpy.types.Operator):
-    """Show or hide a Maya UI element (Maya 2022 hotbox East zone)"""
+    """Show or hide a Maya UI element (Maya hotbox East zone)"""
     bl_idname = "allset.hb_ui"
     bl_label = "Toggle UI Element"
     bl_options = {'INTERNAL'}
@@ -629,23 +702,8 @@ class ALLSET_OT_hb_ui(bpy.types.Operator):
             setattr(prefs, attr, not getattr(prefs, attr))
             return {'FINISHED'}
         if self.element == "TOOLBOX":
-            from ..ui.status_line import main_view3d
-            area, _r = main_view3d(context.screen)
-            if area is None:
-                return {'CANCELLED'}
-            # Set from inside an operator (or via screen.region_toggle / wm.context_toggle) the
-            # toolbar stayed visible in the GUI test; set right after the operator it works.
-            area_ptr = area.as_pointer()
-
-            def toggle():
-                # the area's pointer, looked up again: its window may have closed meanwhile (#36)
-                win, area_ = live_refs.find_area(area_ptr)
-                if area_ is not None:
-                    space = area_.spaces.active
-                    with bpy.context.temp_override(window=win, area=area_):
-                        space.show_region_toolbar = not space.show_region_toolbar
-            bpy.app.timers.register(toggle, first_interval=0.0)
-            return {'FINISHED'}
+            # the Tool Box column in a kit layout, else the main 3D View's toolbar (ui/toolbox_layouts.py)
+            return bpy.ops.allset.toolbox_toggle()
         return bpy.ops.allset.editor_toggle(editor=self.element)
 
 
@@ -680,7 +738,7 @@ class ALLSET_OT_hb_mask(bpy.types.Operator):
 
 
 class ALLSET_OT_hb_style(bpy.types.Operator):
-    """Hotbox style: zones and menu rows, zones only, or centre only (Maya 2022 hotbox centre zone)"""
+    """Hotbox style: zones and menu rows, zones only, or centre only (Maya hotbox centre zone)"""
     bl_idname = "allset.hb_style"
     bl_label = "Hotbox Style"
     bl_options = {'INTERNAL'}

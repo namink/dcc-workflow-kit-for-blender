@@ -8,6 +8,8 @@ tangent watches) must not count them, or they never run.
 
 import bpy
 
+from . import live_refs
+
 NAMES = frozenset({
     "ALLSET_OT_pose_empty_click",
     "ALLSET_OT_joint_outliner_select",
@@ -22,7 +24,7 @@ def tool_running(window_manager=None):
     wm = window_manager or bpy.context.window_manager
     for window in getattr(wm, "windows", ()):
         try:
-            if any(op.bl_idname not in NAMES for op in window.modal_operators):
+            if any(op.bl_idname not in NAMES for op in live_refs.running_modals(window)):
                 return True
         except (AttributeError, ReferenceError):
             pass

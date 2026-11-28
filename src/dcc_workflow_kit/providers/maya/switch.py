@@ -17,6 +17,10 @@ unregistering the Maya mode modules takes back everything they registered.
 Layout: switching on in a file that has no Maya layout appends the layout workspace of the startup.blend
 bundled inside the extension (``app_template.STARTUP``) (named "Maya-style") and activates it; switching off goes back to the previous
 workspace and deletes the appended one. Scenes and objects are never touched.
+
+Code: ``switch_layout`` (the Maya layout workspaces: their keys, append, reset, delete); this module keeps the
+mode switch, the way back to Blender's workspaces and register / unregister. The names used elsewhere are
+importable from here too.
 """
 
 import os
@@ -26,12 +30,16 @@ import bpy
 from . import results
 from . import live_refs
 from . import i18n
+from . import switch_keep
+# the Maya layout workspaces, also read through this module by other UI, tools and the tests
+from .switch_layout import (BLENDER_LAYOUT_KEY, BLENDER_PREV_KEY, MASK_KEY, PREV_KEY, STRIP_MASKS,  # noqa: F401
+                            TEMPLATE_KEY, TEMPLATE_WORKSPACE, USER_KEY, USER_UNIT_KEY, WORKSPACE, _delete_later,
+                            _delete_workspace, _fit_views, _forget_timer, _linked_from, _mark_strips,
+                            _prepare_layout, _template_blend, _timers, _window_override, _windows,
+                            append_workspace, drop_workspace, enter_layout, forget_copies, is_copy, keep_panels,
+                            is_maya_workspace, mark_own, reset_workspace, template_of)
 
-WORKSPACE = "Maya-style"
 
-
-TEMPLATE_WORKSPACE = "General"
-PREV_KEY = "allset_switch_prev"
 SHORTCUT = ('M', {"ctrl": True, "alt": True, "shift": True})
 
 
@@ -49,194 +57,18 @@ def is_on():
         return False
 
 
-def _template_blend():
-    from .app_template import STARTUP
-    return STARTUP
-
-
-def _window_override(window):
-    return {"window": window, "screen": window.screen}
-
-
-def is_maya_workspace(ws):
-    """A workspace that already is the Maya layout (appended by the switch or a Maya Workflow Kit file)."""
-    if ws is None:
-        return False
-    if PREV_KEY in ws or TEMPLATE_KEY in ws or USER_KEY in ws:     # TEMPLATE_KEY: any Maya workspace of the template
-        return True
-    for screen in ws.screens:
-        for area in screen.areas:
-            if area.type != 'IMAGE_EDITOR':
-                continue
-            mask = getattr(area.spaces.active, "mask", None)
-            if mask is not None and mask.name.startswith(".Allset"):
-                return True
-    return False
-
-
-def _fit_views(ws, scene, saved_unit=0.01):
-    """The template views are in cm (Maya unit 0.01 BU; a saved workspace: the Maya unit it was saved with): keep
-    them on the same Maya-unit scene."""
-    from .operators import units
-    ratio = units.maya_unit(scene) / (saved_unit or 0.01)
-    for screen in ws.screens:
-        for area in screen.areas:
-            for space in area.spaces:
-                if space.type != 'VIEW_3D':
-                    continue
-                # The tool header is Maya's panel toolbar in views with a header; the Tool Box column has
-                # neither. Set it explicitly: an appended screen came back with it shown. Only a
-                # change is written (Modeling - Expert keeps a header without the toolbar row; writing a
-                # region flag of a screen no window shows crashes Blender in ED_area_init in -b).
-                if space.show_region_tool_header and not space.show_region_header:
-                    space.show_region_tool_header = False
-                for key, value in units.clip(scene).items():
-                    setattr(space, key, value)
-                space.overlay.grid_scale = units.grid_scale(scene)
-                if abs(ratio - 1.0) > 1e-9:
-                    for rv3d in (space.region_3d, *space.region_quadviews):
-                        rv3d.view_location = rv3d.view_location * ratio
-                        rv3d.view_distance *= ratio
-
-
-def enter_layout(window):
-    """Append and activate the Maya layout workspace in ``window`` (unless it already is one)."""
-    if window is None or is_maya_workspace(window.workspace):
-        return None
-    own = [ws for ws in bpy.data.workspaces if is_maya_workspace(ws)]
-    own.sort(key=lambda ws: template_of(ws) != TEMPLATE_WORKSPACE)     # Maya Classic first
-    own = own[0] if own else None
-    if own is not None:
-        # the file's own Maya layout (a Maya Workflow Kit template file left by a switch to Blender): back to it,
-        # nothing appended twice (#19); the user's workspace is remembered for the way back (#185)
-        if window.workspace is not None:
-            own[BLENDER_PREV_KEY] = window.workspace.name
-        window.workspace = own
-        return own
-    prev = window.workspace.name
-    ws = append_workspace(window, TEMPLATE_WORKSPACE)
-    if ws is None:
-        return None
-    ws[PREV_KEY] = prev
-    ws.name = WORKSPACE
-    return ws
-
-
-TEMPLATE_KEY = "allset_template"      # the template workspace a Maya workspace was made from
-USER_KEY = "allset_user_workspace"    # a workspace the user saved (Save Current Workspace As): its name
-USER_UNIT_KEY = "allset_user_unit"    # the Maya unit of the scene it was saved in
-
-
-def append_workspace(window, template_name, filepath=None, idname=None):
-    """Append the template workspace ``template_name`` (General, Animation, ... tools/make_startup.MAYA_WORKSPACES) into
-    the open file and show it in ``window``: its Status Line / Shelf masks and cm views are set up (#81). With
-    ``filepath`` / ``idname``: workspace ``idname`` of that file (a saved workspace, ``template_name`` None)."""
-    before = set(bpy.data.workspaces)
-    libs = set(bpy.data.libraries)
-    with bpy.context.temp_override(**_window_override(window)):
-        bpy.ops.workspace.append_activate(idname=idname or template_name, filepath=filepath or _template_blend())
-    if filepath is not None:
-        # the appended workspace is local: the saved file's library entry isn't needed
-        def same(path):
-            return os.path.normcase(os.path.normpath(bpy.path.abspath(path))) ==                 os.path.normcase(os.path.normpath(filepath))
-        for lib in [lib for lib in bpy.data.libraries if lib not in libs and same(lib.filepath)]:
-            if not _linked_from(lib):
-                bpy.data.libraries.remove(lib)
-    new = [ws for ws in bpy.data.workspaces if ws not in before]
-    if not new:
-        return None
-    ws = new[0]
-    if template_name is not None:
-        ws[TEMPLATE_KEY] = template_name
-    window.workspace = ws
-    # region flag writes call ED_area_init, which reads the context window's workspace (None after a file load in
-    # -b crashed Blender)
-    with bpy.context.temp_override(**_window_override(window)):
-        _mark_strips(ws)
-        _fit_views(ws, window.scene, ws.get(USER_UNIT_KEY, 0.01))
-    return ws
-
-
-def _linked_from(lib):
-    """True when some data of the open file is still linked from library ``lib``."""
-    for attr in dir(bpy.data):
-        coll = getattr(bpy.data, attr, None)
-        if attr == "libraries" or not isinstance(coll, bpy.types.bpy_prop_collection):
-            continue
-        if any(getattr(i, "library", None) == lib for i in coll):
-            return True
-    return False
-
-
-def template_of(ws):
-    """The template name of a Maya workspace (None: not one of the kit's Maya workspaces)."""
-    if ws is None or USER_KEY in ws:      # a saved workspace isn't a template's copy
-        return None
-    name = ws.get(TEMPLATE_KEY)
-    if isinstance(name, str) and name:
-        return name
-    return TEMPLATE_WORKSPACE if is_maya_workspace(ws) else None
-
-
-def reset_workspace(window, ws=None):
-    """Maya Windows > Workspaces > Reset Current Workspace (#81): the current Maya workspace is replaced by a fresh
-    copy from the bundled template (same name, same way back to Blender's layout); the old one is deleted once the
-    window shows the new one. Returns the new workspace (None: not a Maya workspace)."""
-    if window is None:
-        return None
-    old = ws or window.workspace
-    template = template_of(old)
-    if template is None:
-        return None
-    name, prev = old.name, old.get(PREV_KEY)
-    old.name = name + " (old)"
-    ws = append_workspace(window, template)
-    if ws is None:
-        old.name = name
-        return None
-    ws.name = name
-    if prev is not None:
-        ws[PREV_KEY] = prev
-    gone = old.name
-    if window.workspace == old:
-        _delete_later(window, gone, [])
-    else:
-        _delete_workspace(window, gone, [])
-    return ws
-
-
-STRIP_MASKS = (".AllsetStrip", ".AllsetShelf")   # ui/shelf.MARKER, SHELF_MARKER (top to bottom)
-MASK_KEY = "allset_switch_masks"
-
-
-def _mark_strips(ws):
-    """Appending a workspace doesn't bring the Masks its Image Editors point to, and those mark the
-    Status Line row and the Shelf row (ui/shelf.is_strip): load them and point the two
-    top Image Editors (Status Line above the Shelf) at them again."""
-    missing = [m for m in STRIP_MASKS if m not in bpy.data.masks]
-    if missing:
-        with bpy.data.libraries.load(_template_blend(), link=False) as (src, dst):
-            dst.masks = [m for m in missing if m in src.masks]
-        ws[MASK_KEY] = missing
-    for screen in ws.screens:
-        rows = sorted((a for a in screen.areas if a.type == 'IMAGE_EDITOR'), key=lambda a: -a.y)
-        for area, name in zip(rows, STRIP_MASKS):
-            mask = bpy.data.masks.get(name)
-            if mask is not None:
-                area.spaces.active.mask = mask
-
-
 def leave_layout(window):
-    """Back to the workspace from before ``enter_layout``; the Maya workspaces appended on the way (the layout and
-    any Maya workspace picked from Windows > Workspaces) are deleted, so no Maya layout is left among Blender's
-    workspaces (#282)."""
+    """Return to Blender and keep the Maya workspace for reuse."""
     if window is None:
         return False
+    forget_copies()
     ws = window.workspace
     if ws is None:
         return False
     if PREV_KEY not in ws:
-        return _leave_template_layout(window) if is_maya_workspace(ws) else False
+        if is_maya_workspace(ws):
+            return _leave_template_layout(window)
+        return False
     chain, cur = [], ws
     while cur is not None and PREV_KEY in cur and cur not in chain:
         chain.append(cur)
@@ -251,24 +83,21 @@ def leave_layout(window):
         if prev is None:
             return False
     window.workspace = prev
+    return True
+
+
+def _drop_unshown(window):
+    """The window shows a workspace that isn't a Maya one (another add-on's layout made from the Maya layout, #423):
+    the Maya workspaces the switch appended that no window shows are deleted all the same."""
+    shown = {w.workspace for w in _windows()}
+    appended = [w for w in bpy.data.workspaces if PREV_KEY in w and w not in shown]
     added = []
     for w in appended:
         added += [m for m in w.get(MASK_KEY, ()) if m not in added]
     for w in appended:
-        if w != ws:
-            _delete_workspace(window, w.name, [])
-    name = ws.name
-    if window.workspace == ws:
-        # The window changes workspace on its next event loop: delete the old one after that. Deleting the
-        # screen the window still draws crashed Blender 5.1 (screen_draw_move_highlight, GUI sweep).
-        _delete_later(window, name, added)
-    else:
-        _delete_workspace(window, name, added)
-    return True
+        _delete_workspace(window, w.name, added if w == appended[-1] else [])
 
 
-BLENDER_LAYOUT_KEY = "allset_blender_layout"
-BLENDER_PREV_KEY = "allset_blender_prev"     # on a template Maya workspace: the user's workspace before it (#185)
 # Blender's embedded factory startup file: what Add Workspace > General appends from (workspace_edit.cc
 # workspace_append_button, BLO_EMBEDDED_STARTUP_BLEND)
 EMBEDDED_STARTUP = "<startup.blend>"
@@ -402,6 +231,7 @@ def _drop_new_scene_layouts(window):
     another window shows stays for that window's own switch. Returns the names dropped."""
     if bpy.data.filepath:
         return []
+    forget_copies()
     shown = {w.workspace for w in _windows() if w != window}
     gone = []
     for ws in list(bpy.data.workspaces):
@@ -484,62 +314,6 @@ def _show_later(window, name, tries=3):
     bpy.app.timers.register(tick, first_interval=0.05)
 
 
-def _delete_workspace(window, name, added):
-    ws = bpy.data.workspaces.get(name)
-    # workspace.delete removes the window's active workspace whatever the override says: remove the
-    # left one as data once no window shows it (4.5 and 5.1 GUI)
-    if ws is not None and all(w.workspace != ws for w in _windows()):
-        bpy.data.batch_remove(ids=[ws])
-    for mask_name in added:                  # masks the switch loaded go too: the file is as before
-        mask = bpy.data.masks.get(mask_name)
-        if mask is not None:
-            bpy.data.masks.remove(mask)
-
-
-def drop_workspace(window, ws):
-    """Remove workspace ``ws`` from the open file (once ``window`` no longer shows it)."""
-    name = ws.name + " (old)" if not ws.name.endswith(" (old)") else ws.name
-    ws.name = name
-    if window.workspace == ws:
-        _delete_later(window, ws.name, [])
-    else:
-        _delete_workspace(window, ws.name, [])
-
-
-def _delete_later(window, name, added, tries=40):
-    ptr = window.as_pointer()
-    left = [tries]
-
-    def tick():
-        win = live_refs.window(ptr)
-        ws = bpy.data.workspaces.get(name)
-        if win is None or ws is None:
-            _forget_timer(tick)
-            return None
-        left[0] -= 1
-        if win.workspace == ws and left[0] > 0:
-            return 0.05
-        _delete_workspace(win, name, added)
-        _forget_timer(tick)
-        return None
-    _timers.append(tick)
-    bpy.app.timers.register(tick, first_interval=0.05)
-
-
-# Timers this module started (closures): unregister() stops any still pending, so nothing of the kit runs after it.
-_timers = []
-
-
-def _forget_timer(fn):
-    if fn in _timers:
-        _timers.remove(fn)
-
-
-def _windows():
-    wm = bpy.context.window_manager
-    return list(wm.windows) if wm is not None else []
-
-
 def _mode_modules():
     from . import MODE
     return MODE
@@ -556,14 +330,30 @@ def register_mode():
     from . import safe_reg
     if _mode_done:                  # a previous half state: start clean
         unregister_mode()
+    safe_reg.release_panels(_mode_panels())
     safe_reg.register_all(_mode_modules(), _mode_done)
+    _panels_on[:] = [cls for cls in _mode_panels() if cls.is_registered]
     _registered[0] = True
+
+
+# The kit's panels registered by ``register_mode``. Another add-on may unregister panels of the sidebar's Tool tab
+# (where the kit's panels are) while it is on and register them again later (#423): ``unregister_mode`` first puts
+# back what was taken, ``register_mode`` first takes out what was put back while Maya mode was off.
+_panels_on = []
+
+
+def _mode_panels():
+    from . import safe_reg
+    from . import operators
+    return safe_reg.own_panels(tuple(m.__name__ + "." for m in _mode_modules() if m is not operators))
 
 
 def unregister_mode():
     """Take back every Maya mode module that is registered (whatever ``_registered[0]`` says). Returns the names of
     modules whose unregister raised (the others still went)."""
     from . import safe_reg
+    safe_reg.restore_panels(_panels_on)
+    _panels_on.clear()
     failed = safe_reg.unregister_all(_mode_done)
     _registered[0] = False
     return failed
@@ -659,14 +449,18 @@ def _set_mode(on, layout=True):
             maya_dock.close_floating()     # floating Maya panels would show Blender's Tool tab
         except Exception:
             pass
+        kept = _keep_panels() if layout else []
         try:
             from .ui import four_view
             four_view.collapse_all(bpy.context)   # the four panels back to one, the screen as it was
         except Exception:
             pass
         if layout:
+            for window, record in kept:
+                switch_keep.add_four_view(record, window)
             for window in _windows():
                 leave_layout(window)
+            switch_keep.store([record for _window, record in kept])
         prefs.maya_mode = False
         unregister_mode()      # whatever is recorded as registered, also after a half-done switch (#198)
     # The mode is this add-on's own setting: marked for Blender's Auto-Save Preferences like a change made in the
@@ -676,6 +470,22 @@ def _set_mode(on, layout=True):
 
 
 _registered = [False]
+
+
+def _keep_panels():
+    """[(window, record)] of the Maya layout panels each window shows (``switch_keep``), first window first; one
+    record per Maya template workspace."""
+    out, seen = [], set()
+    for window in _windows():
+        try:
+            record = switch_keep.capture(window)
+        except Exception as ex:      # never stop the switch for this
+            print("Maya Workflow Kit: Maya panels not kept:", ex)
+            continue
+        if record is not None and record["template"] not in seen:
+            seen.add(record["template"])
+            out.append((window, record))
+    return out
 
 
 def _pending_hotkeys():

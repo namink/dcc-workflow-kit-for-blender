@@ -2,7 +2,7 @@
 """Maya's Status Line Input Line.
 
 A mode button (Absolute transform / Relative transform / Rename / Select by name) and either three
-X / Y / Z fields or one text field. Behaves like Maya 2022's Status Line
+X / Y / Z fields or one text field. Behaves like Maya's Status Line
 input field:
 
 - Abs / Rel apply the current tool (Move / Rotate / Scale; any other tool = Move) to the selection on
@@ -19,6 +19,7 @@ Box letters). Results and errors go to the Help Line.
 
 import fnmatch
 import re
+import unicodedata
 
 import bpy
 from bpy.props import BoolProperty, EnumProperty, PointerProperty, StringProperty
@@ -33,7 +34,6 @@ MODES = (
     ('SELECT', "Select by Name", "Select objects by name; * and ? are wildcards", 'VIEWZOOM', 3),
 )
 TOOLS = {"builtin.move": 'MOVE', "builtin.rotate": 'ROTATE', "builtin.scale": 'SCALE'}
-NAME_RULE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")   # Maya's rule for a valid node name
 _TRAIL = re.compile(r"^(.*?)(\d+)$")
 HISTORY_PATH = "Status Line/Construction History"
 
@@ -46,10 +46,38 @@ def _say(text):
 
 # --- pure-ish helpers (tests/test_step75_input_line.py) ----------------------------------------------
 
+_NOT_NAME = re.compile(r"[^A-Za-z0-9_]")
+_LEADING = re.compile(r"^[^A-Za-z_]+")
+BAD_NAME = "Rename: \"{}\" has no characters a name can use."
+
+
 def clean_name(text):
-    """Maya Status Line rename: spaces -> "_"; None when the name breaks Maya's rule."""
-    name = text.strip().replace(" ", "_")
-    return name if NAME_RULE.match(name) else None
+    """Maya rename: the name Maya makes of a typed one, or None when nothing usable is left.
+
+    Outer spaces go; a namespace prefix goes (the kit has no namespaces); accents are dropped (é -> e); the leading
+    characters a name can't start with go (1box -> box); every other character a name can't hold becomes "_"
+    (a-b -> a_b). A trailing "#" stays: ``number_hash`` turns it into the next free number. A letter without a plain
+    form (not A-Z) makes it None."""
+    name = text.strip().rsplit(":", 1)[-1]
+    name = "".join(c for c in unicodedata.normalize("NFKD", name) if not unicodedata.combining(c))
+    if not name.isascii():
+        return None
+    hashed = name.endswith("#")
+    if hashed:
+        name = name[:-1]
+    name = _NOT_NAME.sub("_", _LEADING.sub("", name))
+    if not name:
+        return None
+    return name + "#" if hashed else name
+
+
+def number_hash(name, taken):
+    """A cleaned name ending in "#": the "#" becomes the next number of the base among ``taken`` (box# -> box1)."""
+    if not name.endswith("#"):
+        return name
+    from ..operators import naming
+    base = name[:-1]
+    return f"{base}{naming.next_number(base, taken)}"
 
 
 def rename_plan(name, objects, taken):
@@ -71,9 +99,9 @@ def rename_plan(name, objects, taken):
 
 
 def shape_name(name):
-    """Maya's shape name for a transform called ``name``: box -> boxShape, box1 -> boxShape1."""
+    """Maya's shape name for a transform called ``name``: box -> boxShape, box1 -> boxShape1, box_01 -> box_Shape1."""
     m = _TRAIL.match(name)
-    return f"{m.group(1)}Shape{m.group(2)}" if m and m.group(1) else f"{name}Shape"
+    return f"{m.group(1)}Shape{int(m.group(2))}" if m and m.group(1) else f"{name}Shape"
 
 
 def match_names(pattern, names):
@@ -195,7 +223,7 @@ def _transform_components(context, kind, vals, relative):
 def rename(context, text):
     name = clean_name(text)
     if name is None:
-        _say(f"Rename: \"{text.strip()}\" is not a valid name (letters, digits and _, not starting with a digit).")
+        _say(BAD_NAME.format(text.strip()))
         return []
     ld = lead(context)
     obs = [o for o in context.selected_objects if o != ld]
@@ -204,7 +232,12 @@ def rename(context, text):
         _say("Rename: nothing is selected.")
         return []
     taken = {o.name for o in bpy.data.objects if o not in obs}
-    new = rename_plan(name, obs, taken)
+    if name.endswith("#"):
+        new = []                        # box#: box1, box2, ... (each the next free number)
+        for _ob in obs:
+            new.append(number_hash(name, taken | set(new)))
+    else:
+        new = rename_plan(name, obs, taken)
     for ob in obs:                      # free the old names first (two selected objects may swap)
         ob.name = f"__allset_tmp_{ob.as_pointer()}"
     for ob, nm in zip(obs, new):
@@ -289,7 +322,7 @@ class ALLSET_PG_input_line(bpy.types.PropertyGroup):
 # --- drawing ------------------------------------------------------------------------------------------
 
 def draw_history(layout, context):
-    """Maya's Construction History toggle (Maya 2022 Status Line): pressed = on."""
+    """Maya's Construction History toggle (Maya Status Line): pressed = on."""
     layout.operator(ALLSET_OT_construction_history.bl_idname, text="", icon='RECOVER_LAST',
                     depress=context.window_manager.allset_construction_history)
 

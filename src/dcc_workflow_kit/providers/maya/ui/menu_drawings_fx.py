@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+# Large table file: search it (grep) or read line ranges; reading it whole is rarely needed.
 """Kit menu pictures for Effects, Fields / Solvers, Fluids, nParticles, nConstraint, nHair, nCache and Cache (
 #54) — see ``menu_drawings``."""
 

@@ -4,7 +4,7 @@
 Global tool settings (#64): Maya keeps each tool context's settings in its preferences
 and symmetry / soft select in global options, so they survive File > New Scene / Open. Blender keeps them per scene (``Scene.tool_settings``, the transform orientation
 slots, the kit's scene property groups), and a new / opened file brings its own. Like the selection masks
-(``ui/status_line._masks_before_load``), load_pre reads them from the current scene and load_post writes them into
+(``ui/status_line_buttons._masks_before_load``), load_pre reads them from the current scene and load_post writes them into
 every scene of the loaded file — every load: File > Open, Open Recent, Revert, New Scene (the kit's startup.blend) and
 Blender's File > New. What is carried is ``TOOL_SETTINGS`` / ``SCENE_GROUPS`` / ``SCENE_PROPS`` / the orientation
 slots / the soft select radius (in Maya units) / the pivot options (``WM_PROPS``). Soft select on / off is already one
@@ -12,7 +12,7 @@ global state (``operators/soft_select.py``), and Smart Duplicate / Extrude are a
 
 Maya layout on Open (#63): Maya's UI is built at startup from the workspace, never from the scene file.
 With Maya mode on and the add-on preference ``maya_layout_on_open``, a file opened
-in a non-Maya workspace gets the Maya layout from a timer after load_post (``switch.enter_layout`` runs an operator:
+in a non-Maya workspace gets the Maya layout from a timer after load_post (``switch_layout.enter_layout`` runs an operator:
 not inside the load) — the file's own Maya layout workspace when it has one, else the bundled one appended.
 """
 
@@ -228,8 +228,9 @@ def show_maya_layout(window):
         masks = status_line.session_masks()
     ws = maya_workspace()
     if ws is not None:
-        # switch.enter_layout looks only for a workspace without PREV_KEY: a file saved with the appended Maya
+        # switch_layout.enter_layout looks only for a workspace without PREV_KEY: a file saved with the appended Maya
         # workspace in the background would get a second one
+        switch.keep_panels(window, ws, window.workspace, fresh=False)     # a Four View a switch folded (#458)
         window.workspace = ws
     else:
         ws = switch.enter_layout(window)

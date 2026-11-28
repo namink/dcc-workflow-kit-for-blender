@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Maya Skeleton > Joint Labelling and Enable / Disable Selected IK Handles.
 
-Behaviour: Maya 2022 menus.
+Behaviour: Maya menus.
 
 A Maya joint is a bone. Its joint label attributes live as ID properties on the bone: ``allset_side``
-(Maya ``side``: 0 Center, 1 Left, 2 Right, 3 None; factory 0), ``allset_type`` (Maya ``type``, the 30-value enum
-below; factory 0 None), ``allset_other_type`` (Maya ``otherType``, factory "jaw") and ``allset_draw_label``
-(``drawLabel``, factory off). In armature edit mode they are written on the edit bone (Blender writes edit bones
+(Maya ``side``: 0 Center, 1 Left, 2 Right, 3 None; default 0), ``allset_type`` (Maya ``type``, the 30-value enum
+below; default 0 None), ``allset_other_type`` (Maya ``otherType``, default "jaw") and ``allset_draw_label``
+(``drawLabel``, default off). In armature edit mode they are written on the edit bone (Blender writes edit bones
 back over the bones when edit mode ends), else on the data bone.
 
 Which joints a command acts on follows Maya's ``cmds.ls(selection=True, type="joint"[, dag=True])``: the selected
@@ -469,7 +469,7 @@ class ALLSET_OT_ik_handle_enable(bpy.types.Operator):
     @i18n.translated
     def description(cls, context, properties):
         return ("Turn the IK of the selected IK handles on" if properties.enable
-                else "Turn the IK of the selected IK handles off (the joints keep their FK rotation)")
+                else "Turn the IK of the selected IK handles off (the joints keep the IK pose)")
 
     def execute(self, context):
         cons = selected_ik_constraints(context)
@@ -495,7 +495,7 @@ classes = (ALLSET_OT_joint_label, ALLSET_OT_joint_label_toggle, ALLSET_OT_joint_
 
 # --- viewport label drawing ----------------------------------------------------------------------------------------
 
-# Maya 2022 label look: colour by side; Left text starts at the joint, Right text ends at
+# Maya label look: colour by side; Left text starts at the joint, Right text ends at
 # it, Center / None text is centred over it; the text sits just above the joint.
 def _srgb(h):
     return tuple(int(h[i:i + 2], 16) / 255 for i in (0, 2, 4)) + (1.0,)
@@ -508,7 +508,7 @@ _handles = []
 
 
 def _armatures(view_layer):
-    """The view layer's armature objects, kept until an update can add or remove one (``maya_joints.armatures``:
+    """The view layer's armature objects, kept until an update can add or remove one (``maya_joints_views.armatures``:
     a redraw walks no other object; looking each one up by name walked them all)."""
     from ..ui import maya_joints
     return maya_joints.armatures(view_layer)
@@ -518,7 +518,7 @@ _labelled = {}      # skeleton pointer -> (key, [(pose bone name, text, side)], 
 
 
 def _names_hidden(ob):
-    """What a light update (``maya_joints.light_stamp``) can change of ``ob``'s labels: its bone names and the
+    """What a light update (``maya_joints_cache.light_stamp``) can change of ``ob``'s labels: its bone names and the
     bones' own hide flags."""
     import numpy as np
     bones = ob.data.bones

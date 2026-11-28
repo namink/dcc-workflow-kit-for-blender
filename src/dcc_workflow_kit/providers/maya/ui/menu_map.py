@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+# Large table file: search it (grep) or read line ranges; reading it whole is rarely needed.
 """Maya menu item -> Blender action.
 
 Key = label path in ``menu_data.MENUS`` ("Create/Polygon Primitives/Cube"),
@@ -104,7 +105,8 @@ def _kit_pref(prop):
 _WINDOW_EDITORS = {
     "General Editors/Attribute Editor": _dock('ATTRIBUTE_EDITOR'),
     "General Editors/Channel Box / Layer Editor": _dock('CHANNEL_BOX'),
-    "General Editors/Tool Settings": ("allset.editor_toggle", {"editor": 'TOOL_SETTINGS'}),
+    # shows the Tool Settings (a floating window comes to the front), never hides it, like Maya's item
+    "General Editors/Tool Settings": ("allset.editor_toggle", {"editor": 'TOOL_SETTINGS', "show": True}),
     "General Editors/Attribute Spread Sheet": _editor('SPREADSHEET'),
     "General Editors/Display Layer Editor": ("v3d", "allset.dock_show", {"dock": 'CHANNEL_BOX', "le_tab": 'DISPLAY'}),
     "General Editors/Script Editor": "allset.script_editor",
@@ -216,7 +218,7 @@ MAP = {
     "Create/Free Image Plane": _create('IMAGE_PLANE'),
     "Create/Locator": _create('LOCATOR'),
     "Create/Annotation...": ("tool", "builtin.annotate", False),
-    "Create/Measure Tools/Distance Tool": ("tool", "builtin.measure", False),
+    "Create/Measure Tools/Distance Tool": ("tool", "allset.distance_tool", False),   # locators + distanceDimension
     "Create/Empty Group": _create('EMPTY_GROUP'),
     "Create/Sets/Set": "allset.create_set",                       # kit sets (operators/sets.py)
     "Create/Sets/Quick Select Set...": "allset.create_quick_select_set",
@@ -241,8 +243,8 @@ MAP = {
     "Select/Hierarchy": ("object.select_grouped", {"type": 'CHILDREN_RECURSIVE', "extend": True}),
     "Select/Inverse": ("object.select_all", {"action": 'INVERT'}),
     "Select/Similar": ("object.select_grouped", {"type": 'TYPE'}),
-    "Select/Grow": "mesh.select_more",
-    "Select/Shrink": "mesh.select_less",
+    "Select/Grow": "allset.grow_selection",        # Maya: edges grow by vertex, faces / vertices by face
+    "Select/Shrink": "allset.shrink_selection",    # Maya: the open mesh border counts as outside
     "Select/Object/Component": "allset.toggle_sel_mode",
     "Select/Components/Multi-Component": ("allset.component_mode", {"type": 'MULTI'}),
     "Select/Components/Vertex": ("allset.component_mode", {"type": 'VERT'}),
@@ -253,7 +255,7 @@ MAP = {
     # selection touches (Ctrl+F9-F11's operator), the other conversions operators/select_convert.py.
     "Select/Convert Selection/To Vertices": ("allset.convert_selection", {"type": 'VERT'}),
     "Select/Convert Selection/To Edges": ("allset.convert_selection", {"type": 'EDGE'}),
-    "Select/Convert Selection/To Edge Loop": ("allset.select_loops", {"ring": False}),
+    "Select/Convert Selection/To Edge Loop": ("allset.select_loops", {"ring": False, "border": True}),
     "Select/Convert Selection/To Edge Ring": ("allset.select_loops", {"ring": True}),
     "Select/Convert Selection/To Edge Perimeter": _sel('EDGE_PERIMETER'),
     "Select/Convert Selection/To Faces": ("allset.convert_selection", {"type": 'FACE'}),
@@ -307,8 +309,29 @@ MAP = {
     # --- Display ---
     "Display/Grid": ("v3d", "allset.toggle_grid", {}),     # Maya grid (ui/maya_grid.py)
     # one Maya visibility = hide_viewport (operators/visibility.py, #26)
+    # the two submenu paths stay mapped for shelf buttons saved with them; SUBMENUS still draws Maya's items
     "Display/Hide": ("allset.visibility", {"action": 'HIDE'}),
     "Display/Show": ("allset.visibility", {"action": 'SHOW_ALL'}),
+    "Display/Hide/Hide Selection": ("allset.visibility", {"action": 'HIDE'}),
+    "Display/Hide/Hide Unselected Objects": ("allset.visibility", {"action": 'HIDE_UNSELECTED'}),
+    "Display/Hide/All": ("allset.visibility", {"action": 'HIDE_ALL'}),
+    "Display/Show/Show Selection": ("allset.visibility", {"action": 'SHOW_SELECTED'}),
+    "Display/Show/Show Last Hidden": ("allset.visibility", {"action": 'SHOW_LAST'}),
+    "Display/Show/All": ("allset.visibility", {"action": 'SHOW_ALL'}),
+    "Display/Show/All Components": "allset.show_all_components",     # every mesh, also from object mode
+    # Maya Hide / Show > <type>: the visibility of every node of the type (operators/visibility.py)
+    **{f"Display/{verb}/{label}": ("allset.visibility", {"action": f'{verb.upper()}_TYPE', "kind": kind})
+       for verb in ("Hide", "Show")
+       for label, kind in ((f"{verb} Geometry/All", 'GEOMETRY'), (f"{verb} Geometry/NURBS Surfaces", 'NURBS_SURFACES'),
+                           (f"{verb} Geometry/NURBS Curves", 'NURBS_CURVES'),
+                           (f"{verb} Geometry/Polygon Surfaces", 'POLYGONS'),
+                           (f"{verb} Geometry/Deforming Geometry", 'DEFORMING'),
+                           (f"{verb} Kinematics/All", 'KINEMATICS'), (f"{verb} Kinematics/Joints", 'JOINTS'),
+                           (f"{verb} Kinematics/IK Handles", 'IK_HANDLES'),
+                           (f"{verb} Deformers/All", 'DEFORMERS'), (f"{verb} Deformers/Lattices", 'LATTICES'),
+                           (f"{verb} Deformers/Clusters", 'CLUSTERS'), (f"{verb} Deformers/Nonlinears", 'NONLINEARS'),
+                           ("Lights", 'LIGHTS'), ("Cameras", 'CAMERAS'), ("nCloths", 'NCLOTHS'),
+                           ("nParticles", 'NPARTICLES'), ("nRigids", 'NRIGIDS'))},
     # #165: joints = their skeleton's bone axes, objects = every selected one (operators/joint_display.py)
     "Display/Transform Display/Local Rotation Axes": "allset.local_rotation_axes",
     "Display/Frame All in All Views": ("allset.frame_all_views", {"selected": False}),
@@ -339,6 +362,9 @@ MAP = {
     "Mesh/Booleans/Intersection": ("allset.boolean", {"operation": 'INTERSECT'}),
     # Maya 2026 Booleans (PolygonBooleanDifferenceBA = Difference B - A)
     "Mesh/Booleans/Difference (B - A)": ("allset.boolean", {"operation": 'DIFFERENCE_BA'}),
+    **{f"Mesh/Booleans/{label}": ("allset.boolean", {"operation": op})
+       for label, op in (("Slice", 'SLICE'), ("Hole Punch", 'HOLE_PUNCH'), ("Cut Out", 'CUT_OUT'),
+                         ("Split Edges", 'SPLIT_EDGES'))},
     "Mesh/Unsmooth": ("v3d", "mesh.unsubdivide", {}),        # UnsmoothPolygon -> Blender Un-Subdivide
     "Mesh/Fill Hole": "allset.fill_hole",     # every selected border loop, any number of edges (#337)
     "Mesh/Reduce": _mod('DECIMATE'),
@@ -347,7 +373,7 @@ MAP = {
     "Mesh/Triangulate": _mod('TRIANGULATE'),
     "Mesh/Quadrangulate": "mesh.tris_convert_to_quads",
     "Mesh/Mirror": "allset.mirror",                       # applied, world plane; □ = Mirror Options
-    "Mesh/Transfer Attributes": _mod('DATA_TRANSFER'),
+    "Mesh/Transfer Attributes": "allset.transfer_attributes",   # live, source = other selected (#554)
     "Mesh/Smooth Proxy/Subdiv Proxy": ("allset.smooth_proxy", {"action": 'CREATE'}),   # same as Ctrl+Shift+~
     # --- Edit Mesh ---
     "Edit Mesh/Add Divisions": "allset.subdivide",
@@ -361,13 +387,13 @@ MAP = {
     "Edit Mesh/Merge": "allset.merge",          # always merges two vertices
     "Edit Mesh/Merge to Center": ("mesh.merge", {"type": 'CENTER'}),
     "Edit Mesh/Symmetrize": "allset.symmetrize",   # pick the seam edge first
-    "Edit Mesh/Average Vertices": "mesh.vertices_smooth",
+    "Edit Mesh/Average Vertices": "allset.average_vertices",    # polyAverageVertex, Iterations editable
     "Edit Mesh/Chamfer Vertices": ("v3d", "mesh.bevel", {"affect": 'VERTICES'}),
-    "Edit Mesh/Delete Edge/Vertex": "mesh.dissolve_mode",
+    "Edit Mesh/Delete Edge/Vertex": "allset.delete_edge_vertex",
     "Edit Mesh/Flip Triangle Edge": "mesh.edge_rotate",
     "Edit Mesh/Spin Edge Backward": ("mesh.edge_rotate", {"use_ccw": True}),
     "Edit Mesh/Spin Edge Forward": ("mesh.edge_rotate", {"use_ccw": False}),
-    "Edit Mesh/Duplicate": ("v3d", "mesh.duplicate_move", {}),
+    "Edit Mesh/Duplicate": ("v3d", "allset.duplicate_face", {}),     # polyChipOff, Duplicate on
     "Edit Mesh/Extract": ("mesh.separate", {"type": 'SELECTED'}),
     "Edit Mesh/Poke": "mesh.poke",
     # --- Mesh Tools ---
@@ -409,12 +435,12 @@ MAP = {
     "Deform/Paint Membership": "paint.weight_paint_toggle",
     # --- UV ---
     "UV/UV Editor": _editor('UV'),
-    "UV/Planar": "allset.uv_planar",
+    "UV/Planar": ("allset.uv_planar", {"axis": 'X'}),    # the option window's defaults: X axis, bounding box
     "UV/Normal-Based": "allset.uv_planar",
     "UV/Automatic": "allset.uv_automatic",      # Maya polyAutoProjection
     "UV/Camera-based": ("v3d", "uv.project_from_view", {}),
-    "UV/Cylindrical": ("v3d", "uv.cylinder_project", {}),
-    "UV/Spherical": ("v3d", "uv.sphere_project", {}),
+    "UV/Cylindrical": "allset.uv_cylindrical",     # on the selection's centre, around the up axis (#442)
+    "UV/Spherical": "allset.uv_spherical",
     "UV/Cut UV Edges": "allset.uv_cut",          # seam + shells apart in place
     "UV/Sew UV Edges": "allset.uv_sew",
     "UV/3D Cut and Sew UV Tool": "allset.cut_sew_tool_set",   # seam cleared + the smaller shell moved onto the edge
@@ -478,6 +504,10 @@ MAP = {
     "Key/Set Blend Shape Target Weight Keys": "allset.key_blend_shape_weights",
     "Key/Set Key on Animated": ("anim.keyframe_insert_by_name", {"type": "Available"}),
     "Key/Set Breakdown Key": ("allset.set_key", {"breakdown": True}),
+    # Blender's pose in-between tools (no Maya item; their Blender keys are Maya keys here): EXTRA below Set Breakdown Key
+    "Key/Pose Breakdowner": ("v3d", "pose.breakdown", {}),
+    "Key/Relax Pose to Breakdown": ("v3d", "pose.relax", {}),
+    "Key/Push Pose from Breakdown": ("v3d", "pose.push", {}),
     "Key/Set Driven Key/Set...": "allset.sdk_window",
     "Key/Set Driven Key/Go to Previous": ("allset.sdk_go", {"direction": 'PREVIOUS'}),
     "Key/Set Driven Key/Go to Next": ("allset.sdk_go", {"direction": 'NEXT'}),
@@ -496,14 +526,15 @@ MAP = {
     "Key/IK/FK Keys/Set IK/FK Key": "allset.ik_fk_key",
     "Key/IK/FK Keys/Enable IK Solver": ("prop", "window_manager.allset_ik_solver", {}),   # Maya check item
     "Key/IK/FK Keys/Move IK to FK": "allset.move_ik_to_fk",
+    "Key/IK/FK Keys/Connect to IK/FK": "allset.connect_ik_fk",
     "Key/Scale Keys": "allset.opt_scale_keys",
     # --- Playback ---
     "Playback/Playblast": ("v3d", "allset.playblast", {}),
-    "Playback/Play": "screen.animation_play",
-    "Playback/Backward": ("screen.animation_play", {"reverse": True}),
+    "Playback/Play": "allset.play",             # from the viewport (ui/playback_redraw.py)
+    "Playback/Backward": ("allset.play", {"reverse": True}),
     "Playback/Stop": ("screen.animation_cancel", {"restore_frame": False}),
-    "Playback/Next Key": ("screen.keyframe_jump", {"next": True}),
-    "Playback/Prev Key": ("screen.keyframe_jump", {"next": False}),
+    "Playback/Next Key": ("allset.key_jump", {"next": True}),
+    "Playback/Prev Key": ("allset.key_jump", {"next": False}),
     "Playback/Next Frame": ("screen.frame_offset", {"delta": 1}),
     "Playback/Prev Frame": ("screen.frame_offset", {"delta": -1}),
     "Playback/Play Range Start": ("screen.frame_jump", {"end": False}),
@@ -511,6 +542,14 @@ MAP = {
     "Playback/Set Range to/Start/End": ("allset.time_set_range", {"mode": "START_END"}),
     "Playback/Set Range to/Min/Max": ("allset.time_set_range", {"mode": "MIN_MAX"}),
     "Playback/Set Range to/Selected": ("allset.time_set_range", {"mode": "SELECTED"}),
+    "Playback/Set Range to/Sound Length": ("allset.time_set_range", {"mode": "SOUND"}),
+    "Mesh/Clipboard Actions/Copy Attributes": ("allset.mesh_clipboard", {"action": 'COPY'}),
+    "Mesh/Clipboard Actions/Paste Attributes": ("allset.mesh_clipboard", {"action": 'PASTE'}),
+    "Mesh/Clipboard Actions/Clear Clipboard": ("allset.mesh_clipboard", {"action": 'CLEAR'}),
+    "Edit/Transfer Attribute Values": "allset.transfer_values",
+    "Edit/LOD (Level of Detail)/Create LOD Group": ("allset.lod", {"action": 'CREATE'}),
+    "Edit/LOD (Level of Detail)/Generate LOD Meshes": ("allset.lod", {"action": 'GENERATE'}),
+    "Edit/LOD (Level of Detail)/Ungroup LOD Group": ("allset.lod", {"action": 'UNGROUP'}),
     "Playback/Set Range to/Enabled Clips": ("allset.trax_tracks", {"action": "RANGE"}),    # Trax clips (#287)
     "Playback/Playback Speed/Real-time": ("wm.context_set_enum", {"data_path": "scene.sync_mode",
                                                                    "value": "FRAME_DROP"}),
@@ -522,6 +561,7 @@ MAP = {
     "Playback/Render Settings": "allset.render_settings",
     # --- Visualize ---
     "Visualize/Motion Trail Editor": "allset.motion_trail_editor",
+    "Visualize/Create Turntable...": "allset.create_turntable",     # operators/turntable.py (#108)
     # snapshots + ghosting
     "Visualize/Create Animation Snapshot": "allset.animation_snapshot",
     "Visualize/Update Snapshot": "allset.update_snapshot",
@@ -565,10 +605,11 @@ MAP = {
     # --- Rendering ---
     # Materials (operators/material.py).
     "Lighting/Shading/Material Attributes": ("v3d", "allset.material_attributes", {}),
-    # Maya 2026: Assign New Material is a submenu (favourites + New Material...)
+    # Maya 2026: Assign New Material is a submenu (favourites + New Material...): Blender's one material
     "Lighting/Shading/Assign New Material/New Material...": "allset.assign_new_material",
     "Lighting/Shading/Assign Favorite Material": ("menu", "ALLSET_MT_assign_favorite_material"),
     "Lighting/Shading/Assign Existing Material": ("menu", "ALLSET_MT_assign_existing_material"),
+    "Lighting/Shading/Convert Old Kit Materials": "allset.convert_old_materials",   # kit only (EXTRA)
     "Texturing/3D Paint Tool": "paint.texture_paint_toggle",
     "Render/Render Settings...": "allset.render_settings",
     # Render menu: Blender's own render (INVOKE opens Blender's Render window, Maya's Render View) through the scene
@@ -587,7 +628,7 @@ MAP = {
 
 # Items Maya adds at run time, inserted after a data path: {after path: [item]} with
 # items like menu_data's ((label,) or ("-", section label)). Modify's Pivot / Naming / Attributes
-# sections now come from tools/gen_menu_data.py RUNTIME_LABELS.
+# sections now come from the generated menu data (ui/menu_data.py).
 EXTRA = {
     # The kit's own switch back to plain Blender (switch.py): found by the menu search too.
     "Windows/Settings/Preferences": [("Switch to Blender",)],
@@ -595,9 +636,19 @@ EXTRA = {
     "Create/Lights/Volume Light": [("-", ""), ("Dome Light",)],
     # Maya 2027's Smart Bevel (#303) right below Bevel (operators/smart_bevel.py)
     "Edit Mesh/Bevel": [("Smart Bevel",)],
+    # Blender's pose in-between tools in Pose Mode (#496): Shift+E and F3 are Maya keys in the kit
+    "Key/Set Breakdown Key": [("Pose Breakdowner",), ("Relax Pose to Breakdown",), ("Push Pose from Breakdown",)],
+    # Materials of older kit versions -> plain Principled BSDF, once (operators/material.convert_old)
+    "Lighting/Shading/Assign Existing Material": [("Convert Old Kit Materials",)],
+    # Blender's one material where Maya lists its surface shaders (HIDE)
+    "Hypershade/Create/Materials/Anisotropic": [("New Material",)],
 }
 # EXTRA items that have an option box (the static menu data lists the others')
 EXTRA_OPTION_BOXES = frozenset({"Edit Mesh/Smart Bevel"})
+# Maya items the kit leaves out of its menus (label paths): Blender has one material, so the Maya surface shader
+# kinds give way to one New Material entry (EXTRA) in the same place.
+HIDE = frozenset(f"Hypershade/Create/Materials/{label}" for label in (
+    "Anisotropic", "Blinn", "Lambert", "OpenPBR Surface", "Phong", "Phong E", "Standard Surface"))
 
 # Submenus Maya builds at run time, so Maya's static menu structure has them as leaves (or with a
 # placeholder child): {label path: [items like menu_data's]}. Their actions are in MAP.
@@ -617,6 +668,10 @@ MAP.update({
     "Display/Heads Up Display/View Axis": _kit_pref("maya_view_axis"),
     "Display/Heads Up Display/ViewCube": _kit_pref("maya_viewcube"),
     "Display/Heads Up Display/In-View Editors": _kit_pref("inview_editors"),
+    "Display/Heads Up Display/In-view Messages": _kit_pref("in_view_messages"),
+    "Display/Heads Up Display/Current Frame": _kit_pref("maya_hud_current_frame"),
+    "Display/Heads Up Display/Focal Length": _kit_pref("maya_hud_focal_length"),
+    "Display/Heads Up Display/Scene Timecode": _kit_pref("maya_hud_scene_timecode"),
 })
 
 
@@ -664,12 +719,19 @@ MAP.update({
     "Create/Universal Scene Description (USD)": "wm.usd_import",
     # Select
     "Select/Shortest Edge Path Tool": "mesh.shortest_path_select",
-    "Select/Convert Selection/To Contained Edges": ("mesh.select_mode", {"type": 'EDGE'}),
-    "Select/Convert Selection/To Contained Faces": ("mesh.select_mode", {"type": 'FACE'}),
+    "Select/Convert Selection/To Contained Edges": ("allset.select_convert", {"kind": 'CONTAINED_EDGES'}),
+    "Select/Convert Selection/To Contained Faces": ("allset.select_convert", {"kind": 'CONTAINED_FACES'}),
     "Select/Convert Selection/To UV Shell": ("mesh.select_linked", {"delimit": {'UV'}}),
     "Select/All CVs": ("curve.select_all", {"action": 'SELECT'}),
     "Select/First CV": "curve.de_select_first",
     "Select/Last CV": "curve.de_select_last",
+    # NURBS CV mask, Surface Border, CV Selection Boundary (operators/nurbs_select.py, #108)
+    "Select/Components#2/Control Vertex": "allset.nurbs_component",
+    "Select/Components#3/Control Vertex": "allset.nurbs_component",
+    "Select/Surface Border": "allset.select_surface_border",
+    "Select/CV Selection Boundary": "allset.select_cv_boundary",
+    "Edit/Delete All by Type/Sounds": "allset.delete_sounds",       # like Audio > Delete Sounds
+    "Windows/Home": "wm.splash",                                   # Blender's start screen: recent files, new
     "Select/All by Type/Image Planes": ("object.select_by_type", {"type": 'EMPTY'}),
     # Modify
     "Modify/Transformation Tools/Proportional Modification Tool": _PROPORTIONAL,
@@ -697,6 +759,13 @@ MAP.update({
     "Modify/Align Tool": "allset.align_tool",
     "Modify/Snap Align Objects/Position Along Curve": "allset.position_along_curve",
     "Modify/Convert/Geometry to Bounding Box": "allset.geometry_to_bbox",
+    "Modify/Convert/Displacement to Polygons": "allset.displacement_to_polygons",
+    # Maya Interactive Grooming brush -> Blender hair (Curves) sculpt brush; Width / Twist / Noise / Part / Freeze
+    # have none and stay greyed
+    **{f"Generate/Interactive Grooming Tools/{maya} Brush": ("allset.groom_brush", {"brush": brush})
+       for maya, brush in (("Density", "Density"), ("Place", "Add"), ("Length", "Grow/Shrink"), ("Cut", "Cut"),
+                           ("Comb", "Comb"), ("Grab", "Pull Tips"), ("Smooth", "Smooth"), ("Clump", "Pinch"),
+                           ("Select", "Select"))},
     # Display
     # Blender's playback frame rate display is a preference (#43): open it, don't write it
     "Display/Heads Up Display/Frame Rate": ("screen.userpref_show", {"section": 'VIEWPORT'}),
@@ -708,7 +777,7 @@ MAP.update({
     "Display/Object Display/Bounding Box": ("allset.object_display", {"kind": 'BBOX'}),
     "Display/Object Display/No Bounding Box": ("allset.object_display", {"kind": 'NO_BBOX'}),
     # Display > Polygons is Maya's submenu, no longer a leaf. Its check items are the overlays of the 3D View
-    # the menu acts on ("view3d.", ui/status_line.view3d_space), drawn on meshes in edit mode; Maya's Standard /
+    # the menu acts on ("view3d.", ui/status_line_buttons.view3d_space), drawn on meshes in edit mode; Maya's Standard /
     # Soft/Hard Edges pair = Blender's Sharp edge overlay off / on; Custom Polygon Display = Blender's edit-mode
     # overlay popover (the item this menu used to be). The rest is greyed with a notice (ui/notices.py).
     "Display/Polygons/Backface Culling": ("prop", "view3d.shading.show_backface_culling", {}),
@@ -729,6 +798,7 @@ MAP.update({
     "Display/Polygons/Edge Width...": ("allset.theme_setting", {"name": "Edge Width"}),
     "Display/Animation": ("v3d", "wm.call_panel", {"name": "VIEW3D_PT_overlay_bones", "keep_open": True}),
     "Display/Animation/Joint Size...": "allset.joint_size",              # Maya jointDisplayScale
+    "Display/Animation/Joint Labels": "allset.joint_label_toggle",       # the selected joints and the joints below them
     "Display/Rendering": ("v3d", "wm.call_panel", {"name": "VIEW3D_PT_shading", "keep_open": True}),
     # #136: Maya's Wireframe Color window (user palette 1-8 / RGB, Apply / Default / Close)
     "Display/Wireframe Color...": ("allset.wireframe_color", {}),
@@ -886,7 +956,7 @@ MAP.update({
     # Skeleton / Skin / Constrain
     "Skeleton/Insert Joints": "allset.insert_joint_tool",          # click a joint, drag
     "Skeleton/Connect Joint": "allset.connect_joint",              # connect / parent mode (option box)
-    # #106: Maya's three skinCluster.normalizeWeights modes (operators/skin_tools_199.py)
+    # #106: Maya's three skinCluster.normalizeWeights modes (operators/skin_normalize_weights.py)
     "Skin/Normalize Weights/Enable Weight Normalization": ("allset.skin_normalize_mode", {"mode": 'INTERACTIVE'}),
     "Skin/Normalize Weights/Disable Weight Normalization": ("allset.skin_normalize_mode", {"mode": 'NONE'}),
     "Skin/Normalize Weights/Enable Weight Post Normalization": ("allset.skin_normalize_mode", {"mode": 'POST'}),
@@ -895,7 +965,7 @@ MAP.update({
     "Skin/Import Weights Maps...": "allset.import_weight_maps",
     "Skin/Substitute Geometry": "allset.substitute_geometry",
     "Skin/Bake Deformation to Skin Weights...": "allset.bake_deformation",
-    # #106, operators/constrain_199.py
+    # #106, operators/constrain_199.py, constrain_modify.py
     "Constrain/Normal": "allset.normal_constraint",
     "Constrain/Tangent": "allset.tangent_constraint",
     "Constrain/Remove Target": "allset.remove_constraint_target",
@@ -913,7 +983,19 @@ MAP.update({
     **{f"Playback/Playback Looping/{label}": ("prop", "scene.allset_playback_loop", {"value": value})
        for value, label in (("CONTINUOUS", "Continuous"), ("ONCE", "Once"), ("OSCILLATE", "Oscillate"))},
     "Playback/Enable Stepped Preview": ("prop", "scene.allset_stepped_preview", {}),
-    "Visualize/Time Slider Bookmarks": "marker.add",
+    # the same actions as the Maya bookmark hotkeys (keymap/mapping.py, operators/bookmarks.py)
+    "Visualize/Time Slider Bookmarks/Create": "allset.bookmark_create",
+    "Visualize/Time Slider Bookmarks/Next Bookmark": "allset.bookmark_go",
+    "Visualize/Time Slider Bookmarks/Previous Bookmark": ("allset.bookmark_go", {"previous": True}),
+    "Visualize/Time Slider Bookmarks/Frame Bookmark": ("allset.bookmark_frame", {"which": 'CURRENT'}),
+    "Visualize/Time Slider Bookmarks/Frame Previous Bookmark": ("allset.bookmark_frame", {"which": 'PREVIOUS'}),
+    "Visualize/Time Slider Bookmarks/Frame Next Bookmark": ("allset.bookmark_frame", {"which": 'NEXT'}),
+    "Visualize/Time Slider Bookmarks/Unframe": "allset.playback_range_anim",
+    "Visualize/Time Slider Bookmarks/Delete": "allset.bookmark_delete",
+    "Visualize/Time Slider Bookmarks/Delete All Bookmarks": ("allset.bookmark_delete", {"all": True}),
+    "Visualize/Time Slider Bookmarks/Edit": "allset.bookmark_edit",
+    "Visualize/Time Slider Bookmarks/Show Bookmarks": ("prop", "addon_prefs.show_time_slider_bookmarks", {}),
+    "Visualize/Time Slider Bookmarks/Bookmark Manager": "allset.bookmark_manager",
     # Audio: sounds are Video Sequencer sound strips
     "Audio/Import Audio...": "allset.import_audio",
     "Audio/Import Audio Clip to Time Editor...": "allset.import_audio",
@@ -979,7 +1061,7 @@ OBJECT_MODE = {
     "Edit Mesh/Poke": ('ALL', 'FACE'),
     "Edit Mesh/Circularize": ('ALL', 'VERT'),
     "Edit Mesh/Edit Edge Flow": ('ALL', 'EDGE'),
-    "Edit Mesh/Bevel": ('ALL', 'EDGE'),
+    # Edit Mesh/Bevel: allset.bevel bevels an object selection itself (its In-View Editor stays in object mode)
     "Edit Mesh/Smart Bevel": ('ALL', 'EDGE'),
     "Edit Mesh/Chamfer Vertices": ('ALL', 'VERT'),
     "Edit Mesh/Bridge": "Invalid selection : polyBridgeEdge requires equal number of border edges to be selected "
@@ -991,7 +1073,7 @@ OBJECT_MODE = {
     "Edit Mesh/Wedge": "No faces selected to wedge. Select faces and one or more edges from the selected faces "
                        "to wedge about.",
     "Edit Mesh/Connect": "Can't perform polyConnectComponents1 on selection",
-    "Edit Mesh/Symmetrize": "No components selected for Symmetrize.",     # Maya 2022
+    "Edit Mesh/Symmetrize": "No components selected for Symmetrize.",     # Maya's message
     "Edit Mesh/Flip Triangle Edge": "Select edges to flip.",
     "Edit Mesh/Spin Edge Backward": "Select edges to spin.",
     "Edit Mesh/Spin Edge Forward": "Select edges to spin.",
@@ -1004,9 +1086,11 @@ OBJECT_MODE = {
     # (Maya 2026); Automatic / Contour Stretch / Planar do that in their own operator.
     "UV/Cylindrical": ('ALL', 'FACE'),
     "UV/Spherical": ('ALL', 'FACE'),
+    "UV/Camera-based": ('ALL', 'FACE'),                  # #392: mapped from the 3D View
+    "UV Editor/Create/Camera-based": ('ALL', 'FACE'),
 }
 
-# Edit / Select / Modify items run in component (mesh edit) mode the way Maya 2022 runs them there (#39 /
+# Edit / Select / Modify items run in component (mesh edit) mode the way Maya runs them there (#39 /
 # #17 / #18; with pCube1.f[1] selected after F11):
 # ("run", action) = this action instead of the object one; ("object", action) = back to object mode, then the
 # action; ("owner", action) = the action on the objects whose components are selected, then back to component mode
@@ -1057,7 +1141,7 @@ MAP.update({
 })
 
 # modeling / rigging commands with Maya's results;
-# operators/poly_maya.py, operators/rig_maya.py, menu_items.nonlinear.
+# operators/poly_maya.py, operators/rig_maya.py / ik_spline_handle.py / skin_influences.py / cluster_soft_mod.py, menu_items.nonlinear.
 MAP.update({
     "Edit Mesh/Circularize": "allset.circularize",
     "Mesh Tools/Connect": "allset.connect_tool_enter",      # connects the selection, then the tool waits
@@ -1100,6 +1184,10 @@ MAP.update({
     "Skeleton/Joint Labelling/Hide All Labels": ("allset.joint_label_show_all", {"show": False}),
     "Skeleton/Joint Labelling/Rename Joints From Labels": "allset.rename_joints_from_labels",
     "Skeleton/Joint Labelling/Label Based on Joint Names": "allset.label_from_joint_names",
+    # Maya check items (operators/ik_fk_control.py); Snap is greyed out while IK/FK control is on
+    "Skeleton/Enable IK Handle Snap": ("prop", "window_manager.allset_ik_handle_snap",
+                                       {"off_while": "window_manager.allset_ik_fk_control"}),
+    "Skeleton/Enable IK/FK Control": ("prop", "window_manager.allset_ik_fk_control", {}),
     "Skeleton/Enable Selected IK Handles": ("allset.ik_handle_enable", {"enable": True}),
     "Skeleton/Disable Selected IK Handles": ("allset.ik_handle_enable", {"enable": False}),
     # Maya deformerWeights XML (operators/deformer_weights.py)
@@ -1117,7 +1205,7 @@ MAP.update({
     "Deform/Cluster": "allset.cluster",
     "Deform/Nonlinear/Twist": ("allset.deformer", {"kind": 'TWIST'}),     # operators/deformers.py
     "Deform/Soft Modification Tool": "allset.soft_mod",
-    # operators/pins_205.py: Maya 2020+ matrix constraints, intermediate objects, wrap influences
+    # operators/pin_create.py, intermediate_objects.py, wrap_influence.py: Maya 2020+ matrix constraints, intermediate objects, wrap influences
     "Constrain/UV Pin": "allset.uv_pin",
     "Constrain/Proximity Pin": "allset.proximity_pin",
     "Deform/Display Intermediate Objects": ("allset.intermediate_objects", {"show": True}),
@@ -1177,14 +1265,12 @@ BLENDER_MENU = {
 
 # Graph Editor / Dope Sheet / UV Editor / UV Toolkit menu bars: their own module, same forms.
 from .editor_menu_map import MAP as _EDITOR_MAP  # noqa: E402
-from .editor_menu_map import GREY_ON_POLL  # noqa: E402,F401  (menu_sets.draw_item)
+from .editor_menu_map import GREY_ON_POLL  # noqa: E402,F401  (menu_item_draw.draw_item)
 
 MAP.update(_EDITOR_MAP)
 
 # the same Maya command greyed in one menu while it works in another
-# (tools/menu_consistency.py finds them: label + runTimeCommand / annotation) gets the working item's action.
-# UV Editor Tools > Unfold / Cut / Sew / Pin are Maya's brush tools; the kit runs the command on the selection
-# (Blender's UV editor has no unfold / cut / sew brush).
+# (same label and runTimeCommand / annotation) gets the working item's action.
 TWINS = {
     **{f"Key/{label}": f"Control/{label}" for label in (
         "Create Character Set", "Create Subcharacter Set", "Attribute Editor", "Add to Character Set",
@@ -1194,11 +1280,7 @@ TWINS = {
     "UV/3D Grab UV Tool": "UV Editor/Tools/Grab",      # Maya 2026 UV menu item = the UV Editor Grab tool
     **{f"UV Editor/Select/Convert Selection/{label}": f"Select/Convert Selection/{label}"
        for label in ("To Contained Edges", "To Contained Faces", "To Edge Loop", "To Edge Ring")},
-    "UV Editor/Tools/Unfold": "UV Editor/Modify/Unfold",
-    "UV Editor/Tools/Cut": "UV Editor/Cut/Sew/Cut",
-    "UV Editor/Tools/Sew": "UV Editor/Cut/Sew/Sew",
-    "UV Editor/Tools/Pin": "UV Editor/Edit/Pin Selection",
-    # runTimeCommand aliases (tools/menu_consistency.py module doc) — the main UV > Delete UVs runs
+    # runTimeCommand aliases — the main UV > Delete UVs runs
     # DeleteUVsWithoutHotkey = the marking menu's DeleteUVs (polyMapDel on the selected faces, Maya UV marking menu);
     # nHair > Modify Curves runs the Curves menu's SmoothHairCurves / StraightenCurves (Maya 2026 nHair menu)
     "nHair/Modify Curves/Smooth": "Curves/Smooth",
@@ -1223,6 +1305,15 @@ MAP.setdefault("UV/Delete UVs", "allset.uv_delete")   # main menu twin of the UV
 for _twin, _source in TWINS.items():
     if _twin not in MAP and _source in MAP:
         MAP[_twin] = MAP[_source]
+
+
+# Maya submenus drawn with their items although their own path is mapped (shelf buttons saved with that path)
+SUBMENUS = frozenset({"Display/Hide", "Display/Show", "Display/Animation"})
+
+
+def is_submenu(path, kids):
+    """A menu entry with children opens them, unless its own path is mapped to one action."""
+    return bool(kids) and (path not in MAP or path in SUBMENUS)
 
 
 def spec(path):

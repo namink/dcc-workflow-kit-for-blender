@@ -2,7 +2,7 @@
 """Maya viewport panel menu bar: View, Shading, Lighting, Show, Renderer, Panels.
 
 Every Maya modelPanel has its own menu bar. Menu contents
-follow Maya 2022's panel menus (View, Shading, Lighting,
+follow Maya's panel menus (View, Shading, Lighting,
 Show, Renderer, Panels); only labels and order.
 
 Only the menu part of the 3D View header changes: ``VIEW3D_MT_editor_menus.draw_collapsible``
@@ -16,15 +16,17 @@ Item forms (one tuple per row):
 ``("set", key, label)`` ``allset.panel_set`` (radio / toggle state from ``state``);
 ``("run", label, op, props)`` an operator run in this view's main region;
 ``("menu", label, idname)``; ``("grey", label)`` no Blender equivalent; ``("sep", label)``.
+
+Code: ``panel_cameras`` (the camera of a view, Look Through, new cameras), ``panel_state`` (state / apply of the
+``set`` keys); this module keeps the operators, row drawing, menus, header patch and register. The names used
+elsewhere are importable from here too.
 """
 
 import json
 
 import bpy
-from bpy.app.handlers import persistent
 from bpy.props import BoolProperty, EnumProperty, StringProperty
 
-from ..operators import view as view_ops
 from . import camera_bookmarks
 
 GREY_OP = "allset.menu_unavailable"
@@ -32,413 +34,29 @@ GREY_OP = "allset.menu_unavailable"
 
 # Row tables live in panel_menu_data (bpy-free: menu_count / menu_consistency / notice rules walk them).
 from .panel_menu_data import (_view, VIEW, VIEW_AXIS, CAMERA_TOOLS, SHADING, LIGHTING, ALL_TYPES,
-                              _show_row, SHOW, ISOLATE, RENDERER, PANELS, PANEL_TYPES, LAYOUTS, BAR, item_path)  # noqa: F401
+                              _show_row, SHOW, ISOLATE, RENDERER, ENGINE_ROWS, PANELS, PANEL_TYPES, LAYOUTS, BAR,  # noqa: F401
+                              item_path)
 from .. import i18n
+# the split-out parts, also read through this module by other UI and the tests
+from .panel_cameras import (ALLSET_MT_panel_new_ortho, ALLSET_MT_panel_ortho_new,  # noqa: F401
+                            ALLSET_OT_panel_look_through, ALLSET_OT_panel_new_ortho, ALLSET_OT_panel_new_persp,
+                            ORTHO_SIDES, _before_look, _cameras, _draw_camera_list, _look_through_panel_camera,
+                            _on_undo, _scene_camera_view, _space, _startup_name, camera_locked, enable_in_viewports,
+                            has_panel_camera, look_through, panel_camera, restore_camera_less, view_camera)
+from .panel_state import (CAMERA_DATA, CAMERA_KEYS, EXPOSURE_LAST, FAILS, FIELD_CHART, GAMMA_LAST,  # noqa: F401
+                          GATE_OVERSCAN, RADIO, RAW, RENDER_ENGINES, RES_GATE, SAFE, SET_KEYS, SHOW_HIDDEN, TIPS,
+                          TOGGLE_OFF, TOOLBAR_KEYS, TRANSFORM_LAST, _before_render, _safe_on, _sync_safe_margins,
+                          _toggle_colour, apply, enter_rendered, leave_rendered, main_region, set_engine,
+                          show_ik_handles, state)
 
 
 # --- state ---------------------------------------------------------------------------
 
-def _space(context):
-    space = context.space_data
-    return space if space is not None and space.type == 'VIEW_3D' else None
-
-
 def _owner(space, context, owner):
+    if owner == "preferences":
+        from .. import preferences
+        return preferences.get(context)
     return {"space": space, "shading": space.shading, "overlay": space.overlay}[owner]
-
-
-def _scene_camera_view(context):
-    rv3d = context.region_data or getattr(_space(context), "region_3d", None)
-    return rv3d is not None and rv3d.view_perspective == 'CAMERA'
-
-
-def view_camera(context):
-    """The object this view looks through (None: Blender's persp / ortho view, which has no camera object)."""
-    space = _space(context)
-    if space is None or not _scene_camera_view(context):
-        return None
-    if space.use_local_camera and space.camera is not None:
-        return space.camera
-    return context.scene.camera
-
-
-# Maya's startup camera of an orthographic view by its looking direction (Blender Z-up world)
-_ORTHO_CAMERAS = (("top", (0.0, 0.0, -1.0)), ("front", (0.0, 1.0, 0.0)), ("side", (-1.0, 0.0, 0.0)))
-
-
-def _startup_name(context):
-    """The startup camera of this view: persp for a perspective view, top / front / side for those orthographic
-    views, else None."""
-    space = _space(context)
-    rv3d = context.region_data or getattr(space, "region_3d", None)
-    if rv3d is None:
-        return None
-    if rv3d.view_perspective == 'PERSP':
-        return "persp"
-    from mathutils import Vector
-    forward = rv3d.view_rotation @ Vector((0.0, 0.0, -1.0))
-    for name, axis in _ORTHO_CAMERAS:
-        if forward.dot(Vector(axis)) > 0.999:
-            return name
-    return None
-
-
-def panel_camera(context, make=False):
-    """Maya's camera of this panel: the camera it looks through, else the scene's startup camera of that view
-    (persp for a perspective view, top / front / side for those orthographic views), else None. ``make``: a scene
-    without startup cameras (one not made with File > New Scene in Maya mode) gets them first, as every Maya scene has
-    them (#297)."""
-    cam = view_camera(context)
-    if cam is not None:
-        return cam
-    name = _startup_name(context)
-    if name is None:
-        return None
-    from ..operators import startup_cameras
-    found = {ob.get(startup_cameras.MARK): ob for ob in startup_cameras.cameras(context.scene)}
-    if not found and make:
-        found = {ob.get(startup_cameras.MARK): ob
-                 for ob in startup_cameras.ensure(context.scene, context.view_layer)}
-    return found.get(name)
-
-
-def has_panel_camera(context):
-    """Select Camera has a camera to select in this view (the startup ones are made on the first use)."""
-    return view_camera(context) is not None or _startup_name(context) is not None
-
-
-def camera_locked(ob):
-    """Maya Lock Camera (camera -lockTransform): the kit locks the camera's location and rotation channels;
-    Blender's camera-view navigation keeps locked channels."""
-    return all(ob.lock_location) and all(ob.lock_rotation)
-
-
-# Maya camera display toggles (Maya panel toolbar) -> Blender camera data.
-# Blender draws title and action safe areas together (one flag).
-CAMERA_DATA = {"FILM_GATE": "show_sensor", "GATE_MASK": "show_passepartout",
-               "SAFE_ACTION": "show_safe_areas", "SAFE_TITLE": "show_safe_areas"}
-CAMERA_KEYS = {"CAMERA_LOCK", *CAMERA_DATA}
-
-# Toolbar toggles whose Maya off state is another mode (Maya panel toolbar):
-# Wireframe off = smooth shaded, Smooth Shade All off = wireframe, Use All Lights off = default lighting.
-TOGGLE_OFF = {"SHADE_WIRE": "SHADE_SMOOTH", "SHADE_SMOOTH": "SHADE_WIRE", "LIGHT_ALL": "LIGHT_DEFAULT"}
-
-# Maya colour management icons (Maya panel toolbar: exposure / gamma icon = toggle between the
-# default and the last other value, view transform check box = colour management on / off). Blender keeps these per
-# scene (view settings); the last values live in Scene ID properties.
-EXPOSURE_LAST, GAMMA_LAST, TRANSFORM_LAST = "allset_exposure_last", "allset_gamma_last", "allset_view_transform_last"
-RAW = 'Raw'
-
-FAILS = {
-    "SELECT_CAMERA": "This view has no camera: Select Camera works in a perspective view, the top / front / side "
-                     "views and a view that looks through a camera",
-    "CAMERA_LOCK": "Look through a camera first (Panels > Perspective): Blender's persp view has no camera",
-    "ISOLATE": "Select the objects to isolate",
-    "BOOKMARK": camera_bookmarks.NO_CAMERA,
-}
-for _k in CAMERA_DATA:
-    FAILS[_k] = FAILS["CAMERA_LOCK"]
-
-TIPS = {
-    "TUMBLE_SELECTION": "Tumble around the selection: Blender's Orbit Around Selection preference "
-                        "(opens Preferences > Navigation; the kit doesn't change preferences)",
-    "TUMBLE_COI": "Tumble around the center of interest: Orbit Around Selection off "
-                  "(opens Preferences > Navigation; the kit doesn't change preferences)",
-    "SELECT_CAMERA": "Select camera: the camera this view looks through",
-    "CAMERA_LOCK": "Lock Camera: the camera this view looks through can't be moved (Blender: its location and "
-                   "rotation channels are locked)",
-    "FILM_GATE": "Film gate (Blender: camera sensor frame)",
-    "GATE_MASK": "Gate mask (Blender: passepartout)",
-    "SAFE_ACTION": "Safe action (Blender draws the action and title safe areas together)",
-    "SAFE_TITLE": "Safe title (Blender draws the action and title safe areas together)",
-    "BOOKMARK": "Bookmarks: bookmark this view (the camera's place and lens). Right-click: the camera's bookmarks, "
-                "Create 2D Bookmark, Edit 2D Bookmarks",
-    "PAN_ZOOM": "2D Pan/Zoom: off shows the view without its 2D pan / zoom (a camera view: the camera's whole frame), "
-                "on brings it back; the camera doesn't move. Tap \\ to switch it; hold \\ and middle-drag to pan, "
-                "right-drag to zoom. Right-click: the 2D bookmarks",
-    "GRID": "Grid",
-    "SHOW_IMAGE_PLANES": "Image planes (Blender image empties: shown or hidden in every view, like Alt+4)",
-    "SELECTION_HILITE": "Selection highlighting in this view (the Maya selection wire, and Blender's outline "
-                        "where it was on)",
-    "SHOW_NURBS_CURVES": "NURBS curves: curve objects in this view, and rig controls drawn as bone shapes "
-                         "(their bones are shown or hidden in every view)",
-    "SHOW_IK_HANDLES": "IK handles (the empties IK constraints follow: shown or hidden in every view)",
-    "SHADE_WIRE": "Wireframe",
-    "SHADE_SMOOTH": "Smooth shade all",
-    "DEFAULT_MATERIAL": "Use default material",
-    "HW_TEXTURE": "Textured",
-    "LIGHT_ALL": "Use all lights",
-    "ISOLATE": "Isolate select",
-    "EXPOSURE": "Exposure: switch between 0 and the last exposure",
-    "GAMMA": "Gamma: switch between 1 and the last gamma",
-    "CM_ENABLE": "Colour management on / off (off = Blender's Raw view transform)",
-    "LAYOUT_FOUR": "Four View: top, persp, front and side. " + view_ops.FOUR_VIEW_NOTE,
-}
-
-
-SHOW_HIDDEN = "allset_hidden_by_show"   # IK handles the Show menu hid (view-layer hide; only these come back)
-
-
-def show_ik_handles(context, on):
-    """Maya Show > IK Handles: Blender has no view filter for these empties, so the kit hides them in
-    the view layer (every view) and marks them; showing again un-hides only marked ones."""
-    from ..operators import by_type
-    for ob in by_type.ik_handles(context.scene):
-        try:
-            if on and ob.get(SHOW_HIDDEN):
-                ob.hide_set(False)
-                del ob[SHOW_HIDDEN]
-            elif not on and not ob.hide_get():
-                ob.hide_set(True)
-                ob[SHOW_HIDDEN] = True
-        except RuntimeError:       # not in the view layer
-            pass
-
-
-def state(context, key):
-    """On/off of a ``set`` row (None: plain command)."""
-    space = _space(context)
-    if space is None:
-        return None
-    if key in CAMERA_KEYS:
-        ob = view_camera(context)
-        if ob is None:
-            return False
-        if key == "CAMERA_LOCK":
-            return camera_locked(ob)
-        return ob.type == 'CAMERA' and bool(getattr(ob.data, CAMERA_DATA[key]))
-    if key == "ISOLATE":
-        return space.local_view is not None
-    if key == "PAN_ZOOM":
-        return camera_bookmarks.pan_zoom_on(context.region_data or space.region_3d)
-    if key == "CM_ENABLE":
-        return context.scene.view_settings.view_transform != RAW
-    sh = space.shading
-    if key == "SHADE_WIRE":
-        return sh.type == 'WIREFRAME'
-    if key == "SHADE_SMOOTH":
-        return sh.type != 'WIREFRAME'
-    if key == "DEFAULT_MATERIAL":
-        return sh.color_type == 'SINGLE'
-    if key == "HW_TEXTURE":
-        return sh.color_type == 'TEXTURE'
-    if key == "LIGHT_DEFAULT":
-        return sh.type in ('SOLID', 'WIREFRAME') and sh.light != 'FLAT'
-    if key == "LIGHT_ALL":
-        return (sh.type == 'MATERIAL' and sh.use_scene_lights) or \
-            (sh.type == 'RENDERED' and sh.use_scene_lights_render)
-    if key == "LIGHT_FLAT":
-        return sh.type in ('SOLID', 'WIREFRAME') and sh.light == 'FLAT'
-    if key == "RENDER_VP2":
-        return sh.type != 'RENDERED'
-    if key == "RENDER_ENGINE":
-        return sh.type == 'RENDERED'
-    if key == "TUMBLE_SELECTION":
-        return context.preferences.inputs.use_rotate_around_active
-    if key == "TUMBLE_COI":
-        return not context.preferences.inputs.use_rotate_around_active
-    if key == "GRID":
-        from . import maya_grid
-        return maya_grid.visible(space)
-    if key == "SHOW_IMAGE_PLANES":
-        from ..operators import global_keys4
-        planes = global_keys4.image_planes(context.scene)
-        return not planes or any(getattr(o, f) for o in planes for f in global_keys4.IMAGE_FLAGS)
-    if key == "SHOW_NURBS_CURVES":
-        return space.show_object_viewport_curve
-    if key == "SELECTION_HILITE":
-        from . import selection_wire
-        return selection_wire.highlighting(context)
-    if key == "SHOW_IK_HANDLES":
-        from ..operators import by_type
-        return not any(o.get(SHOW_HIDDEN) for o in by_type.ik_handles(context.scene))
-    if key in ("LAYOUT_SINGLE", "LAYOUT_FOUR"):
-        from . import four_view                 # four real panels
-        four = four_view.is_four(context.screen) if context.screen is not None else False
-        return four == (key == "LAYOUT_FOUR")
-    return None
-
-
-RADIO = {"SHADE_WIRE", "SHADE_SMOOTH", "LIGHT_DEFAULT", "LIGHT_ALL", "LIGHT_FLAT", "RENDER_VP2",
-         "RENDER_ENGINE", "TUMBLE_SELECTION", "TUMBLE_COI", "LAYOUT_SINGLE", "LAYOUT_FOUR"}
-SET_KEYS = [s[1] for menu in (VIEW, SHADING, LIGHTING, SHOW, RENDERER, LAYOUTS) for s in menu
-            if s[0] == "set"]
-# keys only the panel toolbar uses (ui/panel_toolbar.py)
-TOOLBAR_KEYS = ["FILM_GATE", "GATE_MASK", "SAFE_ACTION", "SAFE_TITLE", "ISOLATE", "EXPOSURE", "GAMMA", "CM_ENABLE",
-                "BOOKMARK", "PAN_ZOOM"]
-
-# Shading / overlay values "Apply Current to All" copies (Maya: current panel's settings to all).
-_COPY_SHADING = ("type", "light", "color_type", "show_xray", "show_backface_culling", "show_shadows",
-                 "use_dof", "use_scene_lights", "use_scene_world")
-_COPY_OVERLAY = ("show_wireframes", "show_xray_bone", "show_floor", "show_ortho_grid", "grid_lines", "show_text",
-                 "show_outline_selected", "show_object_origins", "show_motion_paths")
-
-
-def main_region(area):
-    """The area's WINDOW region whose view is ``space.region_3d`` (quad views: the user view)."""
-    space = area.spaces.active
-    wins = [r for r in area.regions if r.type == 'WINDOW']
-    rv3d = getattr(space, "region_3d", None)
-    return next((r for r in wins if r.data == rv3d), wins[-1] if wins else None)
-
-
-_before_render = {}   # 3D View space pointer -> shading type before Rendered (IPR / Renderer menu)
-
-
-def enter_rendered(space):
-    sh = space.shading
-    if sh.type != 'RENDERED':
-        _before_render[space.as_pointer()] = sh.type
-        sh.type = 'RENDERED'
-
-
-def leave_rendered(space):
-    """Back to the shading the view had before Rendered (Maya: stopping IPR keeps the panel's mode, #24)."""
-    sh = space.shading
-    if sh.type == 'RENDERED':
-        sh.type = _before_render.pop(space.as_pointer(), 'SOLID')
-
-
-def apply(context, key):
-    space = _space(context)
-    if space is None:
-        return False
-    sh = space.shading
-    if key == "SHADE_WIRE":
-        sh.type = 'WIREFRAME'
-    elif key == "SHADE_SMOOTH":
-        sh.type = 'SOLID'
-    elif key == "DEFAULT_MATERIAL":
-        sh.color_type = 'MATERIAL' if sh.color_type == 'SINGLE' else 'SINGLE'
-    elif key == "HW_TEXTURE":
-        sh.color_type = 'MATERIAL' if sh.color_type == 'TEXTURE' else 'TEXTURE'
-    elif key == "LIGHT_DEFAULT":
-        if sh.type not in ('SOLID', 'WIREFRAME'):
-            sh.type = 'SOLID'
-        sh.light = 'STUDIO'
-    elif key == "LIGHT_ALL":
-        sh.type = 'MATERIAL'
-        sh.use_scene_lights = True
-        sh.use_scene_world = False
-    elif key == "LIGHT_FLAT":
-        if sh.type not in ('SOLID', 'WIREFRAME'):
-            sh.type = 'SOLID'
-        sh.light = 'FLAT'
-    elif key == "RENDER_VP2":
-        leave_rendered(space)
-    elif key == "RENDER_ENGINE":
-        enter_rendered(space)
-    elif key in ("TUMBLE_SELECTION", "TUMBLE_COI"):
-        # Blender's Orbit Around Selection is a user preference, which the kit never writes:
-        # the items show it and open Preferences > Navigation to change it.
-        try:
-            bpy.ops.screen.userpref_show('INVOKE_DEFAULT', section='NAVIGATION')
-        except RuntimeError:      # no window (background)
-            return False
-    elif key == "GRID":
-        from . import maya_grid
-        maya_grid.toggle(space)
-    elif key == "SHOW_IMAGE_PLANES":
-        from ..operators import global_keys4
-        global_keys4.toggle_show(space, context.scene, 'IMAGE_PLANES')
-    elif key == "SHOW_IK_HANDLES":
-        show_ik_handles(context, not state(context, key))
-    elif key == "SELECTION_HILITE":
-        from . import selection_wire
-        selection_wire.set_highlighting(context, not selection_wire.highlighting(context))
-    elif key == "SHOW_NURBS_CURVES":
-        # #173: the view's curve filter + the curve-shaped bone controls (ui/curve_controls.py)
-        from . import curve_controls
-        space.show_object_viewport_curve = not space.show_object_viewport_curve
-        curve_controls.sync(space, context.scene)
-    elif key in ("SHOW_ALL", "SHOW_NONE"):
-        for t in ALL_TYPES:
-            setattr(space, f"show_object_viewport_{t}", key == "SHOW_ALL")
-        from . import curve_controls
-        curve_controls.sync(space, context.scene)
-    elif key == "APPLY_ALL":
-        for screen in bpy.data.screens:
-            for area in screen.areas:
-                for other in area.spaces:
-                    if other.type != 'VIEW_3D' or other == space:
-                        continue
-                    for name in _COPY_SHADING:
-                        setattr(other.shading, name, getattr(sh, name))
-                    for name in _COPY_OVERLAY:
-                        setattr(other.overlay, name, getattr(space.overlay, name))
-    elif key == "SELECT_CAMERA":
-        cam = panel_camera(context, make=True)
-        if cam is None:
-            return False
-        for ob in context.view_layer.objects:
-            if ob is not None and ob.select_get():
-                ob.select_set(False)
-        try:
-            cam.select_set(True)
-        except RuntimeError:
-            pass
-        context.view_layer.objects.active = cam
-    elif key in CAMERA_KEYS:
-        ob = view_camera(context)
-        if ob is None or (key != "CAMERA_LOCK" and ob.type != 'CAMERA'):
-            return False
-        if key == "CAMERA_LOCK":
-            on = not camera_locked(ob)
-            ob.lock_location = (on,) * 3
-            ob.lock_rotation = (on,) * 3
-        else:
-            prop = CAMERA_DATA[key]
-            setattr(ob.data, prop, not getattr(ob.data, prop))
-    elif key == "ISOLATE":
-        area = context.area
-        if area is None or area.type != 'VIEW_3D':
-            return False
-        if space.local_view is None and not any(ob.select_get() for ob in context.view_layer.objects if ob):
-            return False
-        with context.temp_override(area=area, region=main_region(area)):
-            bpy.ops.allset.isolate()        # isolating a group shows its children
-    elif key in ("EXPOSURE", "GAMMA", "CM_ENABLE"):
-        _toggle_colour(context.scene, key)
-    elif key == "BOOKMARK":
-        return camera_bookmarks.add(context) is not None
-    elif key == "PAN_ZOOM":
-        return camera_bookmarks.toggle_pan_zoom(context)
-    elif key in ("LAYOUT_SINGLE", "LAYOUT_FOUR"):
-        # Issue #148: Maya's layouts = four real panels (ui/four_view.py); Single Perspective View keeps
-        # the persp panel, Four View puts every panel back with its own settings
-        from . import four_view
-        from ..operators import view
-        # any editor can be one of the panels: the four view is never split again, one panel never joined again
-        area, window = context.area, context.window
-        got = four_view.set_layout(context, window, key == "LAYOUT_FOUR", area)
-        if key == "LAYOUT_SINGLE":
-            area = got or area
-            if area.type == 'VIEW_3D':
-                view.ensure_persp(area, area.spaces.active)     # Maya: Single Perspective is the persp camera (#8)
-    else:
-        return False
-    return True
-
-
-def _toggle_colour(scene, key):
-    vs = scene.view_settings
-    if key == "CM_ENABLE":
-        if vs.view_transform != RAW:
-            scene[TRANSFORM_LAST] = vs.view_transform
-            vs.view_transform = RAW
-        else:
-            try:
-                vs.view_transform = scene.get(TRANSFORM_LAST, 'Standard')
-            except TypeError:       # a transform of another colour config
-                vs.view_transform = 'Standard'
-        return
-    prop, default, last = ("exposure", 0.0, EXPOSURE_LAST) if key == "EXPOSURE" else ("gamma", 1.0, GAMMA_LAST)
-    value = getattr(vs, prop)
-    if abs(value - default) > 1e-6:
-        scene[last] = value
-        setattr(vs, prop, default)
-    else:
-        setattr(vs, prop, scene.get(last, default))
 
 
 class ALLSET_OT_panel_set(bpy.types.Operator):
@@ -481,7 +99,8 @@ class ALLSET_OT_panel_set(bpy.types.Operator):
 
 
 # rows that change the scene: one undo step named after the command (a Python operator call makes none)
-UNDO_RUNS = {"allset.camera_from_view"}
+UNDO_RUNS = {"allset.camera_from_view", "allset.image_plane", "allset.image_plane_display",
+             "allset.image_plane_delete"}
 
 
 class ALLSET_OT_panel_run(bpy.types.Operator):
@@ -492,10 +111,13 @@ class ALLSET_OT_panel_run(bpy.types.Operator):
 
     op: StringProperty(options={'SKIP_SAVE'})
     props: StringProperty(default="{}", options={'SKIP_SAVE'})
+    tip: StringProperty(options={'HIDDEN', 'SKIP_SAVE'})     # the row's own tooltip (else the command's)
 
     @classmethod
     @i18n.translated
     def description(cls, context, props):
+        if getattr(props, "tip", ""):
+            return props.tip
         try:
             mod, name = props.op.split(".")
             return getattr(getattr(bpy.ops, mod), name).get_rna_type().description
@@ -576,6 +198,11 @@ def draw_rows(layout, context, rows, idname=""):
                 layout.prop(_owner(space, context, owner), prop, text=label)
         elif kind == "set":
             _k, key, label = row
+            if key == "RENDER_ENGINE" or key in ENGINE_ROWS:
+                # the Renderer Engine Items preference: Eevee / Cycles rows, else one row for the scene's engine
+                from .. import preferences
+                if (key in ENGINE_ROWS) != bool(preferences.get(context).renderer_engines):
+                    continue
             if key == "RENDER_ENGINE":
                 label = context.engine.replace("BLENDER_", "").replace("_NEXT", "").title()
             on = state(context, key)
@@ -599,179 +226,6 @@ def _menu(idname, label, rows, doc):
         draw_rows(self.layout, context, rows, idname)
     return type(idname, (bpy.types.Menu,), {"bl_idname": idname, "bl_label": label, "__doc__": doc,
                                             "draw": draw})
-
-
-def _cameras(context, ortho):
-    """Cameras listed under Panels > Perspective / Orthographic (``ortho`` None = both kinds, the panel toolbar's
-    camera list); the startup persp / top / front / side are the menus' own rows."""
-    from ..operators import startup_cameras
-    return [ob for ob in context.scene.objects
-            if ob.type == 'CAMERA' and (ortho is None or (ob.data.type == 'ORTHO') == ortho)
-            and not startup_cameras.is_startup(ob)]
-
-
-class ALLSET_OT_panel_look_through(bpy.types.Operator):
-    """Look through this camera in this view"""
-    bl_idname = "allset.panel_look_through"
-    bl_label = "Look Through Camera"
-    bl_options = {'INTERNAL'}
-
-    camera: StringProperty(options={'SKIP_SAVE'})   # empty: the active object (Maya Look Through Selected)
-
-    def execute(self, context):
-        ob = context.scene.objects.get(self.camera) if self.camera else context.active_object
-        area = context.area
-        if ob is None or area is None or area.type != 'VIEW_3D':
-            if ob is None:
-                self.report({'WARNING'}, "Select an object to look through")
-            return {'CANCELLED'}
-        look_through(context, area, ob)
-        return {'FINISHED'}
-
-
-# what each view showed before a kit Look Through (RegionView3D pointer -> perspective, camera name, local camera):
-# when Ctrl+Z removes the camera a view looks through, the view goes back to it (session only)
-_before_look = {}
-
-
-def look_through(context, area, ob):
-    space = area.spaces.active
-    rv3d = space.region_3d
-    if rv3d is not None:
-        old = space.camera if space.use_local_camera else context.scene.camera
-        _before_look[rv3d.as_pointer()] = (rv3d.view_perspective, old.name if old is not None else "",
-                                           space.use_local_camera)
-    # the view's own camera (a Maya panel's): local first, since a camera set on a view locked to the scene becomes
-    # the scene camera
-    space.use_local_camera = ob != context.scene.camera
-    space.camera = ob
-    space.region_3d.view_perspective = 'CAMERA'
-    # Maya: navigating a view that looks through a camera moves the camera (#9)
-    space.lock_camera = True
-    from ..operators import camera_overscan
-    camera_overscan.apply_later(area)      # the frame fills the view by the camera's Overscan (Maya)
-
-
-def restore_camera_less(window_manager):
-    """Views left looking through no camera (Ctrl+Z took away the camera they looked through) show again what they
-    showed before that Look Through: that camera, else the persp / orthographic view."""
-    for window in window_manager.windows:
-        scene = window.scene
-        for area in window.screen.areas:
-            if area.type != 'VIEW_3D':
-                continue
-            space = area.spaces.active
-            rv3d = space.region_3d
-            if rv3d is None or rv3d.view_perspective != 'CAMERA':
-                continue
-            if (space.camera if space.use_local_camera else scene.camera) is not None:
-                continue
-            perspective, name, local = _before_look.pop(rv3d.as_pointer(), ('PERSP', "", False))
-            cam = scene.objects.get(name) if name else None
-            if perspective == 'CAMERA' and cam is not None:
-                space.use_local_camera = local
-                space.camera = cam
-            else:
-                rv3d.view_perspective = 'ORTHO' if perspective == 'ORTHO' else 'PERSP'
-            area.tag_redraw()
-
-
-@persistent
-def _on_undo(*_args):
-    try:
-        restore_camera_less(bpy.context.window_manager)
-    except (AttributeError, ReferenceError, RuntimeError):
-        pass
-
-
-class ALLSET_OT_panel_new_persp(bpy.types.Operator):
-    """Make a new perspective camera and look through it in this view"""
-    bl_idname = "allset.panel_new_persp"
-    bl_label = "New"
-    # an undo step, no Adjust Last Operation (Maya has no redo panel)
-    bl_options = {'UNDO'}
-
-    @classmethod
-    def poll(cls, context):
-        return context.area is not None and context.area.type == 'VIEW_3D'
-
-    def execute(self, context):
-        # Maya 2026 behaviour (#193): New makes persp1, persp2 ... with the camera settings and the place
-        # of a new scene's persp (35 mm, translate 28 21 28 aimed at the origin), selects it and looks through it
-        from ..operators import create, film_fit, naming, startup_cameras, units
-        ob = create.create(context, 'CAMERA', maya_naming=False)
-        film_fit.set_fit(ob.data, 'HORIZONTAL')       # the Fit Resolution Gate of a new scene's persp
-        naming.apply_maya_name(ob, "persp")
-        ob.matrix_world = startup_cameras.maya_matrix("persp", units.maya_unit(context.scene))
-        for other in context.selected_objects:
-            other.select_set(other == ob)
-        ob.select_set(True)
-        context.view_layer.objects.active = ob
-        look_through(context, context.area, ob)
-        return {'FINISHED'}
-
-
-ORTHO_SIDES = (('front', "Front"), ('back', "Back"), ('right', "Right"), ('left', "Left"), ('top', "Top"),
-               ('bottom', "Bottom"))
-
-
-class ALLSET_OT_panel_new_ortho(bpy.types.Operator):
-    """Make a new orthographic camera that looks from one side and look through it in this view"""
-    bl_idname = "allset.panel_new_ortho"
-    bl_label = "New Orthographic Camera"
-    bl_options = {'UNDO'}
-
-    kind: EnumProperty(name="View", items=[(k, label, "") for k, label in (*ORTHO_SIDES, ('side', "Side"))],
-                       default='front', options={'SKIP_SAVE'})
-
-    @classmethod
-    def poll(cls, context):
-        return context.area is not None and context.area.type == 'VIEW_3D'
-
-    def execute(self, context):
-        # Maya: New makes front1, back1, right1 ... (side1 from the panel toolbar's list) 30 units wide, 1000.1 units
-        # out on that side looking at the origin, not renderable; it selects it and looks through it
-        from ..operators import create, film_fit, naming, startup_cameras, units
-        unit = units.maya_unit(context.scene)
-        ob = create.create(context, 'CAMERA', maya_naming=False)
-        film_fit.set_fit(ob.data, 'HORIZONTAL')
-        naming.apply_maya_name(ob, self.kind)
-        ob.data.type = 'ORTHO'
-        ob.data.ortho_scale = startup_cameras.MAYA_ORTHO_WIDTH * unit
-        ob.data.allset_renderable = False
-        ob.matrix_world = startup_cameras.maya_matrix(self.kind, unit)
-        for other in context.selected_objects:
-            other.select_set(other == ob)
-        ob.select_set(True)
-        context.view_layer.objects.active = ob
-        look_through(context, context.area, ob)
-        return {'FINISHED'}
-
-
-class ALLSET_MT_panel_new_ortho(bpy.types.Menu):
-    """New orthographic camera: front, side or top (Maya New Orthographic)"""
-    bl_idname = "ALLSET_MT_panel_new_ortho"
-    bl_label = "New Orthographic"
-
-    def draw(self, context):
-        for kind, label in (('front', "Front"), ('side', "Side"), ('top', "Top")):
-            self.layout.operator(ALLSET_OT_panel_new_ortho.bl_idname, text=label).kind = kind
-
-
-class ALLSET_MT_panel_ortho_new(bpy.types.Menu):
-    """New orthographic camera looking from one side (Maya Panels > Orthographic > New)"""
-    bl_idname = "ALLSET_MT_panel_ortho_new"
-    bl_label = "New"
-
-    def draw(self, context):
-        for kind, label in ORTHO_SIDES:
-            self.layout.operator(ALLSET_OT_panel_new_ortho.bl_idname, text=label).kind = kind
-
-
-def _draw_camera_list(layout, context, ortho):
-    for ob in _cameras(context, ortho):
-        layout.operator(ALLSET_OT_panel_look_through.bl_idname, text=ob.name,
-                        icon='OUTLINER_OB_CAMERA').camera = ob.name
 
 
 class ALLSET_MT_panel_perspective(bpy.types.Menu):
@@ -890,9 +344,13 @@ def register():
         bpy.utils.register_class(cls)
     patch_header()
     bpy.app.handlers.undo_post.append(_on_undo)
+    from . import startup_camera_views
+    startup_camera_views.register()
 
 
 def unregister():
+    from . import startup_camera_views
+    startup_camera_views.unregister()
     if _on_undo in bpy.app.handlers.undo_post:
         bpy.app.handlers.undo_post.remove(_on_undo)
     _before_look.clear()

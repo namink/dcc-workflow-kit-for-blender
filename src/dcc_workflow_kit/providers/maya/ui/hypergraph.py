@@ -7,6 +7,12 @@ their parent, lines from parent to child. A node is filled with its display laye
 colour tag), else the default node grey; selected nodes are white, the lead (Blender's active object) green; an
 icon tells groups (empty transforms) from meshes, joints, cameras, lights, curves and locators.
 
+Joints are nodes of their own, like Maya's: each joint stands under its parent joint (joint1 > joint2 > joint3), an
+object parented to a joint stands under that joint, and a skeleton the kit made (``skeleton<N>``) has no node of its
+own: its root joints take its place, as in the kit Outliner. A skeleton the user named (or a Rigify rig) is a node
+with its root joints under it. Clicking or boxing joints picks those joints (Pose Mode); a selection that mixes joints
+and other nodes picks the joints' skeletons as objects.
+
 Mouse and keys (items first in "View2D Buttons List", the region's earliest keymap; they poll False outside a
 Hypergraph region):
   LMB on a node = select (Shift toggle, Ctrl remove, Ctrl+Shift add), LMB drag on empty space = marquee,
@@ -55,9 +61,17 @@ def _is_shown(ob):
     return ob is not None and not startup_cameras.is_startup(ob)
 
 
+def is_joint(key):
+    """``key`` is a joint node's key: ('B', skeleton object session_uid, joint name)."""
+    return isinstance(key, tuple)
+
+
 def graph(scene):
-    """(nodes [(key, parent key)], {key: object}) for the scene's objects in Outliner order (creation order)."""
+    """(nodes [(key, parent key)], {key: object}) for the scene's objects and joints in Outliner order (creation
+    order; joints in Maya child order). An object's key is its ``session_uid``, a joint's ``('B', uid, name)`` with
+    its skeleton object as the value. A kit skeleton's object is in ``by`` (selection) but is not a node."""
     from . import outliner_order
+    from .outliner_tree_rows import _Bones, is_kit_skeleton
     obs = [o for o in scene.objects if _is_shown(o)]
     big = 1 << 40
 
@@ -66,8 +80,40 @@ def graph(scene):
         return (v if isinstance(v, int) else big, o.name)
     obs.sort(key=order)
     by = {o.session_uid: o for o in obs}
-    nodes = [(o.session_uid, o.parent.session_uid if o.parent is not None and o.parent.session_uid in by else None)
-             for o in obs]
+    skel = {}                   # uid -> (_Bones, kit skeleton: its root joints stand for the object)
+    for o in obs:
+        if o.type == 'ARMATURE' and o.data is not None:
+            b = _Bones(o)
+            skel[o.session_uid] = (b, is_kit_skeleton(o, b))
+
+    def stands_for(o):
+        got = skel.get(o.session_uid)
+        return ('B', o.session_uid, got[0].roots[0]) if got is not None and got[1] else o.session_uid
+
+    nodes = []
+    for o in obs:
+        uid = o.session_uid
+        p = o.parent
+        if p is None or p.session_uid not in by:
+            pk = None
+        elif o.parent_type == 'BONE' and p.session_uid in skel and o.parent_bone in skel[p.session_uid][0].names:
+            pk = ('B', p.session_uid, o.parent_bone)
+        else:
+            pk = stands_for(p)
+        got = skel.get(uid)
+        if got is None or not got[1]:
+            nodes.append((uid, pk))
+            pk = uid
+        if got is None:
+            continue
+        b = got[0]
+        stack = [(r, pk) for r in reversed(b.roots)]
+        while stack:
+            name, parent = stack.pop()
+            k = ('B', uid, name)
+            by[k] = o
+            nodes.append((k, parent))
+            stack.extend((c, k) for c in reversed(b.kids.get(name, ())))
     return nodes, by
 
 
@@ -105,7 +151,7 @@ def frame(area, region, scene, selected_only=False, context=None):
     v = view_for(area, region, scene, context)
     cents, _nodes, by = centres(scene)
     if selected_only:
-        cents = {k: c for k, c in cents.items() if by[k].select_get()} or cents
+        cents = {k: c for k, c in cents.items() if node_state(context or bpy.context, k, by[k])[0]} or cents
     v.frame(hl.bounds(cents), region.width, region.height, strip_height(_scale(context)))
     area.tag_redraw()
 
@@ -124,9 +170,67 @@ def layer_colour(ob, scene):
         return None
 
 
-def node_kind(ob):
-    from ..operators import create
-    return hl.node_kind(ob.type, bool(ob.get(create.LOCATOR_PROP)))
+def node_kind(ob, key=None):
+    if key is not None and is_joint(key):
+        return 'JOINT'
+    from ..operators import create, distance_tool
+    return hl.node_kind(ob.type, bool(ob.get(create.LOCATOR_PROP)), distance_tool.is_dimension(ob))
+
+
+def joint_layer_colour(ob, name):
+    """RGB of joint ``name``'s display layer colour tag, None when it has none."""
+    from . import layer_joints
+    pb = ob.pose.bones.get(name) if ob.pose is not None else None
+    coll = layer_joints.layer_of(pb) if pb is not None else None
+    tag = getattr(coll, "color_tag", 'NONE') if coll is not None else 'NONE'
+    if not tag or tag == 'NONE':
+        return None
+    try:
+        return tuple(bpy.context.preferences.themes[0].collection_color[int(tag[-2:]) - 1].color)
+    except (ValueError, IndexError, AttributeError):
+        return None
+
+
+def _bone_hidden(ob, name):
+    from .. import compat
+    from . import layer_joints
+    if layer_joints.hidden(ob, name):
+        return True
+    if ob.mode == 'EDIT':
+        eb = ob.data.edit_bones.get(name)
+        return eb is None or eb.hide
+    pb = ob.pose.bones.get(name) if ob.pose is not None else None
+    return pb is None or compat.bone_hidden(pb)
+
+
+def node_state(context, key, ob):
+    """(selected, lead, hidden) of node ``key`` (object ``ob``, or the skeleton of a joint node)."""
+    vl = context.view_layer
+    try:
+        ob_sel = ob.select_get()
+        ob_hidden = not ob.visible_get()
+    except RuntimeError:            # not in the view layer
+        ob_sel, ob_hidden = False, True
+    if not is_joint(key):
+        sel = ob_sel and not (ob.type == 'ARMATURE' and ob.mode in ('POSE', 'EDIT'))
+        return sel, sel and vl.objects.active == ob, ob_hidden
+    name = key[2]
+    hidden = ob_hidden or _bone_hidden(ob, name)
+    if ob.mode == 'EDIT':
+        eb = ob.data.edit_bones.get(name)
+        sel = eb is not None and bool(eb.select_head or eb.select)
+        return sel, sel and ob.data.edit_bones.active == eb, hidden
+    if ob.mode == 'POSE':
+        from .channel_box import bone_selected
+        pb = ob.pose.bones.get(name)
+        sel = pb is not None and bone_selected(pb)
+        act = ob.data.bones.active
+        return sel, sel and act is not None and act.name == name, hidden
+    # Object Mode: a picked kit skeleton = its root joints (the nodes that stand for it)
+    from .outliner_tree_rows import _Bones, is_kit_skeleton
+    b = _Bones(ob)
+    sel = ob_sel and is_kit_skeleton(ob, b) and name in b.roots
+    return sel, sel and vl.objects.active == ob, hidden
 
 
 def redraw_all(context=None):
@@ -139,17 +243,55 @@ def redraw_all(context=None):
 
 # --- selection / parenting -----------------------------------------------------------------------------------------
 
-def _object_mode(context):
+def _object_mode(context, clear=False):
+    """Object Mode for an object pick; ``clear`` also unpicks the joints (a replacing pick)."""
     if context.mode != 'OBJECT' and context.view_layer.objects.active is not None:
+        from ..operators import joint_selection
         try:
-            bpy.ops.object.mode_set(mode='OBJECT')
+            joint_selection.leave(context, clear_selection=clear)
         except RuntimeError:
             pass
 
 
+def _pick_joints(context, ob, names, rule, lead=None):
+    """Maya selection ``rule`` on joints ``names`` of skeleton ``ob`` (like clicking them in a view), ``lead`` last."""
+    from ..operators import joint_selection
+    names = [n for n in names if n != lead] + ([lead] if lead in names else [])
+    for i, name in enumerate(names):
+        if rule == 'REPLACE':
+            shift = ctrl = i > 0
+        elif rule == 'TOGGLE':
+            shift, ctrl = True, False
+        elif rule == 'REMOVE':
+            shift, ctrl = False, True
+        else:
+            shift = ctrl = True
+        try:
+            joint_selection.select(context, ob, name, shift=shift, ctrl=ctrl)
+        except (RuntimeError, KeyError):
+            pass
+    redraw_all(context)
+
+
 def select(context, by, keys, rule, lead=None):
-    """Apply a Maya selection ``rule`` to the nodes ``keys``; ``lead`` becomes the active object when selected."""
-    _object_mode(context)
+    """Apply a Maya selection ``rule`` to the nodes ``keys``; ``lead`` becomes the active object when selected.
+    Joint nodes of one skeleton pick those joints; joints picked together with other nodes stand for their
+    skeleton object (Blender can't select joints and objects together)."""
+    joints = [k for k in keys if is_joint(k)]
+    if joints and len(joints) == len(keys) and len({k[1] for k in joints}) == 1:
+        _pick_joints(context, by[joints[0]], [k[2] for k in joints], rule,
+                     lead[2] if lead is not None and is_joint(lead) else None)
+        return
+    if joints:
+        objs = []
+        for k in keys:
+            k = k[1] if is_joint(k) else k
+            if k not in objs:
+                objs.append(k)
+        keys = objs
+        lead = lead[1] if lead is not None and is_joint(lead) else lead
+    _object_mode(context, clear=rule == 'REPLACE')
+    by = {k: ob for k, ob in by.items() if not is_joint(k)}
     current = [k for k, ob in by.items() if ob.select_get()]
     new = hl.apply_rule(current, keys, rule)
     for k, ob in by.items():
@@ -169,10 +311,33 @@ def select(context, by, keys, rule, lead=None):
     redraw_all(context)
 
 
+def _drop_joints(context, by, source, target):
+    """MMB drop where a joint is dragged or is the target: the kit Outliner's drop (joints move under a joint of
+    their own skeleton, objects go under a joint keeping where they are)."""
+    from collections import namedtuple
+    from . import outliner_tree_edit
+    target_row = namedtuple("Target", "kind ob sub top")
+    moving = [k for k in by if node_state(context, k, by[k])[0]] if node_state(context, source, by[source])[0] else []
+    if source not in moving:
+        moving.append(source)
+    dragged = [('JOINT', by[k].name, k[2]) if is_joint(k) else ('OBJECT', by[k].name, "") for k in moving
+               if k != target]
+    if target is None:
+        row = None
+    elif is_joint(target):
+        row = target_row('JOINT', by[target].name, target[2], False)
+    else:
+        row = target_row('OBJECT', by[target].name, "", False)
+    return outliner_tree_edit.drop(context, dragged, row, 'ON')
+
+
 def drop(context, by, source, target):
     """MMB drop of node ``source`` on node ``target`` (None = empty space). Returns (changed count, message)."""
+    if is_joint(source) or (target is not None and is_joint(target)):
+        return _drop_joints(context, by, source, target)
     from ..operators import parenting
-    moving = [k for k, ob in by.items() if ob.select_get()] if by[source].select_get() else [source]
+    moving = ([k for k, ob in by.items() if not is_joint(k) and ob.select_get()] if by[source].select_get()
+              else [source])
     if source not in moving:
         moving.append(source)
     obs = [by[k] for k in moving]
@@ -299,7 +464,6 @@ def draw():
             pts += [(px, py - hl.NODE_H * view.s / 2), (cx, cy + hl.NODE_H * view.s / 2)]
     _lines(shader, pts, LINE)
 
-    active = context.view_layer.objects.active
     marked = hl.hidden_children(nodes, COLLAPSED)
     font = 11.0 * view.s
     blf.size(0, max(font, 1.0))
@@ -308,11 +472,12 @@ def draw():
         x0, y0, x1, y1 = view.rect(c)
         if x1 < 0 or x0 > region.width or y1 < 0 or y0 > region.height:
             continue
-        layer = layer_colour(ob, scene)
-        selected = ob.select_get()
-        fill = LEAD_FILL if selected and ob == active else SELECTED_FILL if selected else (
+        joint = is_joint(key)
+        layer = joint_layer_colour(ob, key[2]) if joint else layer_colour(ob, scene)
+        selected, lead, hidden = node_state(context, key, ob)
+        fill = LEAD_FILL if lead else SELECTED_FILL if selected else (
             (*layer, 1.0) if layer is not None else NODE_FILL)
-        if not ob.visible_get() and not selected:
+        if hidden and not selected:
             fill = (fill[0] * 0.6, fill[1] * 0.6, fill[2] * 0.6, 1.0)
         _rect(shader, x0, y0, x1, y1, fill)
         if layer is not None and selected:          # the layer colour stays visible as a stripe
@@ -320,14 +485,14 @@ def draw():
         _frame(shader, x0, y0, x1, y1, OUTLINE)
         ink = hl.text_colour(fill)
         h = y1 - y0
-        _icon(shader, node_kind(ob), x0 + h / 2 + 2 * view.s, (y0 + y1) / 2, h * 0.3, ink)
+        _icon(shader, node_kind(ob, key), x0 + h / 2 + 2 * view.s, (y0 + y1) / 2, h * 0.3, ink)
         if key in marked:                            # collapsed: a triangle under the box
             cx, r = (x0 + x1) / 2, 5 * view.s
             _tris(shader, [(cx - r, y0 - 2 * view.s), (cx + r, y0 - 2 * view.s), (cx, y0 - 2 * view.s - r)],
                   [(0, 1, 2)], LINE)
         if font >= 4.0:
             tx = x0 + h + 4 * view.s
-            text = _fit(blf, ob.name, x1 - tx - 4 * view.s)
+            text = _fit(blf, key[2] if joint else ob.name, x1 - tx - 4 * view.s)
             blf.color(0, *ink)
             blf.position(0, round(tx), round((y0 + y1) / 2 - font * 0.35), 0)
             blf.draw(0, text)
@@ -660,6 +825,7 @@ def register():
         bpy.utils.register_class(cls)
     _handle[0] = bpy.types.SpaceProperties.draw_handler_add(draw, (), 'WINDOW', 'POST_PIXEL')
     bpy.app.handlers.depsgraph_update_post.append(_on_depsgraph)
+    marked_window.AREA_STATE.append(VIEWS)        # the view stays when the window comes to the front
 
 
 def unregister():
@@ -668,6 +834,8 @@ def unregister():
     if _handle[0] is not None:
         bpy.types.SpaceProperties.draw_handler_remove(_handle[0], 'WINDOW')
         _handle[0] = None
+    if VIEWS in marked_window.AREA_STATE:
+        marked_window.AREA_STATE.remove(VIEWS)
     VIEWS.clear()
     OVERLAY.update(area=0, box=None, drag=None)
     for cls in reversed(classes):

@@ -314,11 +314,15 @@ class ALLSET_OT_add_key_tool(bpy.types.Operator):
                 return {'PASS_THROUGH'}
             frame, value = region.view2d.region_to_view(x, y)
             with context.temp_override(window=win, area=area, region=region):
+                from . import graph_move
                 curves = insert_curves(list(getattr(bpy.context, "visible_fcurves", None) or ()))
-                for fc in curves:
+                # the value axis is in display units (degrees, the scene's length unit): back to stored values
+                scales = graph_move._value_scales(bpy.context, curves) if curves else []
+                for fc, scale in zip(curves, scales):
                     for kp in fc.keyframe_points:
                         kp.select_control_point = kp.select_left_handle = kp.select_right_handle = False
-                    add_key(fc, float(round(frame)), value).select_control_point = True
+                    stored = value * scale - graph_move._offset(bpy.context, fc)
+                    add_key(fc, float(round(frame)), stored).select_control_point = True
             if curves:
                 bpy.ops.ed.undo_push(message="Add Key")
                 area.tag_redraw()

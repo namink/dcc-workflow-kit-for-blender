@@ -10,6 +10,7 @@ import bpy
 
 from . import notices
 from ..operators import poly_draw, quad_draw
+from ..keymap.ic_data import platform_tool
 
 # Remaining Maya rows without a matching tool gesture:
 # (notice key) -> (substitute, one line)
@@ -283,7 +284,7 @@ def register():
     notices.PANEL_NOTICES.update(GREY)
     for tool in TOOLS:
         after = {"builtin.poly_build"} if tool.bl_context_mode == 'EDIT_MESH' else None
-        bpy.utils.register_tool(tool, after=after)
+        bpy.utils.register_tool(platform_tool(tool), after=after)
 
 
 def unregister():

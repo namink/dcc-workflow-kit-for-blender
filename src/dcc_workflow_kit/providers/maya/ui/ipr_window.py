@@ -81,13 +81,26 @@ def setup_view(space):
             setattr(space, flag, False)
 
 
+def source():
+    """The 3D View the IPR window follows: the persp panel while a four view is shown (its panels are made again
+    when the four view comes back), else the area IPR was opened from."""
+    from . import four_view
+    from .maya_dock import main_window
+    main = main_window()
+    four = four_view.block(main.screen) if main is not None else {}
+    if four.get("persp") is not None and four["persp"].type == 'VIEW_3D':
+        return four["persp"]
+    _w, src = live_refs.find_area(_state["src"])
+    return src
+
+
 def _follow():
     win = window()
     area = view_area(win)
     if area is None:
         _state["win"] = 0
         return None
-    _w, src = live_refs.find_area(_state["src"])
+    src = source()
     if src is not None and src.type == 'VIEW_3D':
         try:
             if copy_view(src.spaces.active, area.spaces.active):
@@ -121,6 +134,12 @@ def open_window(context, area):
         return None
     _state["win"] = new.as_pointer()
     _state["src"] = area.as_pointer()
+    if view_area(new) is None:          # its place was carved out of the layout: the copy is no 3D View yet
+        new.screen.areas[0].ui_type = 'VIEW_3D'
+        try:
+            copy_view(area.spaces.active, new.screen.areas[0].spaces.active)
+        except (AttributeError, ReferenceError, TypeError):
+            pass
     target = view_area(new)
     if target is not None:
         setup_view(target.spaces.active)

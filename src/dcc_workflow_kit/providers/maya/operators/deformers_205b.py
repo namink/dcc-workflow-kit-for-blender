@@ -31,6 +31,7 @@ import bpy
 from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty, StringProperty
 
 from .. import compat
+from .. import update_summary
 from . import deformers, wire_deformer
 
 MORPH_GROUP = ".Allset Morph"
@@ -60,7 +61,7 @@ MORPH_INPUTS = (
     ("Morph Space", 'NodeSocketInt', 0, 0, 1),
     ("Mirror Direction", 'NodeSocketInt', 0, 0, 8),
     ("Use Original Morph Target", 'NodeSocketBool', False, None, None),
-    # Maya attributes Maya's modes don't use (Retarget's scaling rules are): kept for the Channel Box
+    # Maya attributes the kit's modes don't use (Retarget's scaling rules are the kit's own): kept for the Channel Box
     ("Scale Envelope", 'NodeSocketFloat', 1.0, None, None),
     ("Uniform Scale Weight", 'NodeSocketFloat', 1.0, None, None),
     ("Normal Scale", 'NodeSocketFloat', 1.0, None, None),
@@ -482,6 +483,7 @@ def sync_rest():
     for ob in _rest_helpers():
         owner = ob.get(REST_OF) if REST_OF in ob else None
         if owner is not None and getattr(owner, "data", None) is not None and ob.data != owner.data:
+            update_summary.wrote()
             ob.data = owner.data
             ob.show_only_shape_key = True
             ob.active_shape_key_index = 0
@@ -638,7 +640,7 @@ class ALLSET_OT_gn_deformer_enum(bpy.types.Operator):
         return {'FINISHED'}
 
 
-# --- Attribute Editor (ui/attribute_editor.draw_history) --------------------------------------------------------
+# --- Attribute Editor (ui/ae_rows.draw_history) --------------------------------------------------------
 
 def _draw_input(layout, md, socket, label):
     from .. import compat

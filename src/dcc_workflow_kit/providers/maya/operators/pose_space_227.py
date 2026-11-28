@@ -2,7 +2,7 @@
 """Pose Space Deformation (Pose Interpolator, Pose Editor).
 
 Maya: Deform > Pose
-Space Deformation > Create Pose Interpolator on a joint makes ``<joint>_poseInterpolator`` (driver = the joint, factory
+Space Deformation > Create Pose Interpolator on a joint makes ``<joint>_poseInterpolator`` (driver = the joint, default
 Create neutral poses on, Driver twist axis X, interpolation Linear). A pose = the joint's rotation when it was added;
 ``poseInterpolatorAddShapePose`` makes a blendShape target named after the pose whose weight is the interpolator's
 output, in front of the skinCluster. With Linear and one pose at rz -90 the pose weight is linear in

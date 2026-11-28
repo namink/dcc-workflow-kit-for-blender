@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Maya G / Edit > Repeat / Recent Commands for every Maya command, not only key operators.
 
-Maya 2022: a menu item run from the UI goes into ``repeatLast``
+Maya: a menu item run from the UI goes into ``repeatLast``
 (Create > Polygon Primitives > Cube → "CreatePolygonCube", G makes the next cube); an option window's Apply records the
 command with its options (label "PolyPrimitive"); commands run by a script are not
 recorded; Edit > Repeat reads ``Repeat "<label>"``; Recent Commands lists the history.
@@ -20,7 +20,7 @@ import bpy
 from .. import results
 
 MAX = 30                     # history kept (Maya's Recent Commands list is a short history)
-HISTORY = []                 # oldest first: {"label", "action", "path", "mark"}
+HISTORY = []                 # oldest first: {"label", "action", "path", "mark"}; mark may also hold a launched modal's pointer
 # Blender operators Maya's repeatLast never records (selection, manipulator / transform, view, undo, UI).
 SKIP_PREFIXES = ("TRANSFORM_OT_", "VIEW3D_OT_view", "VIEW3D_OT_zoom", "VIEW3D_OT_move", "VIEW3D_OT_rotate",
                  "VIEW3D_OT_dolly", "VIEW3D_OT_navigate", "VIEW3D_OT_walk", "VIEW3D_OT_fly", "VIEW3D_OT_localview",
@@ -62,8 +62,8 @@ def repeatable(idname):
                 or idname.startswith(SKIP_PREFIXES) or idname in _node_edits())
 
 
-def _recordable(action):
-    """Apply the same command filter to menu/shelf actions as to key operators.
+def _command(action):
+    """Resolve item wrappers to their command, keeping tool/UI actions out.
 
     Resolve item wrappers so Select > All and RMB > Face do not replace an
     extrusion, while a wrapped modeling command still records its saved action.
@@ -73,15 +73,23 @@ def _recordable(action):
     while True:
         spec = menu_map.normalize(action)
         if spec is None or spec[0] not in {"op", "v3d"}:
-            return False
+            return None
         _kind, target, props = spec
         if target not in {"allset.menu_item", "allset.component_command", "allset.menu_whole_mesh"}:
             break
         item = props.get("item")
         if item in seen:
-            return False
+            return None
         seen.add(item)
         action = menu_map.MAP.get(item)
+    return target
+
+
+def _recordable(action):
+    """Apply the same command filter to menu/shelf actions as to key operators."""
+    target = _command(action)
+    if target is None:
+        return False
     # Smart Extrude explicitly saves a completed operation with its final values;
     # its registered drag helper remains excluded from Blender's history.
     if target == "allset.smart_extrude":
@@ -106,23 +114,36 @@ def _mark(context=None):
 
 
 def record(label, action, path=None, context=None):
-    """A Maya command finished (menu / shelf / marking menu / option window): remember it for G."""
+    """A Maya command finished or started a modal tool: remember it for G."""
     if path in NO_RECORD or not _recordable(action):
         return
     entry = {"label": label or "Maya Command", "action": action, "path": path, "mark": _mark(context)}
+    # A modal command registers only when it ends; G must replay its invocation, not its EXEC-only history entry.
+    window = (context or bpy.context).window
+    target = _command(action)
+    namespace, name = target.split(".", 1)
+    idname = namespace.upper() + "_OT_" + name
+    if window is not None:
+        from .. import live_refs
+        entry["mark"] += tuple(op.as_pointer() for op in live_refs.running_modals(window) if op.bl_idname == idname)
     if HISTORY and HISTORY[-1]["action"] == action and HISTORY[-1]["path"] == path:
+        live = {op.as_pointer() for op in (context or bpy.context).window_manager.operators if op.bl_idname == idname}
+        entry["mark"] += tuple(ptr for ptr in HISTORY[-1]["mark"][2:]
+                               if ptr in live and ptr not in entry["mark"][2:])
         HISTORY[-1] = entry          # the same command again: one row, newest position
     else:
         HISTORY.append(entry)
     del HISTORY[:-MAX]
 
 
-def _blender_after(context, mark):
+def _blender_after(context, mark, action=None):
     """Newest repeatable Blender operator registered after ``mark`` (index in wm.operators), or None."""
     ops = context.window_manager.operators
     for i in range(len(ops) - 1, -1, -1):
         op = ops[i]
-        if mark is not None and op.as_pointer() == mark[1]:
+        if mark is not None and (op.as_pointer() == mark[1] or
+                                 (op.as_pointer() in mark[2:] and
+                                  op.bl_idname.replace("_OT_", ".").lower() == _command(action))):
             return None
         if _operator_repeatable(op):
             return i
@@ -132,7 +153,7 @@ def _blender_after(context, mark):
 def last(context):
     """("kit", entry) / ("blender", operator index) / None: what G repeats now."""
     entry = HISTORY[-1] if HISTORY else None
-    idx = _blender_after(context, entry["mark"] if entry else None)
+    idx = _blender_after(context, entry["mark"] if entry else None, entry["action"] if entry else None)
     if idx is not None:
         return ("blender", idx)
     return ("kit", entry) if entry else None
@@ -186,9 +207,12 @@ def recent(context, limit=15):
     by_ptr = {op.as_pointer(): i for i, op in enumerate(ops)}
     rows = []
     for k, entry in enumerate(HISTORY):
-        pos = by_ptr.get(entry["mark"][1], -1) if entry["mark"][0] else -1
+        pos = max((by_ptr.get(ptr, -1) for ptr in entry["mark"][1:]), default=-1)
         rows.append((pos + 0.5, ("kit", k, entry["label"])))
-    rows += [(i, ("blender", i, op.bl_label)) for i, op in enumerate(ops) if _operator_repeatable(op)]
+    modal_ptrs = {(ptr, _command(entry["action"])) for entry in HISTORY for ptr in entry["mark"][2:]}
+    rows += [(i, ("blender", i, op.bl_label)) for i, op in enumerate(ops)
+             if (op.as_pointer(), op.bl_idname.replace("_OT_", ".").lower()) not in modal_ptrs
+             and _operator_repeatable(op)]
     rows.sort(key=lambda r: r[0], reverse=True)
     return [r[1] for r in rows[:limit]]
 

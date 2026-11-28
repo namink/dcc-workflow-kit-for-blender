@@ -58,11 +58,12 @@ def _bounds(persp, corners, size):
     return min(xs), min(ys), max(xs), max(ys)
 
 
-def fit(points, rot, win0, dist0, ortho, size, rect, factor=FIT, min_half=MIN_HALF):
+def fit(points, rot, win0, dist0, ortho, size, rect, factor=FIT, min_half=MIN_HALF, per_box=False):
     """(view_location, view_distance) that fit ``points`` into ``rect`` (region pixels).
 
     ``rect`` = (x0, y0, x1, y1), the visible part of the region; the box fills ``factor``
-    of it on its tighter axis and is centred in it. ``size`` = region (width, height).
+    of it on its tighter axis and is centred in it. ``size`` = region (width, height). ``per_box``: ``points`` are
+    the corners of several objects' own boxes, which set the perspective distance (Maya Frame Selected on objects).
     """
     corners = box_corners(points, min_half)
     centre = sum(corners, Vector()) / 8.0
@@ -123,18 +124,22 @@ def fit(points, rot, win0, dist0, ortho, size, rect, factor=FIT, min_half=MIN_HA
         return max((b[2] - b[0]) / (2.0 * hw), (b[3] - b[1]) / (2.0 * hh))
 
     if not ortho and win0[0][0] > 0.0 and win0[1][1] > 0.0:
-        # Maya viewFit in perspective (Maya 2026 for fitFactor 1.0 / 0.95 / 0.9): the camera stands back from
+        # perspective framing, like Maya's viewFit (any fit factor): the camera stands back from
         # the box centre by the box's half depth
         # along the view plus the distance at which the box's half extents across the view (the axis-aligned box
         # projected on the view's right / up axes) fill the field of view times the fit factor. The field of view is
         # the visible rect's (sidebars excluded). Maya aims the camera at the box centre: the centre is put on the
         # visible rect's middle.
+        # The half extents are half the width of the corners projected on each axis: for one box that is the box's
+        # own extent; with ``per_box`` the corners of each object's own box, so the space between objects apart
+        # counts only where a box is (Maya Frame Selected on several objects).
         fwd = rot @ Vector((0.0, 0.0, -1.0))
-        lo_c, hi_c = corners[0], corners[-1]
-        half = (hi_c - lo_c) / 2.0
+        span = max(max(p[i] for p in points) - min(p[i] for p in points) for i in range(3))
+        spread = points if per_box and span >= 1e-6 else corners   # a single point: the padded box
 
         def extent(axis):
-            return abs(axis.x) * half.x + abs(axis.y) * half.y + abs(axis.z) * half.z
+            ds = [axis.dot(Vector(p)) for p in spread]
+            return (max(ds) - min(ds)) / 2.0
         tan_w = (rect[2] - rect[0]) / max(size[0], 1.0) / win0[0][0]
         tan_h = (rect[3] - rect[1]) / max(size[1], 1.0) / win0[1][1]
         d = extent(fwd) + max(extent(right) / tan_w, extent(up) / tan_h) / factor

@@ -3,16 +3,16 @@
 
 - Create Polygon (Mesh Tools > Create Polygon): the kit tool ``allset.create_polygon_tool`` (object and edit mode) runs
   ``allset.create_polygon``: click = a point (Maya's construction plane: the ground in a perspective view, the view
-  plane through the origin in an orthographic one, ``joints.click_point``; grid / point snapping while held), press-drag
+  plane through the origin in an orthographic one, ``joint_tool.click_point``; grid / point snapping while held), press-drag
   moves it, middle-drag moves the last point, Backspace / Delete removes the last point, Enter completes a new
-  ``polySurfaceN`` (vertices in world space, pivot at the origin, lambert1), Limit points completes by itself, Esc drops
+  ``polySurfaceN`` (vertices in world space, pivot at the origin), Limit points completes by itself, Esc drops
   the points (with none, leaves the tool). The tool stays, like Maya's.
 - Append to Polygon (Mesh Tools > Append to Polygon): ``allset.append_polygon_tool`` (edit mode) runs
   ``allset.append_polygon``: the first click picks a border edge of the edited mesh (its two vertices start the new
   face, wound against the face they border), later clicks pick another border edge (its two vertices) or place a point
   (on the plane through the first edge that faces the view), Enter adds the face to the mesh.
 Tool Settings (Divisions, Limit points, Keep new faces planar, Texture) live in ``Scene.allset_poly_tools`` with
-Maya-style defaults. Pure bmesh parts (``polygon_points``, ``polygon_uvs``,
+the options of the Maya tool. Pure bmesh parts (``polygon_points``, ``polygon_uvs``,
 ``build_polygon``, ``append_face``) are tested headless (tests/test_step144_poly.py).
 """
 
@@ -312,7 +312,7 @@ def _ui_scale(context):
 
 
 def construction_point(context, region, rv3d, coord):
-    """Maya's construction plane point under ``coord`` (joints.click_point), with the snapping the user holds:
+    """Maya's construction plane point under ``coord`` (joint_tool.click_point), with the snapping the user holds:
     grid (X) rounds to one Maya unit, point (V) takes the nearest vertex of a visible mesh on screen."""
     from . import joints, units
     p = joints.click_point(region, rv3d, coord)
@@ -433,8 +433,11 @@ def _border_segments(ob):
 def _draw_view():
     context = bpy.context
     try:
+        editing = context.mode == 'EDIT_MESH'
+        if not editing and STATE["kind"] != 'CREATE':
+            return          # outside Edit Mode only a polygon being placed draws: the tool isn't looked up
         create = tool_active(context, CREATE_TOOL)
-        append = context.mode == 'EDIT_MESH' and tool_active(context, APPEND_TOOL)
+        append = editing and tool_active(context, APPEND_TOOL)
         if not (create or append):
             return
         region = context.region
@@ -480,7 +483,7 @@ def _view_ok(context):
 
 def create_polygon_object(context, points, s=None):
     """The new ``polySurfaceN`` from world ``points`` (Create Polygon completion). Returns the object or None."""
-    from . import mesh_maya, material
+    from . import mesh_maya
     s = s or settings(context)
     pts = polygon_points(points, s.cp_divisions, s.cp_keep_planar)
     if len(pts) < 3:
@@ -496,7 +499,6 @@ def create_polygon_object(context, points, s=None):
     ob = bpy.data.objects.new(BASE_NAME, me)
     context.view_layer.active_layer_collection.collection.objects.link(ob)
     mesh_maya._maya_rename(ob, BASE_NAME)
-    material.give_default(ob)
     if context.view_layer.objects.active is not None and context.view_layer.objects.active.mode != 'OBJECT':
         bpy.ops.object.mode_set(mode='OBJECT')
     for other in context.selected_objects:

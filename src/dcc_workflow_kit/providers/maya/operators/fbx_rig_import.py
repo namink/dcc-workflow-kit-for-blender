@@ -263,7 +263,9 @@ def _signed_permutation(m3, tol=1e-4):
             return None
         row /= n
         j = max(range(3), key=lambda c: abs(row[c]))
-        if abs(abs(row[j]) - 1.0) > tol or j in used:
+        # the other two entries, not |row[j]| - 1: that one grows with the square of the angle, so a joint turned
+        # by a fraction of a degree (a small PreRotation) passed and its translation lost the off-axis part
+        if any(abs(row[c]) > tol for c in range(3) if c != j) or j in used:
             return None
         used.add(j)
         out.append((j, 1.0 if row[j] > 0 else -1.0))
@@ -547,8 +549,14 @@ def _apply_conversion(context, arm, g):
     with context.temp_override(active_object=arm, object=arm, selected_objects=[arm],
                                selected_editable_objects=[arm]):
         bpy.ops.object.mode_set(mode='EDIT')
-        for eb in arm.data.edit_bones:
-            eb.transform(g, scale=True, roll=True)
+        # every bone's new rest from its own old values first: a connected bone's head is its parent's tail, so
+        # moving the bones one by one would carry a child's head along with its parent and then move it again
+        g3 = g.to_3x3()
+        new = [(eb, g @ eb.head, g @ eb.tail, g3 @ eb.z_axis) for eb in arm.data.edit_bones]
+        for eb, head, tail, _z in new:
+            eb.head, eb.tail = head, tail
+        for eb, _head, _tail, z in new:
+            eb.align_roll(z)
         bpy.ops.object.mode_set(mode=prev_mode if prev_mode != 'EDIT' else 'OBJECT')
     arm.matrix_world = Matrix.Identity(4)
     if hidden:

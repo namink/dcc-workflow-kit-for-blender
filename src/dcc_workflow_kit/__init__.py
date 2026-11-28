@@ -6,7 +6,7 @@ from . import lifecycle, localization, preferences, ui, core, migration
 from .providers import max as max_provider, maya
 
 bl_info = {'name': 'DCC Workflow Kit', 'author': 'DCC Workflow Kit contributors; original authors credited in THIRD_PARTY.md',
-           'version': (0, 2, 1), 'blender': (5, 3, 0), 'category': 'Interface',
+           'version': (0, 2, 2), 'blender': (5, 2, 0), 'category': 'Interface',
            'description': 'Choose 3ds Max + Blender or Maya + Blender workflows'}
 
 
@@ -74,3 +74,6 @@ def register():
 
 def unregister():
     lifecycle.deactivate(__name__)
+    wm = bpy.context.window_manager
+    if wm is not None:
+        wm.keyconfigs.update()

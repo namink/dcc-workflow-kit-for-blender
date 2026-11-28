@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Mesh > Fill Hole and Edit Mesh > Bridge with Maya's selection rules (#337).
 
-Fill Hole closes every hole whose border edges are selected with one n-gon, whatever the number of edges around it;
+Fill Hole closes every hole with a selected border edge with one n-gon, whatever the number of edges around it;
 with no edge selected (or the object selected) every hole of the mesh is closed. Bridge (``allset.bridge``,
 operators/poly_attribute_nodes.py) joins two sets of border edges (or faces) as a polyBridgeEdge node; a selection
 that is exactly one closed loop of border edges is filled with a single face instead, without divisions, like
@@ -41,10 +41,13 @@ def one_closed_loop(edges):
 
 
 def fill_holes(bm, edges):
-    """One n-gon over every closed loop of border edges among ``edges``; the new faces are selected. Returns them."""
+    """One n-gon over every hole that has a border edge among ``edges`` (one edge of a hole is enough, like Maya);
+    the new faces are selected. Returns them."""
+    from .component import border_run
     border = [e for e in edges if e.is_boundary]
     if not border:
         return []
+    border = list(border_run(border))
     faces = bmesh.ops.holes_fill(bm, edges=border, sides=0)["faces"]
     for f in faces:
         f.select_set(True)

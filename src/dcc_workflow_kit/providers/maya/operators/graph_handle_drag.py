@@ -309,7 +309,7 @@ class ALLSET_OT_graph_handle_drag(bpy.types.Operator):
                 return {'FINISHED'}
             handles = graph_handles.current(context)
         else:
-            if graph_move.key_tool(context) != 'MOVE':
+            if graph_move.key_tool(context) not in {'MOVE', 'REGION'}:
                 return {'PASS_THROUGH'}
             if any(kp.select_control_point for fc in _editable(context) for kp in fc.keyframe_points):
                 return {'PASS_THROUGH'}         # keys selected: the key drag moves them
@@ -439,7 +439,7 @@ def _finish_box():
     if p is None:
         return None
     wm = bpy.context.window_manager
-    running = any(op.bl_idname == "GRAPH_OT_select_box" for w in wm.windows for op in w.modal_operators)
+    running = any(op.bl_idname == "GRAPH_OT_select_box" for w in wm.windows for op in live_refs.running_modals(w))
     if not p["started"]:
         last = wm.operators[-1].as_pointer() if len(wm.operators) else 0
         p["started"] = running or last != p["last"]

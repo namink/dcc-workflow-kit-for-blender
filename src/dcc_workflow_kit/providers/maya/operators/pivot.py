@@ -25,7 +25,8 @@ import bpy
 from bpy.props import BoolProperty
 from mathutils import Matrix, Quaternion, Vector
 
-from .. import results
+from .. import live_refs, results
+from .. import update_summary
 from . import freeze
 from .manip_scale import TRANSFORM_MODALS
 
@@ -53,8 +54,7 @@ def axes_for(ob):
 
 # --- pure helpers (headless-testable) ---------------------------------------------------------
 
-def snapshot(ob):
-    """Channels and basis of ``ob`` before a pivot edit."""
+def _channels(ob):
     return {
         "basis": ob.matrix_basis.copy(),
         "location": Vector(ob.location), "delta_location": Vector(ob.delta_location),
@@ -64,6 +64,13 @@ def snapshot(ob):
         "delta_rotation_quaternion": ob.delta_rotation_quaternion.copy(),
         "scale": Vector(ob.scale), "delta_scale": Vector(ob.delta_scale),
     }
+
+
+def snapshot(ob):
+    """Channels and basis of ``ob`` (and the channels of its children) before a pivot edit."""
+    snap = _channels(ob)
+    snap["children"] = {ch.name: _channels(ch) for ch in ob.children if ch.parent_type == 'OBJECT'}
+    return snap
 
 
 def _restore_channels(ob, snap):
@@ -81,10 +88,20 @@ def _close(a, b):
     return all(abs(a[i][j] - b[i][j]) < EPS for i in range(4) for j in range(4))
 
 
-def _keep_children(ob, w_old, b_new_world):
-    """Children keep their world matrix when ``ob``'s world becomes ``b_new_world``."""
+def _keep_children(ob, w_old, b_new_world, before=None):
+    """Children keep their world matrix when ``ob``'s world becomes ``b_new_world``; like Maya (a pivot edit changes
+    no child's channels) their values stay too and the parent inverse takes the change. ``before``: their channels
+    from before a drag that changed them (Blender's Affect Only Parents)."""
     w_new = {ob: b_new_world}
     for ch in ob.children:
+        if ch.parent_type == 'OBJECT':
+            snap = (before or {}).get(ch.name)
+            if snap is not None:
+                _restore_channels(ch, snap)
+                ch.delta_location = snap["delta_location"]
+            ch.matrix_parent_inverse = (b_new_world.inverted_safe() @ w_old[ch]
+                                        @ ch.matrix_basis.inverted_safe())
+            continue
         frame = freeze.parent_frame(ch, w_old, w_new)
         ch.matrix_basis = frame.inverted_safe() @ w_old[ch]
 
@@ -111,8 +128,8 @@ def rewrite(ob, snap):
     d = b_final.inverted_safe() @ b1
     if ob.type in freeze.BAKE_TYPES and ob.data is not None and not _close(d, Matrix.Identity(4)):
         freeze.bake_into_data(ob, d)
-    if not _close(b_final, b1):
-        _keep_children(ob, w_old, frame @ b_final)
+    if not _close(b_final, b1) or snap.get("children"):
+        _keep_children(ob, w_old, frame @ b_final, snap.get("children"))
     if world_axes is not None:
         obj_rot = (frame @ b_final).to_3x3().normalized().to_quaternion()
         ob[PROP] = tuple(obj_rot.inverted() @ world_axes.to_quaternion())
@@ -257,7 +274,7 @@ def _op_key():
 
 def _transform_running():
     for window in bpy.context.window_manager.windows:
-        if any(op.bl_idname.startswith(TRANSFORM_MODALS) for op in window.modal_operators):
+        if any(op.bl_idname.startswith(TRANSFORM_MODALS) for op in live_refs.running_modals(window)):
             return True
     return False
 
@@ -341,9 +358,16 @@ def _tick():
     return None
 
 
+def watching():
+    """The watch runs. A file load drops its timer and the snapshots belong to the file before: then it has ended."""
+    if _watch["running"] and not bpy.app.timers.is_registered(_tick):
+        _watch.update(running=False, snaps={}, last_op=None)
+    return _watch["running"]
+
+
 def watch():
     """Start watching origin-only transforms (idempotent)."""
-    if _watch["running"]:
+    if watching():
         return
     _watch["running"] = True
     _watch["last_op"] = _op_key()
@@ -372,6 +396,7 @@ def maya_pivot_point(ts, mode):
     if want is None or ts.transform_pivot_point == want:
         return False
     if ts.transform_pivot_point in MAYA_PIVOT_POINT.values():
+        update_summary.wrote()
         ts.transform_pivot_point = want
         return True
     return False
@@ -391,6 +416,7 @@ def follow_lead(context, scene):
     _last_lead[0] = key
     if ob is None or not any(scene.transform_orientation_slots[index].type == ORIENT_NAME for index in PIVOT_SLOTS):
         return
+    update_summary.wrote()
     if PROP in ob:
         orient = _orientation(scene)
         if orient is not None:
@@ -441,7 +467,7 @@ class ALLSET_OT_reset_pivot(_PivotOp, bpy.types.Operator):
             reset_pivot(ob, self.position, self.orientation)
         if self.orientation:
             leave_custom_orientation(context.scene)
-        if _watch["running"]:
+        if watching():
             process(context)
         return {'FINISHED'}
 
@@ -460,7 +486,7 @@ class ALLSET_OT_bake_pivot(_PivotOp, bpy.types.Operator):
         leave_custom_orientation(context.scene, 'LOCAL')   # Maya: axis mode back to Object (P8)
         if not n:
             results.result(self, "No custom pivot orientation to bake")
-        if _watch["running"]:
+        if watching():
             process(context)
         return {'FINISHED'}
 
@@ -506,7 +532,7 @@ class ALLSET_OT_match_pivots(_PivotOp, bpy.types.Operator):
                 turned = match_pivot_orient(ob, turn) or turned
         if turned:
             leave_custom_orientation(context.scene, 'LOCAL')   # like Bake Pivot: the axes are the object's again
-        if _watch["running"]:
+        if watching():
             process(context)
         return {'FINISHED'}
 

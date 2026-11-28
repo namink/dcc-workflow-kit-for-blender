@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+# Large file, one preferences class that is mostly property declarations: grep the property name; draw() is near
+# the end of the class and the settings backup follows it.
 """Add-on preferences (Preferences > Add-ons > Maya Workflow Kit).
 
 Options for Maya units and parent mode
@@ -72,6 +74,35 @@ class ALLSET_AddonPreferences(bpy.types.PropertyGroup):
                ('BLENDER', "Blender", "Your active Blender keymap, unchanged; the Maya layout, menus and tools stay")),
         default='MAYA', update=_update_keymap_set)
 
+    @_quiet
+    def _update_blender_keys(self, context):
+        if not self.maya_mode:
+            return
+        from . import switch
+        if not switch._registered[0]:
+            return
+        from . import keymap
+        keymap.reapply()
+        bpy.context.window_manager.keyconfigs.update()
+
+    # #226: a few Blender keys next to the Maya keys (keymap/maya_patches_commands.patch_blender_keys), 3D View only.
+    # Off: the Maya keys stay as they are.
+    keep_blender_keys: bpy.props.BoolProperty(
+        name="Keep Blender Keys",
+        description="Keep a few Blender keys next to the Maya keys in the 3D View. Keys Maya mode already uses stay "
+                    "Maya keys",
+        default=False, update=_update_blender_keys)
+    blender_key_tab: bpy.props.BoolProperty(
+        name="Tab: Edit Mode Toggle",
+        description="Tab switches between Object Mode and Edit Mode in the 3D View, as in Blender. The operator "
+                    "search stays on Ctrl+F; with the Quad Draw tool, Tab stays Quad Draw's Tab",
+        default=True, update=_update_blender_keys)
+    blender_key_local_view: bpy.props.BoolProperty(
+        name="Alt+E: Local View",
+        description="Alt+E shows only the selected objects in the 3D View and back (Local View). In Object Mode and "
+                    "Pose Mode it replaces Alt+E Clear Rotation (Modify > Reset Transformations stays)",
+        default=True, update=_update_blender_keys)
+
     # Maya mode on/off (switch.py), kept across restarts. Off after install: enabling the
     # extension changes nothing until the user opts in (welcome dialog / button / switch).
     maya_mode: bpy.props.BoolProperty(name="Maya Mode", default=False, options={'HIDDEN'})
@@ -132,7 +163,7 @@ class ALLSET_AddonPreferences(bpy.types.PropertyGroup):
                     "bones hidden one by one (H) are still walked into, and an armature with controller tags "
                     "(Control > Tag As Controller) follows its controller hierarchy instead. Off: plain hierarchy",
         default=True)
-    # PR #125 extras with no Maya counterpart (no Maya 2022-2027 viewport header has a mode picker or a pulse):
+    # PR #125 extras with no Maya counterpart (no Maya viewport header has a mode picker or a pulse):
     # off by default.
     armature_mode_header: bpy.props.BoolProperty(
         name="Armature Mode Picker",
@@ -198,6 +229,18 @@ class ALLSET_AddonPreferences(bpy.types.PropertyGroup):
         name="Exit On Completion", default=True,
         description="Interactive Creation switches to the Select tool after one primitive; off, the tool keeps drawing primitives")
 
+    # Shelf Editor: a grip on each Shelf Contents row to move the button with the mouse (ui/shelf_editor_drag.py;
+    # off by default: Maya reorders Shelf Contents with Move Up / Move Down)
+    shelf_editor_drag: bpy.props.BoolProperty(
+        name="Shelf Editor Drag", update=lambda self, context: _redraw_all(context),
+        description="A grip on each Shelf Contents row of the Shelf Editor: click it, move the mouse up or down and "
+                    "click again to put the button there")
+
+    # Visualize > Time Slider Bookmarks > Show Bookmarks (on by default, like Maya; operators/bookmarks.py)
+    show_time_slider_bookmarks: bpy.props.BoolProperty(
+        name="Show Bookmarks", default=True, update=lambda self, context: _redraw_time_slider(context),
+        description="Draw the Time Slider bookmarks (timeline markers) as coloured ranges above the Time Slider ruler")
+
     # Graph Editor View > Snap Time To Selection (default off; Alt+/ toggles it).
     snap_time_to_selection: bpy.props.BoolProperty(
         name="Snap Time To Selection",
@@ -208,7 +251,7 @@ class ALLSET_AddonPreferences(bpy.types.PropertyGroup):
         name="Auto Frame", default=True,
         description="When the selection changes, the Graph Editor refits its value axis to the curves it shows "
                     "(Maya View > Auto Frame)")
-    # Dope Sheet View > Auto Frame (Maya displayAutoFitItem, factory off in the Dope Sheet)
+    # Dope Sheet View > Auto Frame (Maya displayAutoFitItem, off by default in the Dope Sheet)
     dope_auto_frame: bpy.props.BoolProperty(
         name="Dope Sheet Auto Frame",
         description="When the selection changes, the Dope Sheet frames all the keys it shows (Maya Dope Sheet "
@@ -245,9 +288,18 @@ class ALLSET_AddonPreferences(bpy.types.PropertyGroup):
         name="Scale Keys Manipulator", default=True,
         description="With the Scale Keys tool (r) the Graph Editor draws a box around the selected keys: drag a "
                     "side to scale them in time or value, a corner for both")
+    # Graph Editor Select > Pre-Select Highlight / Prefer Selected Curves (Maya check items, off like Maya;
+    # operators/graph_hover.py, operators/graph_region.py)
+    graph_preselect: bpy.props.BoolProperty(
+        name="Pre-Select Highlight", default=False,
+        description="The Graph Editor draws the curve under the mouse brighter before you click it")
+    graph_prefer_selected: bpy.props.BoolProperty(
+        name="Prefer Selected Curves", default=False,
+        description="While some curves have selected keys or tangents, Graph Editor clicks and marquees pick the "
+                    "keys of those curves first")
 
-    # Graph Editor depth 2: View > Show Buffer Curves (factory off),
-    # Curves > Default Tangent Weight (factory Non-weighted), Retime Tool Snap On Frame (factory off), Edit > Set Curve
+    # Graph Editor depth 2: View > Show Buffer Curves (default off),
+    # Curves > Default Tangent Weight (default Non-weighted), Retime Tool Snap On Frame (default off), Edit > Set Curve
     # Colors... rules (Maya curveRGBColor: attribute name -> colour; JSON list of [attribute, r, g, b]).
     graph_show_buffers: bpy.props.BoolProperty(
         name="Show Buffer Curves",
@@ -307,6 +359,12 @@ class ALLSET_AddonPreferences(bpy.types.PropertyGroup):
     cb_sync_graph: bpy.props.BoolProperty(
         name="Sync Selection in Graph Editor",
         description="Selecting channels in the Channel Box selects their curves, and S keys only the selected channels")
+    # Maya Preferences > Time Slider > Playback > Update View (ui/playback_redraw.py)
+    playback_update_view: bpy.props.EnumProperty(
+        name="Update View", default='ACTIVE',
+        items=(('ACTIVE', "Active", "While playing, only the active panel of the four view is redrawn (the one the mouse "
+                                    "was last in); every panel when playback stops, like Maya"),
+               ('ALL', "All", "Every panel is redrawn while playing")))
     cb_sync_timeline: bpy.props.BoolProperty(
         name="Sync Timeline Display",
         description="The Time Slider shows only the keys of the channels selected in the Channel Box")
@@ -324,8 +382,8 @@ class ALLSET_AddonPreferences(bpy.types.PropertyGroup):
         description="Joint Size of scenes whose length unit is metres or larger, until Display > Animation > "
                     "Joint Size sets one for the scene (a joint Radius is in centimetres, so Radius 1 is 1 cm "
                     "across: 1 = like Maya)")
-    # Graph Editor Select > Curve / Key / In Tangent / Out Tangent (Maya selectType pick masks, factory all on;
-    # Maya Graph Editor Select menu, operators/graph_key_menu.py).
+    # Graph Editor Select > Curve / Key / In Tangent / Out Tangent (Maya selectType pick masks, all on by default;
+    # Maya Graph Editor Select menu, operators/graph_select_masks.py).
     graph_select_curve: bpy.props.BoolProperty(
         name="Curve", default=True, description="Clicking or dragging in the Graph Editor can pick curves")
     graph_select_key: bpy.props.BoolProperty(
@@ -334,7 +392,7 @@ class ALLSET_AddonPreferences(bpy.types.PropertyGroup):
         name="In Tangent", default=True, description="Clicking or dragging in the Graph Editor can pick in tangents")
     graph_select_out: bpy.props.BoolProperty(
         name="Out Tangent", default=True, description="Clicking or dragging in the Graph Editor can pick out tangents")
-    # Tangents > Default In / Out Tangent (Maya keyTangent -global, factory Auto / Auto):
+    # Tangents > Default In / Out Tangent (Maya's global key tangents, default Auto / Auto):
     # the tangents of the keys the kit sets (S, Shift+W/E/R, Channel Box keys, Auto Key). Blender's own preference
     # is never written (#40).
     default_in_tangent: bpy.props.EnumProperty(
@@ -367,7 +425,7 @@ class ALLSET_AddonPreferences(bpy.types.PropertyGroup):
     maya_viewcube: bpy.props.BoolProperty(
         name="ViewCube", description="Maya ViewCube (or Blender's navigation gizmo, see Viewport Navigation) in "
                                      "the top right of the view", default=True, update=_update_navigation)
-    # #209: Blender's navigation gizmo instead of the Maya ViewCube (ui/view_furniture.py)
+    # #209: Blender's navigation gizmo instead of the Maya ViewCube (ui/view_furniture_state.py)
     view_navigation: bpy.props.EnumProperty(
         name="Viewport Navigation",
         items=(('VIEWCUBE', "Maya ViewCube", "Maya ViewCube in the top right of the view (click a face to look "
@@ -433,6 +491,14 @@ class ALLSET_AddonPreferences(bpy.types.PropertyGroup):
         default=True, update=_update_dock_colors)
     maya_view_axis: bpy.props.BoolProperty(
         name="View Axis", description="Maya axis triad in the bottom left of the view", default=True)
+    # Maya Heads Up Display lines in the bottom right of the view (ui/view_furniture.hud_lines), off like Maya's
+    maya_hud_current_frame: bpy.props.BoolProperty(
+        name="Current Frame", description="Heads Up Display: the current frame in the bottom right of the view")
+    maya_hud_focal_length: bpy.props.BoolProperty(
+        name="Focal Length", description="Heads Up Display: the view's focal length in the bottom right of the view")
+    maya_hud_scene_timecode: bpy.props.BoolProperty(
+        name="Scene Timecode", description="Heads Up Display: the current time as hh:mm:ss:ff in the bottom right "
+                                           "of the view")
     # Maya in-view messages (on by default).
     in_view_messages: bpy.props.BoolProperty(
         name="In-View Messages", description="Short fading messages in the view when you group, hide, toggle "
@@ -450,22 +516,115 @@ class ALLSET_AddonPreferences(bpy.types.PropertyGroup):
         description="3D View headers show Maya's panel menus (View, Shading, Lighting, Show, Renderer, "
                     "Panels) instead of Blender's (Blender menus stay as a submenu)",
         default=True)
+    # Off by default (Maya has none of these): Blender controls next to the Maya ones.
+    show_viewport_shading: bpy.props.BoolProperty(
+        name="Viewport Shading Controls",
+        description="Show Blender's shading modes and settings at the right of the Maya viewport toolbar",
+        default=False, update=_update_selection_wire)
+    show_view_cube_buttons: bpy.props.BoolProperty(
+        name="Camera / Projection Buttons",
+        description="Show the Camera View and Perspective/Orthographic buttons under the ViewCube",
+        default=False, update=_update_selection_wire)
+    renderer_engines: bpy.props.BoolProperty(
+        name="Renderer Engine Items",
+        description="The panel Renderer menu lists Eevee and Cycles, which set the scene's render engine for "
+                    "Rendered shading (off: one item, Rendered shading with the scene's engine; Maya's panel "
+                    "renderer changes only that panel)",
+        default=False)
+    material_preview_hdri: bpy.props.BoolProperty(
+        name="Material Preview HDRI",
+        description="A new Maya panel's Material Preview shows Blender's HDRI as its background and the look-dev "
+                    "spheres (off: the Maya view background)",
+        default=False)
+    grid_depth_pass: bpy.props.BoolProperty(
+        name="Grid Behind Surfaces",
+        description="Material Preview and EEVEE Rendered: the Maya grid doesn't show through the seams of opaque "
+                    "meshes (one more depth pass over the visible meshes each redraw)",
+        default=True, update=_update_selection_wire)
+    tool_settings_tab: bpy.props.BoolProperty(
+        name="Tool Settings Tab",
+        description="Tool Settings open as a tab of the Maya dock on the right, next to the Channel Box and the "
+                    "Attribute Editor (off: their own window, or a dock left of the viewport once docked)",
+        default=False, update=_update_dock_colors)
+
+    def _update_panel_memory(self, context):
+        from .ui import viewport_settings
+        viewport_settings.follow_preference()
+
+    remember_panel_settings: bpy.props.BoolProperty(
+        name="Remember Panel Settings",
+        description="Each Maya panel's display settings (shading, overlays, Show filters) come back in the next "
+                    "Blender session; kept in a file in the kit's extension folder",
+        default=False, update=_update_panel_memory)
+
+    @_quiet
+    def _update_outliner(self, context):
+        if self.outliner_columns:
+            from .ui import maya_outliner, outliner_tree     # switched on: Blender's columns show in every one
+            for space in outliner_tree._outliner_spaces():
+                if outliner_tree.is_tree(space):
+                    maya_outliner.show_columns(space)
+        for window in context.window_manager.windows:
+            for area in window.screen.areas:
+                if area.type == 'OUTLINER':
+                    area.tag_redraw()
+
+    outliner_instance_marks: bpy.props.BoolProperty(
+        name="Mark Instances in the Outliner",
+        description="Instance copies (Duplicate Special > Instance) and their groups show purple in the Maya "
+                    "Outliner, with a chain-link badge and an \"Instance of <source>\" tip on hover (off: like "
+                    "Maya, they look like other objects)",
+        default=False, update=_update_outliner)
+    unshare_instances: bpy.props.BoolProperty(
+        name="Freeze / Delete History Unshare Instances",
+        description="Freeze Transformations and Delete History first give an instance its own data, so edits on the "
+                    "original no longer show on it (off: like Maya, the instance keeps sharing its data)",
+        default=False)
+    outliner_columns: bpy.props.BoolProperty(
+        name="Outliner Column Icons", description="Blender's selectable / eye / render icons at the right of the "
+                                                  "Maya Outliner rows (each one also has its own toggle)",
+        default=False, update=_update_outliner)
+    outliner_select_column: bpy.props.BoolProperty(
+        name="Outliner Selectable", description="Blender's selectable arrow at the right of the Maya Outliner rows",
+        default=True, update=_update_outliner)
+    outliner_eye_column: bpy.props.BoolProperty(
+        name="Outliner Visibility", description="Blender's eye at the right of the Maya Outliner rows",
+        default=True, update=_update_outliner)
+    outliner_render_column: bpy.props.BoolProperty(
+        name="Outliner Render", description="Blender's render camera at the right of the Maya Outliner rows",
+        default=True, update=_update_outliner)
     menu_set: bpy.props.EnumProperty(
         name="Menu Set", description="Maya menu set: which menus follow the common ones",
         items=lambda self, context: _menu_set_items(), default=0)
+    @_quiet
+    def _update_status_line(self, context):
+        from . import switch
+        if switch._registered[0]:          # the Status Line row of the kit layouts (ui/status_line_row.py)
+            from .ui import status_line_row
+            status_line_row.sync_main(context)
+
     show_status_line: bpy.props.BoolProperty(
-        name="Status Line", description="Maya Status Line icons in the top bar", default=True)
+        name="Status Line", description="Maya Status Line icons in the top bar", default=True,
+        update=_update_status_line)
     # Maya layout parity.
     maya_toolbox: bpy.props.BoolProperty(
         name="Maya Tool Box", description="3D View toolbars show Maya's Tool Box in every mode: Select, Lasso, "
                                           "Paint Select, Move, Rotate, Scale, the last other tool and quick layout "
                                           "buttons (other tools stay on keys, menus and the shelf)",
         default=True, update=_update_selection_wire)
+    @_quiet
+    def _update_bottom_row(self, context):
+        from . import switch
+        if switch._registered[0]:          # Help Line and Command Line both off: no status bar (command_line)
+            from .command_line import sync_status_bar
+            sync_status_bar()
+
     show_command_line: bpy.props.BoolProperty(
-        name="Command Line", description="Python command line in the status bar", default=True)
+        name="Command Line", description="Python command line in the status bar", default=True,
+        update=_update_bottom_row)
     show_help_line: bpy.props.BoolProperty(
         name="Help Line", description="Maya-style help for the active tool in the status bar",
-        default=True)
+        default=True, update=_update_bottom_row)
 
     # Marking menus and hotbox.
     marking_menu_style: bpy.props.EnumProperty(
@@ -484,7 +643,7 @@ class ALLSET_AddonPreferences(bpy.types.PropertyGroup):
         name="Show All Menu Sets", description="Hotbox shows the menus of every menu set, not only "
                                                "the current one (on by default, like Maya)",
         default=True)
-    # Extra marking menu behaviour (marking/engine.Params), off by default.
+    # Extra marking menu behaviour (marking/menu_layout.Params), off by default.
     mm_quick_gestures: bpy.props.BoolProperty(
         name="Quick Gestures",
         description="Marking menus and the hotbox's menus stay hidden while the pointer keeps moving and show after "
@@ -546,6 +705,9 @@ class ALLSET_AddonPreferences(bpy.types.PropertyGroup):
         description="Autosave folder when the destination is Named Folder")
     # Maya option window values (operators/option_windows.py).
     option_settings: bpy.props.StringProperty(options={'HIDDEN'})   # JSON {window key: {field: value}}
+    # The user's own edits of the Maya keys while they are out (Blender mode), and of Blender's keys the Maya keys
+    # switch off while they are on (keymap/user_keys.py); unset when there is nothing to keep.
+    user_keys: bpy.props.StringProperty(options={'HIDDEN'})   # JSON {"maya": [...], "blender": [...]}
 
     # Scene concepts.
     parent_mode: bpy.props.EnumProperty(
@@ -569,6 +731,12 @@ class ALLSET_AddonPreferences(bpy.types.PropertyGroup):
         name="Smart Extrude", description="Shift+drag a Move/Rotate/Scale manipulator on faces "
                                           "or edges extrudes them and transforms the new ones",
         default=True)
+    # Off by default: Ctrl+drag on a Move axis uses the other two axes, like Maya.
+    manip_ctrl_snap: bpy.props.BoolProperty(
+        name="Ctrl+Drag on a Move Axis Snaps",
+        description="Ctrl+drag on a Move manipulator axis moves along that axis with grid snapping "
+                    "(off: it moves in the plane of the other two axes, like Maya)",
+        default=False)
     # Off by default: it keeps extra data in the user's files (operators/model_history.py).
     model_history_files: bpy.props.BoolProperty(
         name="Persistent Modeling History",
@@ -630,6 +798,7 @@ class ALLSET_AddonPreferences(bpy.types.PropertyGroup):
         row.operator("allset.new_maya_scene", icon='FILE_NEW')
         row.operator("allset.maya_layout_here", icon='WORKSPACE')
         box.prop(self, "keymap_set")
+        _draw_blender_keys(self, box)
         box.prop(self, "start_in_maya_layout")
         box.prop(self, "new_scene_time")
         box.prop(self, "maya_layout_on_open")
@@ -651,6 +820,7 @@ class ALLSET_AddonPreferences(bpy.types.PropertyGroup):
         row.prop(self, "maya_units")
         row.prop(self, "smart_duplicate")
         row.prop(self, "smart_extrude")
+        box.prop(self, "manip_ctrl_snap")
         box.prop(self, "model_history_files")
         box.prop(self, "metre_joint_size")
         box.prop(self, "project_root")
@@ -705,6 +875,30 @@ class ALLSET_AddonPreferences(bpy.types.PropertyGroup):
         row = box.row()
         row.prop(self, "in_view_messages")
         row.prop(self, "option_boxes_floating")
+        row = box.row()
+        row.prop(self, "tool_settings_tab")
+        row.prop(self, "remember_panel_settings")
+        row.prop(self, "grid_depth_pass")
+
+        box = layout.box()
+        box.label(text="Blender Controls (Maya has none of these)")
+        row = box.row()
+        row.prop(self, "show_viewport_shading")
+        row.prop(self, "show_view_cube_buttons")
+        row.prop(self, "material_preview_hdri")
+        row.prop(self, "renderer_engines")
+        row = box.row()
+        row.prop(self, "outliner_columns")
+        sub = row.row()
+        sub.active = self.outliner_columns
+        sub.prop(self, "outliner_select_column")
+        sub.prop(self, "outliner_eye_column")
+        sub.prop(self, "outliner_render_column")
+        row = box.row()
+        row.prop(self, "outliner_instance_marks")
+        row.prop(self, "unshare_instances")
+        row = box.row()
+        row.prop(self, "shelf_editor_drag")
 
 
 # Undo depth (B6): Maya's undo queue is infinite, Blender keeps 32 steps
@@ -875,6 +1069,36 @@ def register():
 
 def unregister():
     _unregister_classes()
+
+
+def _redraw_all(context):
+    for win in context.window_manager.windows:
+        for area in win.screen.areas:
+            area.tag_redraw()
+
+
+def _redraw_time_slider(context):
+    for win in context.window_manager.windows:
+        for area in win.screen.areas:
+            if area.type in {'DOPESHEET_EDITOR', 'PROPERTIES'}:
+                area.tag_redraw()
+
+
+def _draw_blender_keys(prefs, layout):
+    """The "Keep Blender Keys" choice (#226), used only with the kit's Maya keys."""
+    col = layout.column(align=True)
+    col.active = prefs.keymap_set == 'MAYA'
+    col.prop(prefs, "keep_blender_keys")
+    if not prefs.keep_blender_keys:
+        return
+    row = col.row(align=True)
+    row.active = prefs.keymap_set == 'MAYA'
+    row.separator(factor=2.0)
+    row.prop(prefs, "blender_key_tab")
+    row.prop(prefs, "blender_key_local_view")
+    row = col.row()
+    row.separator(factor=2.0)
+    row.label(text="Keys Maya mode uses stay Maya keys: Ctrl+Tab, Q, W, E, R, . (period), F, Space", icon='INFO')
 
 
 def get(context=None):

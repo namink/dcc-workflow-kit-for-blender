@@ -1,3 +1,15 @@
+# DCC Workflow Kit 0.2.2
+
+新版安装包适用于 Blender 5.2 LTS 和 5.3。Windows 5.3.0 已通过实测，5.2 尚未在本机验证。Blender 4.2.9 至 5.1 请使用 [0.1.8 兼容包](https://github.com/namink/dcc-workflow-kit-for-blender/releases/tag/v0.1.8)。
+
+- Maya 工作流更新到 0.26.0。新增 Hypershade 节点标记菜单、Tab 创建节点、中键拖放连线、UV 软选择颜色和关节标记菜单。上游支持 Blender 5.2 LTS、5.3。[上游更新](https://github.com/5hyuns/maya-workflow-kit-for-blender/releases/tag/v0.26.0)
+- 3ds Max 工作流更新到 MaxFlow 0.8.5，合入简体中文词表。上游原包面向 Blender 5.0 至 5.2，DCC 另在 5.3 实测。[上游项目](https://github.com/neom315/blender-max)
+- 按 Autodesk 简体中文术语统一挤出面板中的「厚度」「局部平移 Z」「保持面的连接性」等词条。
+
+Windows Blender 5.3.0 通过安装验证、工具架导入、Hypershade 材质创建及 15 项 GUI 检查。逐项工具尚未全部验收，卸载后完整键表与初始基线的差异在旧版也可复现。
+
+请下载 Assets 中的安装 ZIP，在 Blender 偏好设置中选择「从磁盘安装」。已自定义工具架或快捷键时，安装前可先导出设置。
+
 # DCC Workflow Kit 0.2.1 · 简体中文修订
 
 - Maya：挤出等视图内编辑器、UV 统计和超图现在跟随界面语言。挤出字段按 Autodesk 简体中文文档使用「厚度」「局部平移 Z」「偏移」「分段」「保持面的连接性」。

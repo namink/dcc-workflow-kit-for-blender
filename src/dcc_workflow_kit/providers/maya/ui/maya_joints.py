@@ -22,82 +22,53 @@ Maya joints; Stick or Wire one line per bone and no spheres; B-Bone a wire box p
 curve) and Envelope the wire head and tail spheres joined along the bone, both in the joint colours. The kit draws
 only in 3D Views of the Maya layout's workspaces where Blender's Bones overlay is off — the kit turns it off once per
 screen; a view whose Bones overlay is turned back on shows Blender's bones and no kit joints.
+
+The parts live in their own modules: ``maya_joints_views`` (which views draw), ``maya_joints_shapes`` (one joint's
+shapes and colours), ``maya_joints_arrays`` (all joints at once in arrays), ``maya_joints_cache`` (what changed since
+the lines were built) and ``maya_joints_pick`` (picking drawn joints); every name of theirs is importable from here
+too. This module keeps the build chain, the click entry points, the handlers and the draw together: tests replace or
+count functions here (``_parts``, ``skeleton``, ``transforming``, ``region_pick`` ...), and a replaced function is
+only seen by callers that look it up in this module.
 """
 
 import math
 
 import bpy
-from mathutils import Matrix, Quaternion, Vector
+from mathutils import Quaternion
 
-UNSELECTED = (0x26 / 255, 0.0, 0x43 / 255)
-SELECTED = (1.0, 1.0, 1.0)
-LEAD = (0x43 / 255, 1.0, 0xa3 / 255)
-AXIS_COLORS = ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
-SEGMENTS = 32
+from .maya_joints_views import (armatures, _ARMS, is_maya_view, _LAYER_GEN, maya_workspace, release_all, see_through,
+                                settle, SETTLED, _view_skeletons)  # noqa: F401
+from .maya_joints_shapes import (AXIS_COLORS, bbone_lines, bone_lines, _box_lines, _coll_hidden, colours, _COS,
+                                 drawn_radius, envelope_lines, _HIDDEN, Joint, joint_segments, LEAD, _maya_q,
+                                 MAYA_RADIUS, own_shape_lines, _radius_scale, SEGMENTS, SELECTED, selection,
+                                 shape_lines, _shape_matrix, SHAPE_TYPES, _shown, _SIN, sphere_lines, STICK_TYPES,
+                                 UNSELECTED)  # noqa: F401
+from .maya_joints_arrays import (_BONE_INDEX, _bone_index, _bone_rows, _BONE_SEGMENTS, _box_array, _COLOURS,
+                                 _control_placement, _control_points, _distinct_points, _euler_xyz,
+                                 _FORMATS, _join, _join_view, joined_segments, _joint_rgba, _joint_selection,
+                                 JointList, _Lines, _owner, _paint, _part_arrays, placed_points, _pose_raw,
+                                 _pose_read, _RING, _RING_INDEX, _segments, shape_moves, _sphere_index, _sphere_owner,
+                                 _STILL_MODIFIERS, _vertex_buffer)  # noqa: F401
+from .maya_joints_cache import (_ALL_EDITS, _Build, _build_key, _BUILDS, changed, _DATA_USERS, _drop_widget,
+                                _edit_signature, edit_stamp, _EDITS, _forget_build, _GEN, _JOINED, _LEVELS, light_stamp,
+                                _lines_hold, _mark, _moved_bones, _moved_skeletons, _note, _PARTS, _PICK, _register,
+                                _same_list, _same_raw, _SCALE, _SHAPE_PTRS, _SHAPE_USERS, _since, _SKEL_EDITS,
+                                _SKEL_LIGHT, _stamp, _top, _TOUCHED, _touched, _WIDGET_GEN, _WIDGETS, _WORLD,
+                                _world_key)  # noqa: F401
+from .maya_joints_pick import (_box_bounds, _DEPTHS, _drawn_pick_lines, _in_poly, _NEAREST, _nearest, _pick_current,
+                               _PICK_MEMO, pick_memo, _PICK_PLAN, _pick_plan, _region_depths, _screen, _seg_cross,
+                               _segment_columns, _segment_distances, segments_touch, _touching,
+                               _unpickable)  # noqa: F401
+
+from .. import update_summary
+
 LINE_PX = 1.0
-SETTLED = "allset_bones_settled"      # screen ID prop: the kit turned Blender's Bones overlay off in its 3D Views
-MAYA_RADIUS = 1.0                     # Maya joint Radius default
-STICK_TYPES = {'STICK', 'WIRE'}       # the skeleton's Blender display type: one line per bone, no spheres
-SHAPE_TYPES = {'BBONE', 'ENVELOPE'}   # display types drawn as wire versions of Blender's bone shapes
 
-_HIDDEN = "HIDDEN"                    # ui/layer_joints.HIDDEN
 _handle = []
-_GEN = [0]          # one generation per update or new frame that can change a drawn joint (``_note``, ``changed``)
 _CACHE = {}         # space pointer -> (key, points, colours)
-_COS = [math.cos(2.0 * math.pi * i / SEGMENTS) for i in range(SEGMENTS)]
-_SIN = [math.sin(2.0 * math.pi * i / SEGMENTS) for i in range(SEGMENTS)]
 
 
 # --- which views ------------------------------------------------------------------------------------------------
-
-def maya_workspace(workspace):
-    from .. import switch
-    try:
-        return switch.is_maya_workspace(workspace)
-    except (ReferenceError, AttributeError):
-        return False
-
-
-def is_maya_view(space, workspace):
-    """A 3D View where the kit draws the joints (and Blender's bones are off)."""
-    from . import toolbox
-    return (space is not None and workspace is not None and space.type == 'VIEW_3D' and not toolbox.is_toolbox(space)
-            and space.overlay.show_overlays and not space.overlay.show_bones
-            and space.show_object_viewport_armature and maya_workspace(workspace))
-
-
-def settle(window):
-    """Turn Blender's Bones overlay off in the 3D Views of ``window``'s screen once (Maya layout workspaces only)."""
-    from . import toolbox
-    screen = window.screen
-    # temporary screens (Preferences, file browser windows) can't be a context override and hold no 3D View
-    if screen is None or screen.is_temporary or screen.get(SETTLED) or not maya_workspace(window.workspace):
-        return False
-    changed = False
-    with bpy.context.temp_override(window=window, screen=screen):
-        for area in screen.areas:
-            space = area.spaces.active
-            if area.type == 'VIEW_3D' and not toolbox.is_toolbox(space) and space.overlay.show_bones:
-                space.overlay.show_bones = False
-                area.tag_redraw()
-                changed = True
-    screen[SETTLED] = True
-    return changed
-
-
-def release_all():
-    """Give Blender's bones back in every screen the kit settled (disable / Maya mode off)."""
-    from . import toolbox
-    for screen in bpy.data.screens:
-        if not screen.get(SETTLED):
-            continue
-        for area in screen.areas:
-            space = area.spaces.active
-            if area.type == 'VIEW_3D' and not toolbox.is_toolbox(space):
-                space.overlay.show_bones = True
-                area.tag_redraw()
-        del screen[SETTLED]
-
 
 def _tick():
     try:
@@ -110,48 +81,17 @@ def _tick():
 
 # --- joints ------------------------------------------------------------------------------------------------------
 
-def drawn_radius(bone, scene, arm_scale=1.0, scale=None):
-    """World radius of the drawn joint sphere: 0.5 x Radius x Joint Size, in centimetres (``units.radius_unit``).
-    ``scale``: (Joint Size, radius unit) read once for a whole skeleton (``_radius_scale``)."""
-    from ..operators import joints
-    r = float(bone.get(joints.RADIUS, MAYA_RADIUS))
-    size, unit = scale if scale is not None else _radius_scale(scene)
-    return 0.5 * r * size * unit * arm_scale
-
-
-def _radius_scale(scene):
-    """(Joint Size, Blender units per Radius unit) of ``scene``."""
-    from ..operators import joint_display, units
-    return joint_display.joint_size(scene), units.radius_unit(scene)
-
-
-def _maya_q(bone):
-    from ..operators import joints
-    q = bone.get(joints.MAYA_FRAME)
-    return Quaternion(q).to_matrix() if q is not None else None
-
-
-class Joint:
-    __slots__ = ("name", "parent", "centre", "frame", "radius", "shape", "children", "state")
-
-    def __init__(self, name, parent, centre, frame, radius, shape=None, state=None):
-        self.name, self.parent, self.centre, self.frame, self.radius = name, parent, centre, frame, radius
-        self.shape = shape          # (custom shape object, world matrix) or None
-        self.children = []
-        self.state = state          # ui/layer_joints: HIDDEN (not drawn) / TEMPLATE / REFERENCE, None = normal
-
-
 def skeleton(ob, scene):
     """{name: Joint} of armature object ``ob`` in world space: the joints not hidden by their own flags, with their
     display layer state (a joint a layer hides is kept for its parent's bone, ``joint_segments`` draws nothing for
     it)."""
-    from ..operators import joints
+    from ..operators import joint_display, joints
     from ..operators.joint_edit import local_frame
     from . import layer_joints
     layered = layer_joints.state(ob)
     mw = ob.matrix_world
     m3 = mw.to_3x3()
-    s = max(mw.to_scale())
+    s = joint_display.skeleton_scale(ob)
     scale = _radius_scale(scene)
     out = {}
     if ob.mode == 'EDIT':
@@ -181,241 +121,11 @@ def skeleton(ob, scene):
     return out
 
 
-def _coll_hidden(bone):
-    return bool(bone.collections) and not any(c.is_visible_effectively for c in bone.collections)
-
-
-def _shown(ob, names=None, index=None):
-    """Bool per pose bone of ``ob`` (pose bone order): not hidden by its own flag (``compat.bone_hidden``) or by its
-    bone collections (``_coll_hidden``), read for the whole skeleton at once. ``names`` / ``index``: the pose bones'
-    names and {name: row} when the caller has them."""
-    import numpy as np
-    pbs = ob.pose.bones
-    hide = np.zeros(len(pbs), bool)
-    pbs.foreach_get("hide", hide)
-    colls = ob.data.collections_all
-    if len(colls):
-        if index is None:
-            index = {name: i for i, name in enumerate(names if names is not None else pbs.keys())}
-        member, visible = np.zeros(len(pbs), bool), np.zeros(len(pbs), bool)
-        for c in colls:
-            rows = [index[n] for n in c.bones.keys() if n in index]
-            if rows:
-                member[rows] = True
-                if c.is_visible_effectively:
-                    visible[rows] = True
-        hide |= member & ~visible
-    return ~hide
-
-
-def _shape_matrix(pb):
-    """Armature-space matrix Blender draws ``pb``'s custom shape with."""
-    src = pb.custom_shape_transform or pb
-    scale = Vector(pb.custom_shape_scale_xyz)
-    if pb.use_custom_shape_bone_size:
-        scale = scale * pb.bone.length
-    return (src.matrix @ Matrix.Translation(pb.custom_shape_translation)
-            @ pb.custom_shape_rotation_euler.to_matrix().to_4x4() @ Matrix.Diagonal(scale.to_4d()))
-
-
-def selection(ob, joints_):
-    """(selected joint names, lead name or None) of ``ob`` in Maya's terms."""
-    from ..operators import joint_preview
-    from ..operators.joint_selection import _edit_selected
-    from .channel_box import bone_selected
-    if joint_preview.running() and joint_preview.STATE.get("ob") == ob.name:
-        cur = joint_preview.STATE.get("current")
-        return ({cur} if cur else set()), cur          # the Joint Tool: the newest joint is the selection
-    if ob.mode == 'EDIT':
-        sel = {eb.name for eb in ob.data.edit_bones if eb.name in joints_ and _edit_selected(eb)}
-        act = ob.data.edit_bones.active
-    elif ob.mode == 'POSE':
-        sel = {pb.name for pb in ob.pose.bones if pb.name in joints_ and bone_selected(pb)}
-        act = ob.data.bones.active
-    else:
-        if not ob.select_get():
-            return set(), None
-        roots = [n for n, j in joints_.items() if j.parent is None]
-        lead = roots[0] if roots and bpy.context.view_layer.objects.active == ob else None
-        return set(roots), lead
-    lead = act.name if act is not None and act.name in sel else None
-    return sel, lead
-
-
-def colours(joints_, sel, lead):
-    """{name: colour}: own selection first, else its Template / Reference layer colour, else the nearest selected
-    joint above it, else unselected."""
-    from .layer_joints import COLOURS
-    out = {}
-
-    def colour(name):
-        if name in out:
-            return out[name]
-        if name == lead:
-            c = LEAD
-        elif name in sel:
-            c = SELECTED
-        elif joints_[name].state in COLOURS:
-            c = COLOURS[joints_[name].state]
-        else:
-            p = joints_[name].parent
-            c = colour(p) if p in joints_ else UNSELECTED
-        out[name] = c
-        return c
-
-    for n in joints_:
-        colour(n)
-    return out
-
-
-def sphere_lines(c, frame, r):
-    """Line segment end points of the three great circles."""
-    x, y, z = frame.col[0], frame.col[1], frame.col[2]
-    pts = []
-    for a, b in ((x, y), (y, z), (x, z)):
-        ring = [c + (a * _COS[i] + b * _SIN[i]) * r for i in range(SEGMENTS)]
-        for i in range(SEGMENTS):
-            pts += (ring[i], ring[(i + 1) % SEGMENTS])
-    return pts
-
-
-def bone_lines(parent, child):
-    """The eight edges of the bone pyramid from ``parent`` to ``child`` (Joint), or [] when they overlap."""
-    d = child.centre - parent.centre
-    length = d.length
-    if length <= parent.radius + child.radius or length < 1e-9:
-        return []
-    u = d / length
-    base = parent.centre + u * parent.radius
-    apex = child.centre - u * child.radius
-    a = parent.frame.col[1] - u * parent.frame.col[1].dot(u)
-    if a.length < 1e-6:
-        a = parent.frame.col[2] - u * parent.frame.col[2].dot(u)
-    a.normalize()
-    b = u.cross(a)
-    r = parent.radius
-    corners = [base + a * r, base + b * r, base - a * r, base - b * r]
-    pts = []
-    for i in range(4):
-        pts += (corners[i], corners[(i + 1) % 4], corners[i], apex)
-    return pts
-
-
-def _box_lines(rings):
-    """Edges of a tube through ``rings`` (each four corners): the rings and the lines joining their corners."""
-    pts = []
-    for k, ring in enumerate(rings):
-        for i in range(4):
-            pts += (ring[i], ring[(i + 1) % 4])
-            if k:
-                pts += (rings[k - 1][i], ring[i])
-    return pts
-
-
-def bbone_lines(ob, bone):
-    """World edges of Blender's B-Bone box of ``bone`` (pose bone, or edit bone in Edit Mode): ``bbone_x`` /
-    ``bbone_z`` half sizes, one box per segment along the bent bone in Object / Pose Mode."""
-    mw = ob.matrix_world
-    data = bone.bone if isinstance(bone, bpy.types.PoseBone) else bone
-    x, z = data.bbone_x, data.bbone_z
-    corners = (Vector((x, 0.0, z)), Vector((-x, 0.0, z)), Vector((-x, 0.0, -z)), Vector((x, 0.0, -z)))
-    base = mw @ bone.matrix
-    frames = []
-    if isinstance(bone, bpy.types.PoseBone) and data.bbone_segments > 1:
-        try:
-            frames = [base @ bone.bbone_segment_matrix(i, rest=False) for i in range(data.bbone_segments + 1)]
-        except (RuntimeError, ValueError):
-            frames = []
-    if not frames:
-        frames = [base, base @ Matrix.Translation((0.0, bone.length, 0.0))]
-    return _box_lines([[f @ c for c in corners] for f in frames])
-
-
-def envelope_lines(ob, bone):
-    """World edges of Blender's Envelope shape of ``bone``: wire spheres of the head and tail radius joined by four
-    lines along the bone."""
-    mw = ob.matrix_world
-    data = bone.bone if isinstance(bone, bpy.types.PoseBone) else bone
-    s = max(mw.to_scale())
-    m = mw @ bone.matrix
-    frame = m.to_3x3().normalized()
-    head, tail = mw @ bone.head, mw @ bone.tail
-    rh, rt = data.head_radius * s, data.tail_radius * s
-    pts = sphere_lines(head, frame, rh) + sphere_lines(tail, frame, rt)
-    for axis in (frame.col[0], -frame.col[0], frame.col[2], -frame.col[2]):
-        pts += (head + axis * rh, tail + axis * rt)
-    return pts
-
-
-def own_shape_lines(ob, kind):
-    """{bone name: world edges} of every visible bone of ``ob`` drawn as Blender's ``kind`` shape (B-Bone /
-    Envelope), custom-shaped bones left out (they draw their shape)."""
-    from .. import compat
-    from . import layer_joints
-    layered = layer_joints.state(ob)       # hidden by a display layer or a hidden joint above: nothing drawn
-    fn = bbone_lines if kind == 'BBONE' else envelope_lines
-    out = {}
-    if ob.mode == 'EDIT':
-        for eb in ob.data.edit_bones:
-            if not (eb.hide or _coll_hidden(eb) or layered.get(eb.name) == _HIDDEN):
-                out[eb.name] = fn(ob, eb)
-    else:
-        for pb in ob.pose.bones:
-            if not (compat.bone_hidden(pb) or _coll_hidden(pb.bone) or pb.custom_shape is not None
-                    or layered.get(pb.name) == _HIDDEN):
-                out[pb.name] = fn(ob, pb)
-    return out
-
-
-def shape_lines(ob, matrix, depsgraph):
-    """World line segments of a custom shape's edges."""
-    try:
-        ev = ob.evaluated_get(depsgraph)
-        me = ev.to_mesh()
-    except (RuntimeError, AttributeError):
-        return []
-    try:
-        vs = [matrix @ v.co for v in me.vertices]
-        return [vs[i] for e in me.edges for i in e.vertices]
-    finally:
-        ev.to_mesh_clear()
-
-
-def joint_segments(js, name, depsgraph=None):
-    """World line segments drawn for joint ``name``: its sphere and its bones to the children (a bone belongs to
-    its parent joint), or its custom shape; nothing for a joint a display layer hides. Flat list of end points."""
-    j = js[name]
-    if j.state == _HIDDEN:
-        return []
-    if j.shape is not None:
-        return shape_lines(j.shape[0], j.shape[1], depsgraph) if depsgraph is not None else []
-    pts = sphere_lines(j.centre, j.frame, j.radius)
-    for cn in j.children:
-        if js[cn].shape is None:
-            pts += bone_lines(j, js[cn])
-    return pts
-
-
 def depth(js, name):
     n, p = 0, js[name].parent
     while p in js:
         n, p = n + 1, js[p].parent
     return n
-
-
-def _screen(context, pts):
-    """(a, b, ok) screen end points of segments ``pts`` (pairs) in the context region; ok = both in front."""
-    from ..operators.preselect import project
-    region, rv3d = context.region, context.region_data
-    xy, front = project([tuple(p) for p in pts], rv3d.perspective_matrix, region.width, region.height)
-    return xy[0::2], xy[1::2], front[0::2] & front[1::2]
-
-
-def _unpickable(ob, js):
-    """Joints of ``js`` that can't be picked: hidden / Template / Reference by a display layer, or Blender's
-    unselectable bones."""
-    bones = ob.data.edit_bones if ob.mode == 'EDIT' else ob.data.bones
-    return {n for n, j in js.items() if j.state is not None or (n in bones and bones[n].hide_select)}
 
 
 def _shape_points(shape, matrix, depsgraph):
@@ -465,107 +175,6 @@ def _pick_lines(context, ob, js):
     return kept, xy[0::2], xy[1::2], front[0::2] & front[1::2], owner
 
 
-_PICK_PLAN = {}   # skeleton object pointer -> (its ``_PICK`` entry, what clicks reuse of it: ``_pick_plan``)
-
-
-def _pick_current(context, ob):
-    """The lines kept for skeleton ``ob`` (``_PICK``) are still its drawn lines: nothing that can move them reached
-    it since they were built (a selection or a change to another skeleton doesn't)."""
-    layer = getattr(context, "view_layer", None) or bpy.context.view_layer
-    ptr = ob.as_pointer()
-    key = _world_key(context.scene, layer)
-    if _WORLD[0] != key:
-        dirt = _since(_WORLD[0], key)
-        if dirt is None or dirt[1] is not None or dirt[3] or ptr in dirt[0]:
-            return False
-        if _radius_scale(context.scene) != _SCALE[0]:
-            return False
-    b = _BUILDS.get(ptr)
-    return b is None or b.level is None
-
-
-def _pick_plan(ptr, got):
-    """What every click reuses of pick lines ``got`` (``_PICK``): the segments joined once, their joints; per set of
-    pickable joints the kept segments, per view their screen ends."""
-    import numpy as np
-    held = _PICK_PLAN.get(ptr)
-    if held is not None and held[0] is got:
-        return held[1]
-    jl, chunks = got
-    pts, owner = [], []
-    for p, who, index in chunks:
-        if index is not None:
-            p, who = p[index], who[index]
-        if len(p):
-            pts.append(p)
-            owner.append(who)
-    plan = None
-    if pts:
-        pts, owner = np.concatenate(pts), np.concatenate(owner)
-        plan = {"pts": pts.reshape(-1, 2, 3), "seg": owner[0::2], "pickable": None, "view": None,
-                "state": np.array([jl.js[n].state is None for n in jl.names], bool)}
-    if len(_PICK_PLAN) > 32:
-        _PICK_PLAN.clear()
-    _PICK_PLAN[ptr] = (got, plan)
-    return plan
-
-
-def _drawn_pick_lines(context, ob):
-    """``_pick_lines`` of skeleton ``ob`` (Object / Pose Mode, drawn as Maya joints) from the lines last drawn for it,
-    when nothing has changed them since they were built (``_joined``), + its joint list; else None. A click then
-    projects the drawn lines instead of reading the skeleton again; the lines joined, the pickable ones and their
-    screen ends in a view are kept for the next click."""
-    import numpy as np
-    from ..operators.preselect import project
-    ptr = ob.as_pointer()
-    got = _PICK.get(ptr)
-    if got is None or ob.mode == 'EDIT' or not _pick_current(context, ob):
-        return None
-    plan = _pick_plan(ptr, got)
-    if plan is None:
-        return None
-    jl = got[0]
-    bones = ob.data.bones
-    hide_select = np.zeros(len(bones), bool)
-    bones.foreach_get("hide_select", hide_select)
-    # ``_unpickable``: a display layer's state (hidden / Template / Reference) or Blender's unselectable bones
-    pickable = plan["state"] & ~hide_select[_bone_rows(ob, jl)]
-    if plan["pickable"] is None or not np.array_equal(plan["pickable"], pickable):
-        seg = plan["seg"]
-        keep = pickable[seg]
-        kept, owner = np.unique(seg[keep], return_inverse=True)
-        plan.update(pickable=pickable, view=None, kept=[jl.names[i] for i in kept], owner=owner.astype(np.int64),
-                    ends=plan["pts"][keep].reshape(-1, 3).astype(np.float64))
-    if not len(plan["owner"]):
-        return [], np.zeros((0, 2)), np.zeros((0, 2)), np.zeros(0, bool), np.zeros(0, np.int64), jl
-    region, rv3d = context.region, context.region_data
-    persp = rv3d.perspective_matrix
-    view = (tuple(tuple(r) for r in persp), region.width, region.height)
-    if plan["view"] != view:
-        xy, front = project(plan["ends"], persp, region.width, region.height)
-        plan.update(view=view, a=np.ascontiguousarray(xy[0::2]), b=np.ascontiguousarray(xy[1::2]),
-                    ok=front[0::2] & front[1::2], columns=None)
-    return list(plan["kept"]), plan["a"], plan["b"], plan["ok"], plan["owner"], jl
-
-
-_PICK_MEMO = [None]     # while one click is picked (``pick_memo``): {(skeleton, mode, region, mouse): distances}
-
-
-class pick_memo:
-    """Within one click nothing moves between the coarse object test and the joint pick: ``screen_distance`` reads
-    each skeleton once (a skeleton read costs milliseconds per hundred joints). Nests; the outermost one ends it."""
-
-    def __enter__(self):
-        self._outer = _PICK_MEMO[0] is not None
-        if not self._outer:
-            _PICK_MEMO[0] = {}
-        return self
-
-    def __exit__(self, *_exc):
-        if not self._outer:
-            _PICK_MEMO[0] = None
-
-
 def screen_distance(context, ob, mouse):
     """{joint: screen distance from ``mouse`` to its drawn lines} of armature ``ob``, for the joints that can be
     picked."""
@@ -601,85 +210,12 @@ def _screen_distance(context, ob, mouse):
     return dict(zip([names[i] for i in found.tolist()], near[found].tolist()))
 
 
-def _segment_columns(a, b):
-    """What ``preselect.segment_distance`` works out of the screen segments a[i]-b[i] ((S, 2) each) before it looks
-    at the mouse, one array per coordinate: start x, start y, direction x, y, long enough, squared length (1 where
-    not)."""
-    import numpy as np
-    ax, ay = np.ascontiguousarray(a[:, 0], np.float64), np.ascontiguousarray(a[:, 1], np.float64)
-    dx, dy = b[:, 0] - ax, b[:, 1] - ay
-    ll = dx * dx + dy * dy
-    long_ = ll > 1e-12
-    return ax, ay, dx, dy, long_, np.where(long_, ll, 1.0)
-
-
-def _segment_distances(p, columns):
-    """``preselect.segment_distance`` (its distances) from point ``p`` to the segments of ``_segment_columns``: the
-    same steps in the same order, one coordinate array at a time."""
-    import numpy as np
-    ax, ay, dx, dy, long_, ll = columns
-    t = np.where(long_, ((p[0] - ax) * dx + (p[1] - ay) * dy) / ll, 0.0)
-    t = np.clip(t, 0.0, 1.0)
-    return np.hypot(ax + dx * t - p[0], ay + dy * t - p[1])
-
-
-_NEAREST = [None]   # (segment owners, joint count, segment order by joint, first segment of each joint) of a click
-
-
-def _nearest(owner, n, d, ok):
-    """The smallest ``d`` of the ``ok`` segments of each of ``n`` joints (``owner``: joint per segment), inf where it
-    has none. The segments sorted by joint are kept for the owners of the drawn lines (every click uses them)."""
-    import numpy as np
-    got = _NEAREST[0]
-    if got is None or got[0] is not owner or got[1] != n:
-        cnt = np.bincount(owner, minlength=n) if len(owner) else np.zeros(n, np.intp)
-        order = starts = None
-        if len(cnt) == n and n and cnt.all():           # every joint has a segment: one minimum per run
-            order = np.argsort(owner, kind='stable')
-            starts = np.concatenate(([0], np.cumsum(cnt)[:-1]))
-        got = _NEAREST[0] = (owner, n, order, starts)
-    if got[2] is None:
-        near = np.full(n, np.inf)
-        np.minimum.at(near, owner[ok], d[ok])
-        return near
-    return np.minimum.reduceat(np.where(ok, d, np.inf)[got[2]], got[3])
-
-
 def pick(context, ob, mouse, radius):
     """The joint of ``ob`` whose drawn line is nearest to ``mouse`` within ``radius`` px (Maya: a click hits the wire,
     not the inside of the sphere; a bone hit picks its parent joint), or None."""
     d = screen_distance(context, ob, mouse)
     near = [(v, n) for n, v in d.items() if v <= radius]
     return min(near)[1] if near else None
-
-
-def _seg_cross(p1, p2, q1, q2):
-    def orient(a, b, c):
-        return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
-    d1, d2 = orient(q1, q2, p1), orient(q1, q2, p2)
-    d3, d4 = orient(p1, p2, q1), orient(p1, p2, q2)
-    return (d1 * d2 < 0) and (d3 * d4 < 0)
-
-
-def _in_poly(pt, poly):
-    x, y = pt
-    inside = False
-    for i in range(len(poly)):
-        (x1, y1), (x2, y2) = poly[i], poly[i - 1]
-        if (y1 > y) != (y2 > y) and x < (x2 - x1) * (y - y1) / (y2 - y1) + x1:
-            inside = not inside
-    return inside
-
-
-def segments_touch(a, b, poly):
-    """Does any segment a[i]-b[i] touch the closed polygon ``poly`` (screen points)?"""
-    edges = [(poly[i - 1], poly[i]) for i in range(len(poly))]
-    for p, q in zip(a, b):
-        if _in_poly(p, poly) or _in_poly(q, poly):
-            return True
-        if any(_seg_cross(p, q, e0, e1) for e0, e1 in edges):
-            return True
-    return False
 
 
 def region_pick(context, ob, poly):
@@ -716,85 +252,6 @@ def region_pick(context, ob, poly):
     return each + [min((depths[n], index[n], n) for n in joints)[2]]
 
 
-_DEPTHS = {}    # id(joints) -> (joints, {name: ``depth``}, {name: position}): ``region_pick`` of the same joints
-
-
-def _region_depths(js):
-    """{name: ``depth(js, name)``} and {name: position in ``js``} of every joint, kept while ``js`` is the same (a
-    drawn skeleton's joint list lasts until the skeleton changes)."""
-    held = _DEPTHS.get(id(js))
-    if held is not None and held[0] is js:
-        return held[1], held[2]
-    depths = {}
-    for name in js:
-        chain, p = [], name
-        while p not in depths:
-            chain.append(p)
-            p = js[p].parent
-            if p not in js:              # the top: no parent among the joints
-                d = 0
-                break
-        else:
-            d = depths[p] + 1
-        for n in reversed(chain):
-            depths[n] = d
-            d += 1
-    if len(_DEPTHS) > 8:
-        _DEPTHS.clear()
-    index = {n: i for i, n in enumerate(js)}
-    _DEPTHS[id(js)] = (js, depths, index)
-    return depths, index
-
-
-def _box_bounds(pg):
-    """(x min, x max, y min, y max) of a polygon that is an upright rectangle given corner by corner (a box select's
-    region), else None."""
-    if len(pg) != 4:
-        return None
-    (ax, ay), (bx, by), (cx, cy), (dx, dy) = pg.tolist()
-    if not ((ay == by and bx == cx and cy == dy and dx == ax) or (ax == bx and by == cy and cx == dx and dy == ay)):
-        return None
-    return min(ax, cx), max(ax, cx), min(ay, cy), max(ay, cy)
-
-
-def _touching(a, b, poly):
-    """``segments_touch`` for each segment a[i]-b[i] ((S, 2) arrays) at once: a bool per segment."""
-    import numpy as np
-    pg = np.asarray(poly, np.float64).reshape(-1, 2)
-    box = _box_bounds(pg)
-
-    def inside(p):
-        x, y = p[:, 0], p[:, 1]
-        if box is not None:
-            # the crossing rule below on an upright rectangle: only its two upright sides count, each at its own x
-            # for any y, so a point is inside from the low side up to (not including) the high side
-            x0, x1, y0, y1 = box
-            return (x >= x0) & (x < x1) & (y >= y0) & (y < y1)
-        res = np.zeros(len(p), bool)
-        for i in range(len(pg)):
-            (x1, y1), (x2, y2) = pg[i], pg[i - 1]
-            if y1 != y2:              # a level edge never crosses the ray
-                res ^= ((y1 > y) != (y2 > y)) & (x < (x2 - x1) * (y - y1) / (y2 - y1) + x1)
-        return res
-
-    out = inside(a) | inside(b)
-    rest = np.flatnonzero(~out)          # a segment with an end inside touches already: the crossings of the others
-    if not len(rest):
-        return out
-    a, b = a[rest], b[rest]
-    ax, ay, bx, by = a[:, 0], a[:, 1], b[:, 0], b[:, 1]
-    cross = np.zeros(len(rest), bool)
-    for i in range(len(pg)):
-        (ex0, ey0), (ex1, ey1) = pg[i - 1], pg[i]
-        d1 = (ex1 - ex0) * (ay - ey0) - (ey1 - ey0) * (ax - ex0)
-        d2 = (ex1 - ex0) * (by - ey0) - (ey1 - ey0) * (bx - ex0)
-        d3 = (bx - ax) * (ey0 - ay) - (by - ay) * (ex0 - ax)
-        d4 = (bx - ax) * (ey1 - ay) - (by - ay) * (ex1 - ax)
-        cross |= (d1 * d2 < 0) & (d3 * d4 < 0)
-    out[rest] = cross
-    return out
-
-
 def _sphere_array(js):
     """(points, joint order) of every sphere's three great circles as one float32 array of segment end points."""
     import numpy as np
@@ -814,23 +271,6 @@ def _spheres(c, f, r):
     if not len(c):
         return np.zeros((0, 3), np.float32)
     return _sphere_ring(c, f, r)[_sphere_index(len(c))]
-
-
-def _sphere_index(n):
-    """Int32 line index into ``_sphere_ring`` of ``n`` spheres giving the segments of ``_spheres`` in its order (per
-    joint, circle and segment: ring points i and i + 1). Kept per ``n``."""
-    import numpy as np
-    got = _RING_INDEX.get(n)
-    if got is None:
-        j = np.arange(n, dtype=np.intc)[:, None, None]
-        k = np.arange(3, dtype=np.intc)[None, :, None]
-        s = np.arange(SEGMENTS, dtype=np.intc)[None, None, :]
-        a = (k * (SEGMENTS + 1) + s) * n + j                                    # (joint, circle, segment)
-        got = np.ascontiguousarray(np.stack((a, a + n), axis=3).reshape(-1))
-        if len(_RING_INDEX) > 64:
-            _RING_INDEX.clear()
-        _RING_INDEX[n] = got
-    return got
 
 
 def _sphere_ring(c, f, r):
@@ -857,10 +297,6 @@ def _sphere_ring(c, f, r):
     u *= np.repeat(r, 3)
     u += c.reshape(-1)
     return u.astype(np.float32).reshape(-1, 3)          # (circle, ring point, joint): x, y, z of each point
-
-
-_RING = [None]      # (cos, sin) of the ring points' angles (S + 1, 1)
-_RING_INDEX = {}    # sphere count -> ``_sphere_index``
 
 
 def _bone_array(pc, pf, pr, cc, cr):
@@ -892,31 +328,6 @@ def _bone_array(pc, pf, pr, cc, cr):
     ar, br = a * pr[:, None], b * pr[:, None]
     pts = np.stack((base + ar, base + br, base - ar, base - br, apex), axis=1)          # (K, 5, 3)
     return pts.reshape(-1, 3), drawn
-
-
-_BONE_SEGMENTS = (0, 1, 0, 4, 1, 2, 1, 4, 2, 3, 2, 4, 3, 0, 3, 4)   # corner i to i + 1 and to the apex, per corner
-_BONE_INDEX = {}    # pyramid count -> ``_bone_index``
-
-
-def _bone_index(k):
-    """Int32 line index into ``_bone_array``'s points of ``k`` pyramids: per corner the base edge to the next corner,
-    then the edge up to the apex. Kept per ``k``."""
-    import numpy as np
-    got = _BONE_INDEX.get(k)
-    if got is None:
-        got = np.ascontiguousarray((np.arange(k, dtype=np.intc)[:, None] * 5
-                                    + np.array(_BONE_SEGMENTS, np.intc)[None, :]).reshape(-1))
-        if len(_BONE_INDEX) > 64:
-            _BONE_INDEX.clear()
-        _BONE_INDEX[k] = got
-    return got
-
-
-class JointList:
-    """What a pose doesn't change of a skeleton's drawn joints (Object / Pose Mode)."""
-    __slots__ = ("js", "names", "rows", "parents", "raw", "turned", "shaped", "plain", "ctrl", "ctrl_src",
-                 "ctrl_len", "ctrl_shapes", "bone_par", "bone_child", "widgets", "bone_rows", "shown", "tint",
-                 "parent_names", "owners")
 
 
 def _joint_list(ob):
@@ -995,30 +406,7 @@ def _joint_list(ob):
     return jl
 
 
-def _same_list(a, b):
-    """Joint lists ``a`` and ``b`` hold the same joints, hierarchy, Radius values, Maya frames, controls, display
-    layer states and drawn bones (what a pose doesn't change is unchanged)."""
-    import numpy as np
-    if a.names != b.names or a.parent_names != b.parent_names:
-        return False
-    for x, y in ((a.rows, b.rows), (a.parents, b.parents), (a.raw, b.raw), (a.ctrl, b.ctrl), (a.ctrl_src, b.ctrl_src),
-                 (a.ctrl_len, b.ctrl_len), (a.shown, b.shown), (a.bone_rows, b.bone_rows)):
-        if not np.array_equal(x, y):
-            return False
-    if a.tint != b.tint or a.turned.keys() != b.turned.keys():
-        return False
-    if any(not np.array_equal(a.turned[j], b.turned[j]) for j in a.turned):
-        return False
-    try:
-        return [s.as_pointer() for s in a.ctrl_shapes] == [s.as_pointer() for s in b.ctrl_shapes]
-    except ReferenceError:                     # a shape object removed since ``a`` was read
-        return False
-
-
 _LISTS = {}     # skeleton object pointer -> (key, _joint_list) kept while playback runs
-_EDITS = [0]    # bumped by every change that can change a skeleton's joint list (not by a new frame)
-_WIDGETS = {}   # custom shape object session uid -> (its data pointer, its edges' end points in its own space)
-_WIDGET_GEN = [0]   # bumped whenever a custom shape is read again (``_widget_plan`` joins them again)
 
 
 def joint_list(ob, playing=False):
@@ -1038,79 +426,6 @@ def joint_list(ob, playing=False):
     return out
 
 
-def _bone_rows(ob, jl):
-    """Row of every joint of ``jl`` in ``ob.data.bones`` (its order can differ from the pose bones')."""
-    import numpy as np
-    if jl.bone_rows is None:
-        index = {b.name: i for i, b in enumerate(ob.data.bones)}
-        jl.bone_rows = np.array([index[nm] for nm in jl.names], np.intp)
-    return jl.bone_rows
-
-
-def _pose_raw(ob, scene, jl):
-    """What skeleton ``ob``'s drawn lines follow besides its joint list, read in one go: every pose bone's
-    armature-space matrix and head (as stored), the world matrix, the drawn radius factor and, with controls, their
-    custom shape offset / turn / scale. The same readings draw the same lines."""
-    import numpy as np
-    from ..operators import joint_display, units
-    pbs = ob.pose.bones
-    n = len(pbs)
-    mw = ob.matrix_world
-    k = 0.5 * joint_display.joint_size(scene) * units.radius_unit(scene) * max(mw.to_scale())
-    mat = np.empty(n * 16, np.float32)
-    pbs.foreach_get("matrix", mat)
-    head = np.empty(n * 3, np.float32)
-    pbs.foreach_get("head", head)
-    shape = None
-    if len(jl.ctrl):
-        shape = []
-        for prop in ("custom_shape_translation", "custom_shape_rotation_euler", "custom_shape_scale_xyz"):
-            a = np.empty(n * 3, np.float32)
-            pbs.foreach_get(prop, a)
-            shape.append(a)
-        use = np.zeros(n, bool)
-        pbs.foreach_get("use_custom_shape_bone_size", use)
-        shape.append(use)
-    return mat, head, np.array(mw, np.float64), k, shape
-
-
-def _same_raw(a, b):
-    """Two ``_pose_raw`` readings are the same."""
-    import numpy as np
-    if a is None or b is None or a[3] != b[3] or (a[4] is None) != (b[4] is None):
-        return False
-    if not all(np.array_equal(x, y) for x, y in zip(a[:3], b[:3])):
-        return False
-    return a[4] is None or all(np.array_equal(x, y) for x, y in zip(a[4], b[4]))
-
-
-def _pose_read(ob, scene, jl, raw=None, only=None):
-    """(world matrix (4, 4), every pose bone's armature-space matrix (n, 4, 4), and the drawn joints' centres (N, 3),
-    frames (N, 3, 3; columns normalised) and radii (N,)) of skeleton ``ob`` — one read of the pose for all joints.
-    ``raw``: its ``_pose_raw`` when already read. ``only``: joint indices: the centres, frames and radii of these
-    joints alone (each joint's numbers are worked out from its own bone: the same as among all joints)."""
-    import numpy as np
-    from ..operators import joints
-    mat, head, w, k, _shape = raw if raw is not None else _pose_raw(ob, scene, jl)
-    n = len(head) // 3
-    allm = mat.reshape(n, 4, 4).transpose(0, 2, 1).astype(np.float64)       # stored by columns
-    m3 = w[:3, :3]
-    rows = jl.rows if only is None else jl.rows[only]
-    centres = head.reshape(n, 3)[rows].astype(np.float64) @ m3.T + w[:3, 3]
-    frames = m3 @ allm[rows][:, :3, :3] @ np.array(joints.JOINT_AXES, np.float64)
-    if only is None:
-        for j, q in jl.turned.items():
-            frames[j] = frames[j] @ q
-    elif jl.turned:
-        for i, j in enumerate(only.tolist()):
-            q = jl.turned.get(j)
-            if q is not None:
-                frames[i] = frames[i] @ q
-    norms = np.linalg.norm(frames, axis=1, keepdims=True)
-    frames = np.divide(frames, norms, out=np.zeros_like(frames), where=norms > 0)
-    return w, allm, centres, frames, (jl.raw if only is None else jl.raw[only]) * k
-
-
 def _pose_arrays(ob, scene, playing=False):
     """The visible joints of ``ob`` in Object / Pose Mode: (joints {name: Joint, geometry left out}, names, parent
     index per joint (-1: no drawn parent), centres (N, 3), frames (N, 3, 3), radii (N,), {index: (custom shape,
@@ -1123,53 +438,6 @@ def _pose_arrays(ob, scene, playing=False):
     pbs, mw = ob.pose.bones, ob.matrix_world
     shapes = {j: (shape, mw @ _shape_matrix(pbs[int(jl.rows[j])])) for j, shape in jl.shaped.items()}
     return jl.js, jl.names, jl.parents, centres, frames, radii, shapes
-
-
-def _joint_selection(ob, jl):
-    """``selection`` of ``ob``; in Pose Mode the selected bones are read in one call."""
-    import numpy as np
-    from ..operators import joint_preview
-    if ob.mode != 'POSE' or (joint_preview.running() and joint_preview.STATE.get("ob") == ob.name):
-        return selection(ob, jl.js)
-    pbs = ob.pose.bones
-    flags = np.zeros(len(pbs), bool)
-    pbs.foreach_get("select", flags)
-    sel = {jl.names[j] for j in np.nonzero(flags[jl.rows])[0]}
-    act = ob.data.bones.active
-    return sel, (act.name if act is not None and act.name in sel else None)
-
-
-def _joint_rgba(jl, sel, lead):
-    """(N, 4) colour of every joint (``colours``, resolved for all joints at once); nothing selected: all
-    unselected."""
-    import numpy as np
-    n = len(jl.names)
-    if not sel:
-        rgba = np.tile(np.array((*UNSELECTED, 1.0), np.float32), (n, 1))
-        for j, c in jl.tint.items():           # Template / Reference layer colour
-            rgba[j] = c
-        return rgba
-    # each joint's own colour (lead, selected, its layer's), else the nearest joint above it with one
-    palette = [(*UNSELECTED, 1.0), (*SELECTED, 1.0), (*LEAD, 1.0)]
-    val = np.full(n, -1, np.intp)
-    for j, c in jl.tint.items():
-        if c not in palette:
-            palette.append(c)
-        val[j] = palette.index(c)
-    val[np.fromiter((nm in sel for nm in jl.names), bool, n)] = 1
-    if lead is not None and lead in jl.js:
-        val[jl.names.index(lead)] = 2
-    up = jl.parents.copy()
-    todo = np.flatnonzero((val < 0) & (up >= 0))
-    while len(todo):
-        got = val[up[todo]]
-        have = got >= 0
-        val[todo[have]] = got[have]
-        rest = todo[~have]
-        up[rest] = up[up[rest]]                # the parent has no colour of its own: look past it
-        todo = rest[up[rest] >= 0]
-    val[val < 0] = 0
-    return np.array(palette, np.float32)[val]
 
 
 def _read_widget(shape, depsgraph):
@@ -1192,24 +460,6 @@ def _read_widget(shape, depsgraph):
         ev.to_mesh_clear()
 
 
-# modifiers that only reshape the object's own geometry: unkeyed, their result can't change with the frame
-_STILL_MODIFIERS = frozenset({'SUBSURF', 'MULTIRES', 'TRIANGULATE', 'EDGE_SPLIT', 'WELD', 'SOLIDIFY', 'BEVEL',
-                              'WIREFRAME'})
-
-
-def shape_moves(shape):
-    """Can custom shape ``shape``'s geometry change with the frame? Shape keys, particles, animated or driven data,
-    a modifier that can read the time or other objects, or a keyed / driven modifier setting. A Subdivision Surface
-    (Bevel, Solidify ...) modifier alone can't."""
-    if getattr(shape, "particle_systems", None):
-        return True
-    if shape.modifiers and (shape.animation_data is not None
-                            or any(m.type not in _STILL_MODIFIERS for m in shape.modifiers)):
-        return True
-    data = shape.data
-    return data is not None and (getattr(data, "shape_keys", None) is not None or data.animation_data is not None)
-
-
 def _widget_segments(shape, depsgraph):
     """(``_read_widget`` of ``shape``, changes with the frame). A shape whose geometry can't change with the frame is
     read once and kept until its geometry is edited (``_depsgraph_post``), something is edited (``changed``) or
@@ -1226,41 +476,17 @@ def _widget_segments(shape, depsgraph):
     return segs, False
 
 
-def _drop_widget(uid):
-    """Read custom shape ``uid``'s geometry again at its next use."""
-    if _WIDGETS.pop(uid, None) is not None:
-        _WIDGET_GEN[0] += 1
-
-
-def _euler_xyz(e):
-    """(K, 3) XYZ Euler angles -> (K, 3, 3) rotation matrices (``Euler.to_matrix``)."""
-    import numpy as np
-    cx, cy, cz = np.cos(e[:, 0]), np.cos(e[:, 1]), np.cos(e[:, 2])
-    sx, sy, sz = np.sin(e[:, 0]), np.sin(e[:, 1]), np.sin(e[:, 2])
-    m = np.empty((len(e), 3, 3))
-    m[:, 0, 0], m[:, 0, 1], m[:, 0, 2] = cy * cz, sx * sy * cz - cx * sz, cx * sy * cz + sx * sz
-    m[:, 1, 0], m[:, 1, 1], m[:, 1, 2] = cy * sz, sx * sy * sz + cx * cz, cx * sy * sz - sx * cz
-    m[:, 2, 0], m[:, 2, 1], m[:, 2, 2] = -sy, sx * cy, cx * cy
-    return m
-
-
-def _distinct_points(segs):
-    """(each distinct point of segment end points ``segs`` (2E, 3) once, int32 index of every end point into them):
-    points with the same bits are one point."""
-    import numpy as np
-    if not len(segs):
-        return segs, np.zeros(0, np.intc)
-    rows = np.ascontiguousarray(segs).view(np.dtype((np.void, segs.dtype.itemsize * 3))).reshape(-1)
-    _u, first, inverse = np.unique(rows, return_index=True, return_inverse=True)
-    return segs[first], inverse.reshape(-1).astype(np.intc)
-
-
 def _widget_plan(jl, depsgraph):
-    """The controls' shape lines joined in their own space: (points, shape per point, points per shape, the shapes
-    that change with the frame [(shape, start, count)], widget generation, int32 line index into the points of every
-    shape's segments in order). A shape that can't change with the frame keeps each of its points once; one that can
-    keeps its segments' end points. Joined once per joint list and kept while no shape's own geometry changed; the
-    shapes that change with the frame are read again in place."""
+    """The controls' shape lines joined in their own space: (points, control per point, points per control (in
+    control order), the shapes that change with the frame [(shape, start, count)], widget generation, int32 line index
+    into the points of every shape's segments, runs [(start, stop, controls, points each, one shared shape)]). The
+    controls' points follow one another by their point count (``placed_points`` places each run of equal counts at
+    once), control by control; a shape that can't change with the frame and that ``SHARED_SHAPE`` or more controls
+    show gets a run of its own, stored point by point (its first point in every control of the run, then its second
+    ...). A shape that can't change with the frame keeps each of its points once; one that can keeps its segments' end
+    points. Joined
+    once per joint list and kept while no shape's own geometry changed; the shapes that change with the frame are read
+    again in place."""
     import numpy as np
     plan = jl.widgets
     if plan is not None and plan[4] != _WIDGET_GEN[0]:
@@ -1274,22 +500,54 @@ def _widget_plan(jl, depsgraph):
                 break
             p[start:start + count] = segs
     if plan is None:
-        pts, index, moving, start = [], [], [], 0
+        shapes, users = [], {}
         for shape in jl.ctrl_shapes:
             s, m = _widget_segments(shape, depsgraph)
-            if m:
-                moving.append((shape, start, len(s)))
-                at = np.arange(len(s), dtype=np.intc)
+            shapes.append((shape, s, None) if m else (shape, *_distinct_points(s)))   # None: read every frame
+            if not m:
+                users[shape.session_uid] = users.get(shape.session_uid, 0) + 1
+        counts = np.fromiter((len(t[1]) for t in shapes), np.intp, len(shapes))
+        group = {uid: g for g, uid in enumerate(sorted(u for u, c in users.items() if c >= SHARED_SHAPE), 1)}
+        shared = np.fromiter((0 if at is None else group.get(shape.session_uid, 0) for shape, _s, at in shapes),
+                             np.intp, len(shapes))
+        order = np.lexsort((shared, counts))
+        groups = []                                  # [points each, shared shape group, [controls]]
+        for k in order.tolist():
+            c, g = int(counts[k]), int(shared[k])
+            if not c:
+                continue
+            if groups and groups[-1][0] == c and groups[-1][1] == g:
+                groups[-1][2].append(k)
             else:
-                s, at = _distinct_points(s)
-            pts.append(s)
-            index.append(at + start)
-            start += len(s)
-        counts = np.fromiter((len(s) for s in pts), np.intp, len(pts))
-        p = np.concatenate(pts) if counts.sum() else np.zeros((0, 3))
+                groups.append([c, g, [k]])
+        pts, index, owners, moving, runs, start = [], [], [], [], [], 0
+        for c, g, ks in groups:
+            ks = np.array(ks, np.intp)
+            n = len(ks)
+            if g:                                    # one shape: stored point by point (point i of every control)
+                _shape, s, at = shapes[ks[0]]
+                pts.append(np.repeat(s, n, axis=0))
+                owners.append(np.tile(ks, c))
+                index.append((at[None, :] * n + np.arange(n, dtype=np.intc)[:, None]).reshape(-1) + start)
+            else:                                    # control by control
+                for j, k in enumerate(ks.tolist()):
+                    shape, s, at = shapes[k]
+                    if at is None:
+                        moving.append((shape, start + j * c, c))
+                        at = np.arange(c, dtype=np.intc)
+                    pts.append(s)
+                    index.append(at + (start + j * c))
+                owners.append(np.repeat(ks, c))
+            runs.append((start, start + n * c, ks, c, bool(g)))
+            start += n * c
+        p = np.concatenate(pts).astype(np.float32) if start else np.zeros((0, 3), np.float32)   # the shapes' own precision
         index = np.concatenate(index).astype(np.intc) if index else np.zeros(0, np.intc)
-        plan = jl.widgets = (p, np.repeat(np.arange(len(pts)), counts), counts, moving, _WIDGET_GEN[0], index)
+        owner = np.concatenate(owners) if owners else np.zeros(0, np.intp)
+        plan = jl.widgets = (p, owner, counts, moving, _WIDGET_GEN[0], index, runs)
     return plan
+
+
+SHARED_SHAPE = 8      # controls showing one unchanging shape that get a run of their own (``_widget_plan``)
 
 
 def _control_lines(ob, jl, w, allm, depsgraph, props=None):
@@ -1299,7 +557,7 @@ def _control_lines(ob, jl, w, allm, depsgraph, props=None):
     as ``_pose_raw`` read them) are read every time. The controls a display layer hides keep their points but have
     no lines."""
     import numpy as np
-    p, owner, _counts, _moving, _gen, index = _widget_plan(jl, depsgraph)
+    p, owner, _counts, _moving, _gen, index, runs = _widget_plan(jl, depsgraph)
     if not len(p):
         return None
     pbs = ob.pose.bones
@@ -1314,59 +572,14 @@ def _control_lines(ob, jl, w, allm, depsgraph, props=None):
         pbs.foreach_get("use_custom_shape_bone_size", use)
         props.append(use)
     lin, off = _control_placement(jl, w, allm, props, n)
-    pts = np.einsum('kij,kj->ki', lin[owner], p) + off[owner]
+    pts = placed_points(p, lin, off, runs, owner)
     got = jl.owners.get("ctrl")
     if got is None or got[0] is not owner:
         if not jl.shown.all():                       # controls a display layer hides draw nothing
             pairs = index.reshape(-1, 2)
             index = np.ascontiguousarray(pairs[jl.shown[jl.ctrl][owner][pairs[:, 0]]].reshape(-1))
         got = jl.owners["ctrl"] = (owner, jl.ctrl[owner], index)
-    return pts.astype(np.float32), got[1], got[2]
-
-
-def _control_placement(jl, w, allm, props, n, which=None):
-    """(linear part (C, 3, 3), offset (C, 3)) of the world matrix every control's shape is drawn with (``_shape_matrix``
-    in world space; ``props``: the custom shape offset / turn / scale of the ``n`` pose bones as ``_pose_raw`` read
-    them). ``which``: control indices: those controls alone (each from its own bone: the same numbers)."""
-    import numpy as np
-    ctrl_rows, ctrl_src, ctrl_len = jl.rows[jl.ctrl], jl.ctrl_src, jl.ctrl_len
-    if which is not None:
-        ctrl_rows, ctrl_src, ctrl_len = ctrl_rows[which], ctrl_src[which], ctrl_len[which]
-    offset, turn, size = (a.reshape(n, 3)[ctrl_rows].astype(np.float64) for a in props[:3])
-    scale = size * np.where(props[3][ctrl_rows], ctrl_len, 1.0)[:, None]
-    src = allm[ctrl_src]
-    a = w[:3, :3] @ src[:, :3, :3]
-    lin = a @ (_euler_xyz(turn) * scale[:, None, :])
-    off = (a @ offset[:, :, None])[:, :, 0] + src[:, :3, 3] @ w[:3, :3].T + w[:3, 3]
-    return lin, off
-
-
-def _control_points(jl, w, allm, props, plan, which):
-    """(bool per control shape point, float32 points) of the controls ``which`` (indices, sorted) alone: their points
-    in ``_control_lines`` and those points worked out again (the same numbers; every control shown)."""
-    import numpy as np
-    p, owner = plan[0], plan[1]
-    chosen = np.zeros(len(jl.ctrl), bool)
-    chosen[which] = True
-    at = chosen[owner]
-    lin, off = _control_placement(jl, w, allm, props, len(props[3]), which)
-    local = (np.cumsum(chosen) - 1)[owner[at]]          # position in ``which`` of each point's control
-    return at, (np.einsum('kij,kj->ki', lin[local], p[at]) + off[local]).astype(np.float32)
-
-
-def _box_array(frames, corners):
-    """``_box_lines`` of many tubes with the same number of rings: frames (K, F, 4, 4) of each ring, corners
-    (K, 4, 3) of each tube in its rings' space. Returns (K, 8 + 16 * (F - 1), 3) end points per tube."""
-    import numpy as np
-    rings = np.einsum('kfij,kcj->kfci', frames[:, :, :3, :3], corners) + frames[:, :, None, :3, 3]
-    edges = np.stack((rings, np.roll(rings, -1, axis=2)), axis=3)                 # (K, F, 4, 2, 3)
-    k = len(rings)
-    first = edges[:, 0].reshape(k, -1, 3)
-    if rings.shape[1] < 2:
-        return first
-    joins = np.stack((rings[:, :-1], rings[:, 1:]), axis=3)                       # (K, F - 1, 4, 2, 3)
-    rest = np.stack((edges[:, 1:], joins), axis=3).reshape(k, -1, 3)             # ring edge i, then join i
-    return np.concatenate((first, rest), axis=1)
+    return pts, got[1], got[2]
 
 
 def _own_lines(ob, jl, w, allm, kind):
@@ -1442,36 +655,6 @@ def _own_lines(ob, jl, w, allm, kind):
     return np.concatenate(blocks).astype(np.float32), np.repeat(plain, sizes)
 
 
-class _Lines:
-    """A skeleton's drawn lines without their colours (Object / Pose Mode): centres / frames / radii of the joints,
-    the joints with a sphere, the lines before the axes and after them as (points, joint index per point, int32 line
-    index into the points or None: the points are segment end points) triples, the lines a click picks (``_parts``
-    ``pick``, the same triples) and the control shape lines they were built from."""
-    __slots__ = ("centres", "frames", "radii", "plain", "before", "after", "chunks", "plan", "ctrl_at")
-
-
-def _sphere_owner(jl, plain):
-    """(joints with a sphere, joint index per ``_sphere_ring`` point, ``_sphere_index``) of joint list ``jl``, whose
-    joints ``plain`` have a sphere; kept on it."""
-    import numpy as np
-    got = jl.owners.get("spheres")
-    if got is None:
-        idx = np.flatnonzero(plain)
-        got = jl.owners["spheres"] = (idx, np.tile(idx, 3 * (SEGMENTS + 1)), _sphere_index(len(idx)))
-    return got
-
-
-def _owner(jl, part, rows, per, of=None):
-    """Joint index per point of ``part``: ``per`` points for each of ``rows`` (indices into ``of``, else joint
-    indices). Kept on joint list ``jl`` while ``rows`` stay the same: a part whose points belong to the same joints
-    keeps its colours too (``_paint``)."""
-    import numpy as np
-    got = jl.owners.get(part)
-    if got is None or not np.array_equal(got[0], rows):
-        got = jl.owners[part] = (rows, np.repeat(rows if of is None else of[rows], per))
-    return got[1]
-
-
 def _lines(ob, scene, depsgraph, jl, kind, raw):
     """``_Lines`` of skeleton ``ob`` drawn as ``kind`` from joint list ``jl`` and pose reading ``raw``."""
     import numpy as np
@@ -1514,22 +697,6 @@ def _lines(ob, scene, depsgraph, jl, kind, raw):
                 chunks.append(g.after[-1])
     g.chunks = chunks
     return g
-
-
-def _moved_bones(raw, old_raw):
-    """Bool per pose bone: its matrix or head reads differently (any bit) in pose reading ``raw`` than in
-    ``old_raw``; None when something else the lines follow changed (the object's matrix, the joint size, a custom
-    shape offset / turn / scale)."""
-    import numpy as np
-    if (old_raw is None or len(raw[1]) != len(old_raw[1]) or (raw[4] is None) != (old_raw[4] is None)
-            or np.float64(raw[3]).tobytes() != np.float64(old_raw[3]).tobytes()
-            or raw[2].tobytes() != old_raw[2].tobytes()):
-        return None
-    if raw[4] is not None and any(x.tobytes() != y.tobytes() for x, y in zip(raw[4], old_raw[4])):
-        return None
-    n = len(raw[1]) // 3
-    return (np.any(raw[0].view(np.uint32).reshape(n, 16) != old_raw[0].view(np.uint32).reshape(n, 16), axis=1)
-            | np.any(raw[1].view(np.uint32).reshape(n, 3) != old_raw[1].view(np.uint32).reshape(n, 3), axis=1))
 
 
 def _lines_moved(ob, scene, jl, kind, raw, g0, old_raw):
@@ -1588,86 +755,6 @@ def _lines_moved(ob, scene, jl, kind, raw, g0, old_raw):
             chunks.append(g.after[-1])
     g.chunks = chunks
     return g
-
-
-def _lines_hold(g, jl, kind, raw, old_raw):
-    """Lines ``g`` (built from ``jl`` and ``old_raw``) are still the lines of pose reading ``raw``: the same
-    readings, the control shapes joined from the same, unchanged geometry and none of them changing with the frame,
-    and a look built from the pose and the joint list alone (not Blender's B-Bone / Envelope shapes)."""
-    if g is None or kind in SHAPE_TYPES or not _same_raw(raw, old_raw):
-        return False
-    if len(jl.ctrl):
-        plan = jl.widgets
-        if plan is None or plan is not g.plan or plan[4] != _WIDGET_GEN[0] or plan[3]:
-            return False
-    return True
-
-
-def _paint(jl, g, sel, rgba, prev=None):
-    """``_parts`` (before, axes, after) of lines ``g`` in joint colours ``rgba``; the local axes of the selected
-    joints ``sel``. ``prev``: (lines, colours, parts) painted before: a part whose lines belong to the same joints in
-    the same colours keeps its colour array (a new frame moves the lines, not their colours)."""
-    import numpy as np
-
-    def colour(part, k, idx):
-        if prev is not None and prev[0] is not None and prev[1] is rgba:
-            old = getattr(prev[0], part)
-            if k < len(old) and (old[k][1] is idx or (len(old[k][1]) == len(idx) and np.array_equal(old[k][1], idx))):
-                return prev[2][0 if part == "before" else 2][1][k]
-        return rgba[idx]
-
-    before = ([p for p, _i, _x in g.before], [colour("before", k, i) for k, (_p, i, _x) in enumerate(g.before)],
-              [x for _p, _i, x in g.before])
-    after = ([p for p, _i, _x in g.after], [colour("after", k, i) for k, (_p, i, _x) in enumerate(g.after)],
-             [x for _p, _i, x in g.after])
-    axes = ([], [], [])
-    if sel:
-        key = frozenset(sel)
-        got = jl.owners.get("axes")
-        if got is None or got[0] != key:             # the selected joints with a sphere and their axes' colours
-            plain = g.plain
-            picked = np.array([j for j, nm in enumerate(jl.names) if plain[j] and nm in sel], np.intp)
-            axis_rgba = np.array([(*rgb, 1.0) for rgb in AXIS_COLORS], np.float32)
-            got = jl.owners["axes"] = (key, picked, np.tile(np.repeat(axis_rgba, 2, axis=0), (len(picked), 1)))
-        picked = got[1]
-        if len(picked):
-            c = g.centres[picked]
-            ends = c[:, None, :] + g.frames[picked].transpose(0, 2, 1) * g.radii[picked][:, None, None]   # (K, 3, 3)
-            axes[0].append(np.stack((np.broadcast_to(c[:, None, :], ends.shape), ends), axis=2)
-                           .reshape(-1, 3).astype(np.float32))
-            axes[1].append(got[2])
-            axes[2].append(None)
-    return before, axes, after
-
-
-class _Build:
-    """What a view drew for one skeleton, kept between redraws: ``level`` says what may have changed since (None:
-    nothing; 'pose': its pose; 'light': its pose, selection, names or shown bones; 'edit': anything; 'new': build it
-    again from scratch)."""
-    __slots__ = ("level", "key", "jl", "stamp", "raw", "lines", "sel", "rgba", "parts", "pick", "sig", "registered")
-
-    def __init__(self):
-        _forget_build(self)
-
-
-def _forget_build(b):
-    b.level, b.key, b.jl, b.stamp, b.raw, b.lines = 'new', None, None, None, None, None
-    b.sel, b.rgba, b.parts, b.pick, b.sig, b.registered = None, None, None, None, None, None
-
-
-def _build_key(ob, kind):
-    """What a build of skeleton ``ob`` in Object / Pose Mode is for: its armature data, look and number of bones."""
-    return ob.data.as_pointer(), kind, len(ob.pose.bones)
-
-
-def _stamp(ob):
-    """What of skeleton ``ob``'s joint list an update without a pose or data change can change (a rename, a bone
-    collection shown or hidden, a joint's Visibility): its joints' names, hidden flags and shown bone collections."""
-    import numpy as np
-    pbs = ob.pose.bones
-    hide = np.zeros(len(pbs), bool)
-    pbs.foreach_get("hide", hide)
-    return tuple(pbs.keys()), hide.tobytes(), tuple(c.is_visible_effectively for c in ob.data.collections_all)
 
 
 def _parts(ob, scene, depsgraph, kind=None, playing=False, pick=None, keep=None):
@@ -1782,70 +869,11 @@ def _joint_parts(ob, scene, depsgraph, kind):
     return before, axes, after
 
 
-def _part_arrays(parts, perspective):
-    """([points], [colours], [int32 line index or None]) of the ``_parts`` of several skeletons in drawing order, the
-    axes only in perspective."""
-    pts, cols, index = [], [], []
-    for before, axes, after in parts:
-        for part in (before, axes, after) if perspective else (before, after):
-            pts += part[0]
-            cols += part[1]
-            index += part[2]
-    return pts, cols, index
-
-
-def _segments(pts, cols, index):
-    """Lists ``pts`` / ``cols`` of points and colours with their line indices ``index`` as segment end points and
-    their colours (a piece without an index is one already)."""
-    return ([p if x is None else p[x] for p, x in zip(pts, index)],
-            [c if x is None else c[x] for c, x in zip(cols, index)])
-
-
-def _join(parts, perspective):
-    """(points, colours) float32 arrays of the segment end points of the ``_parts`` of several skeletons, the axes
-    only in perspective."""
-    import numpy as np
-    pts, cols = _segments(*_part_arrays(parts, perspective))
-    if not pts:
-        return np.zeros((0, 3), np.float32), np.zeros((0, 4), np.float32)
-    return np.concatenate(pts), np.concatenate(cols)
-
-
 def _fast_lines(ob, scene, perspective, depsgraph, stick, playing=False, kind=None):
     """(points, colours) lists of float32 arrays of segment end points of skeleton ``ob`` drawn as ``kind`` (default:
     Maya joints, or sticks with ``stick``): the same lines and colours as the per-joint geometry, built in arrays."""
     parts = _parts(ob, scene, depsgraph, kind or ('STICK' if stick else 'OCTAHEDRAL'), playing)
     return _segments(*_part_arrays([parts], perspective))
-
-
-_ARMS = {}          # view layer pointer -> (layer generation, its armature objects in its object order)
-_LAYER_GEN = [0]    # bumped by every update that can add, remove or re-include objects (Scene / Collection), edits
-
-
-def armatures(view_layer):
-    """The armature objects of ``view_layer`` in its object order. Read again only after an update that can add,
-    remove, hide or re-include objects (a Scene or Collection update), an edit, undo or a file load: a redraw doesn't
-    walk every object of the scene."""
-    ptr = view_layer.as_pointer()
-    got = _ARMS.get(ptr)
-    if got is None or got[0] != _LAYER_GEN[0]:
-        if len(_ARMS) > 16:
-            _ARMS.clear()
-        got = _ARMS[ptr] = (_LAYER_GEN[0], [ob for ob in view_layer.objects if ob.type == 'ARMATURE'])
-    return got[1]
-
-
-def _view_skeletons(context, space):
-    """The skeletons this view shows, in the view layer's order (``context.visible_objects``): from the view layer's
-    armatures (``armatures``) in a redraw; a context that isn't Blender's lists its own visible objects."""
-    if isinstance(context, bpy.types.Context):
-        for _try in range(2):
-            try:
-                return [ob for ob in armatures(context.view_layer)
-                        if ob.visible_get() and ob.visible_in_viewport_get(space)]
-            except ReferenceError:              # removed since the list was read
-                _ARMS.clear()
-    return [ob for ob in context.visible_objects if ob.type == 'ARMATURE' and ob.visible_in_viewport_get(space)]
 
 
 def transform_op():
@@ -1896,48 +924,6 @@ def view_lines(context):
     return _join(parts, context.region_data.is_perspective)
 
 
-# --- what changed since the lines were built ------------------------------------------------------------------------
-# Every depsgraph update and new frame gets a generation (``_GEN``) and a record of what it can have changed:
-# ({skeleton pointer: level}, level of every skeleton or None, the Scene changed). Levels: 'pose' (its pose or place),
-# 'light' (its pose, selection, mode, names, display type or shown bone collections: an update that changed none of
-# its armature's pose or data), 'frame' (a new frame: its pose, and while nothing plays its joint list too), 'edit'
-# (anything about it), 'new' (a control shape's own geometry: build it again from scratch). A generation without a
-# record (``changed``, undo) counts as 'edit' for every skeleton.
-
-_LEVELS = {None: 0, 'pose': 1, 'light': 2, 'frame': 3, 'edit': 4, 'new': 5}
-_TOUCHED = {}       # generation -> record
-_SKEL_EDITS = {}    # skeleton object pointer -> updates that could change its joint list ('edit', 'new')
-_SKEL_LIGHT = {}    # skeleton object pointer -> 'light' updates (a selection, the active bone, Object / Pose Mode, ...)
-_ALL_EDITS = [0]    # changes that could change every skeleton's joint list (``changed``, undo, load)
-_DATA_USERS = {}    # armature data pointer -> pointers of the skeletons built from it
-_SHAPE_USERS = {}   # custom shape object session uid -> pointers of the skeletons whose controls draw it
-_SHAPE_PTRS = set()   # pointers of those custom shape objects
-
-
-def _top(a, b):
-    return a if _LEVELS[a] >= _LEVELS[b] else b
-
-
-def _note(levels, every=None, scene=False):
-    _GEN[0] += 1
-    if len(_TOUCHED) > 256:
-        _TOUCHED.clear()                   # no redraw consumed them: a missing record counts as everything
-    _TOUCHED[_GEN[0]] = (levels, every, scene)
-
-
-def edit_stamp(ob):
-    """Changes when something may have changed skeleton ``ob``'s joints (not its pose), except a 'light' update
-    (``light_stamp``): keys what is derived from them (``operators/joint_labels``)."""
-    return _ALL_EDITS[0], _SKEL_EDITS.get(ob.as_pointer(), 0)
-
-
-def light_stamp(ob):
-    """Changes with every 'light' update of skeleton ``ob``: an update of its armature without a pose or data change
-    (a selection, the active bone, a switch between Object and Pose Mode, a rename, a bone collection shown or
-    hidden, a bone's own hide flag). What is derived from the joints checks the names and flags it reads."""
-    return _SKEL_LIGHT.get(ob.as_pointer(), 0)
-
-
 @bpy.app.handlers.persistent
 def _depsgraph_post(_scene, depsgraph):
     """Record which skeletons an update can have changed: those it updated (a selection, a pose, an edit) or whose
@@ -1946,7 +932,7 @@ def _depsgraph_post(_scene, depsgraph):
     pose or an object is dragged only poses change: the joint lists and control shapes are kept."""
     try:
         if _posing():
-            moved = _moved_skeletons(depsgraph)
+            moved = _moved_skeletons(depsgraph, update_summary.updates(depsgraph, _depsgraph_post))
             if moved is None:
                 _LAYER_GEN[0] += 1
                 _note({}, 'pose')
@@ -1955,7 +941,7 @@ def _depsgraph_post(_scene, depsgraph):
             else:
                 _note({})
             return
-        got = _touched(depsgraph)
+        got = _touched(depsgraph, update_summary.updates(depsgraph, _depsgraph_post))
         if got is None:
             changed(shapes=True)
             return
@@ -1974,95 +960,6 @@ def _depsgraph_post(_scene, depsgraph):
         _note(levels, None, scene)
     except (ReferenceError, AttributeError):
         changed(shapes=True)
-
-
-def _touched(depsgraph):
-    """({skeleton an update touched: 'light' / 'edit'}, the Scene changed, skeletons whose control shapes' own
-    geometry it changed), or None when it can have changed anything (objects added, removed, linked: a Collection
-    update)."""
-    touched, rebuilt, scene = {}, set(), False
-    for u in depsgraph.updates:
-        id_ = u.id
-        if isinstance(id_, bpy.types.Object):
-            ob = id_.original
-            if ob.type == 'ARMATURE':
-                # a shading-only update (a material, the world, the object's colour or render visibility) changes no
-                # joint; a selection, mode, pose or data change comes with other flags or none
-                if not (u.is_updated_shading and not u.is_updated_transform and not u.is_updated_geometry):
-                    ptr = ob.as_pointer()
-                    touched[ptr] = _top(touched.get(ptr), 'light')
-            elif u.is_updated_geometry:     # a control's custom shape is read again (a mesh the rig deforms isn't one)
-                uid = ob.session_uid
-                _drop_widget(uid)
-                rebuilt |= _SHAPE_USERS.get(uid, set())
-        elif isinstance(id_, bpy.types.Armature):
-            # a pose, a joint's Visibility, a custom shape, a custom property: the armature updates with flags; a
-            # selection, the active bone, a rename, the display type or a bone collection shown / hidden: without
-            level = 'edit' if u.is_updated_transform or u.is_updated_geometry or u.is_updated_shading else 'light'
-            for ptr in _DATA_USERS.get(id_.original.as_pointer(), ()):
-                touched[ptr] = _top(touched.get(ptr), level)
-        elif isinstance(id_, bpy.types.Scene):
-            scene = True
-        elif isinstance(id_, bpy.types.Collection):
-            return None
-        elif _WIDGETS:
-            # other data: a custom shape's mesh / curve edited (also when the shape object isn't in the scene)
-            ptr = id_.original.as_pointer()
-            for uid in [uid for uid, got in _WIDGETS.items() if got[0] == ptr]:
-                _drop_widget(uid)
-                rebuilt |= _SHAPE_USERS.get(uid, set())
-    return touched, scene, rebuilt
-
-
-def _moved_skeletons(depsgraph):
-    """The skeletons a depsgraph update during a drag touched (those whose pose or place follows the dragged
-    control: the dragged one, rigs constrained or parented to it), or None when it touched something else that can
-    change drawn lines (a control shape's geometry, data that isn't an object)."""
-    out = set()
-    for u in depsgraph.updates:
-        id_ = u.id
-        if isinstance(id_, bpy.types.Object):
-            if id_.type == 'ARMATURE':
-                out.add(id_.original.as_pointer())
-                continue
-            if id_.original.as_pointer() in _SHAPE_PTRS:
-                return None
-            continue                    # a mesh deformed by the rig, a prop: not drawn as a joint
-        if isinstance(id_, bpy.types.Armature):
-            continue                    # comes with its skeleton object
-        return None
-    return out
-
-
-def _since(old, key):
-    """What changed between the redraws keyed ``old`` and ``key`` (``_world_key``): ({skeleton pointer: level},
-    level of every skeleton or None, the Scene changed, a new frame), or None when anything may have (another scene,
-    view layer or Joint Tool state, or a generation without a record)."""
-    if old is None or old[2:] != key[2:] or key[0] < old[0]:
-        return None
-    levels, every, scene = {}, None, False
-    for gen in range(old[0] + 1, key[0] + 1):
-        rec = _TOUCHED.get(gen)
-        if rec is None:
-            return None
-        for p, level in rec[0].items():
-            levels[p] = _top(levels.get(p), level)
-        every = _top(every, rec[1])
-        scene = scene or rec[2]
-    return levels, every, scene, old[1] != key[1]
-
-
-def changed(shapes=False):
-    """Something that can change the drawn joints other than a new frame (a Radius typed, a label, a display layer,
-    undo): every skeleton checks its joint list again. ``shapes``: the custom shapes' own geometry may have changed
-    too (read them again); an edited shape's geometry otherwise reaches the kit as its own update."""
-    _GEN[0] += 1
-    _EDITS[0] += 1
-    _ALL_EDITS[0] += 1
-    _LAYER_GEN[0] += 1
-    if shapes:
-        _WIDGETS.clear()
-        _WIDGET_GEN[0] += 1
 
 
 @bpy.app.handlers.persistent
@@ -2091,85 +988,6 @@ def _reload(*_args):
     changed(shapes=True)
     _LISTS.clear()
     _forget()
-
-
-_WORLD = [None]   # what the lines in _PARTS / _JOINED were built for: edit generation, frame, scene, view layer, ...
-_PARTS = {}       # skeleton object pointer -> its ``_parts``
-_PICK = {}        # skeleton object pointer -> the pick lines of its ``_parts`` (``_parts`` ``pick``) or None
-_JOINED = {}      # (skeletons drawn, perspective) -> [points, colours, GPU batch or None, its ``_COLOURS`` entry],
-                  # shared by the views
-_COLOURS = {}     # (skeletons drawn, perspective) -> [the parts' colour arrays, them joined, their GPU vertex buffer
-                  # or None]: kept while the skeletons are drawn in the same colours (a pose or a frame changes points)
-_BUILDS = {}      # skeleton object pointer -> its ``_Build`` (what its lines were built from)
-_SCALE = [None]   # the scene's (Joint Size, radius unit) the builds used
-
-
-def _world_key(scene, layer):
-    from ..operators import joint_preview
-    return (_GEN[0], scene.frame_current, scene.as_pointer(), layer.as_pointer(), joint_preview.running(),
-            str(joint_preview.STATE.get("current")))
-
-
-def _mark(dirt, playing):
-    """Mark every kept build with what may have changed since it was built (``_since``)."""
-    if dirt is None:
-        for b in _BUILDS.values():
-            b.level = _top(b.level, 'edit')
-        return
-    levels, every, scene, frame = dirt
-    if scene:
-        every = _top(every, 'pose')         # a selection / visibility: selections and places are checked
-    if frame:
-        every = _top(every, 'frame')
-    if every == 'frame':
-        every = 'pose' if playing else 'edit'        # a new frame without playback: as an edit (keyed Radius, ...)
-    for ptr, b in list(_BUILDS.items()):
-        level = _top(levels.get(ptr), every)
-        if level == 'new':
-            del _BUILDS[ptr]
-            _PARTS.pop(ptr, None)
-            _PICK.pop(ptr, None)
-        elif level is not None:
-            b.level = _top(b.level, level)
-
-
-def _register(ob, b):
-    """Remember which armature data and custom shapes the build ``b`` of skeleton ``ob`` reads (``_touched``)."""
-    ptr = ob.as_pointer()
-    _DATA_USERS.setdefault(ob.data.as_pointer(), set()).add(ptr)
-    jl = b.registered = b.jl
-    if jl is not None:
-        for shape in jl.ctrl_shapes:
-            _SHAPE_USERS.setdefault(shape.session_uid, set()).add(ptr)
-            _SHAPE_PTRS.add(shape.as_pointer())
-
-
-def _edit_signature(ob):
-    """What skeleton ``ob``'s Edit Mode joints are drawn from that can change without an update reaching the kit:
-    the edit bones' matrices, ends, sizes, flags and selection, names and order, Radius and Maya frame values, the
-    visible bone collections, the active bone, the world matrix, the display type. (A re-parented bone or a bone
-    collection assignment comes with an update.)"""
-    import numpy as np
-    from ..operators import joints
-    data = ob.data
-    ebs = data.edit_bones
-    n = len(ebs)
-    out = [data.display_type, tuple(ebs.keys()), ebs.active.name if ebs.active is not None else None,
-           tuple(tuple(r) for r in ob.matrix_world)]
-    for prop, size, dtype in (("matrix", 16, np.float32), ("head", 3, np.float32), ("tail", 3, np.float32),
-                              ("bbone_x", 1, np.float32), ("bbone_z", 1, np.float32),
-                              ("head_radius", 1, np.float32), ("tail_radius", 1, np.float32), ("hide", 1, bool),
-                              ("select", 1, bool), ("select_head", 1, bool), ("select_tail", 1, bool)):
-        a = np.empty(n * size, dtype)
-        ebs.foreach_get(prop, a)
-        out.append(a.tobytes())
-    colls = data.collections_all
-    out.append(tuple(c.is_visible_effectively for c in colls))
-    if not all(out[-1]):                       # a hidden bone collection hides its bones: who is in one matters
-        out.append(tuple(tuple(eb.collections.keys()) for eb in ebs))
-    radius, frame = joints.RADIUS, joints.MAYA_FRAME
-    out.append(tuple((eb.get(radius), tuple(q) if (q := eb.get(frame)) is not None else None) for eb in ebs))
-    return out
 
 
 def _joined(context):
@@ -2234,47 +1052,6 @@ def _joined(context):
     return hit
 
 
-def _join_view(shown, parts, persp):
-    """[points, colours, None, ``_COLOURS`` entry, int32 line index into the points] of the ``_parts`` of the
-    skeletons ``shown`` draws: the points joined again, the colours and the line index kept while every part still
-    has the same colour array (``_paint``) and line index."""
-    import numpy as np
-    pts, cols, index = _part_arrays(parts, persp)
-    joined = np.concatenate(pts) if pts else np.zeros((0, 3), np.float32)
-    held = _COLOURS.get(shown)
-    if (held is None or len(held[0]) != len(cols) or any(a is not b for a, b in zip(held[0], cols))
-            or any(a is not b for a, b in zip(held[3], index)) or len(held[1]) != len(joined)):
-        if len(_COLOURS) > 16:
-            _COLOURS.clear()
-        lines, start = [], 0
-        for p, x in zip(pts, index):
-            lines.append((np.arange(len(p), dtype=np.intc) if x is None else x) + np.intc(start))
-            start += len(p)
-        held = _COLOURS[shown] = [cols, np.concatenate(cols) if cols else np.zeros((0, 4), np.float32), None, index,
-                                  np.concatenate(lines) if lines else np.zeros(0, np.intc), None]
-    return [joined, held[1], None, held, held[4]]
-
-
-def joined_segments(hit):
-    """(points, colours) of joined lines ``hit`` (``_joined``) as segment end points (what its line index draws)."""
-    return hit[0][hit[4]], hit[1][hit[4]]
-
-
-_FORMATS = {}       # attribute name -> GPU vertex format of that attribute alone
-
-
-def _vertex_buffer(name, data):
-    """GPU vertex buffer of float32 rows ``data`` as the shader attribute ``name`` alone (filled in one copy)."""
-    from gpu.types import GPUVertBuf, GPUVertFormat
-    fmt = _FORMATS.get(name)
-    if fmt is None:
-        fmt = _FORMATS[name] = GPUVertFormat()
-        fmt.attr_add(id=name, comp_type='F32', len=data.shape[1], fetch_mode='FLOAT')
-    vbo = GPUVertBuf(fmt, len(data))
-    vbo.attr_fill(name, data)
-    return vbo
-
-
 def _new_batch(hit):
     """GPU batch of joined lines ``hit`` (``_joined``): the colours' vertex buffer and the line index, made once and
     kept with the colours (``_COLOURS``), and one vertex buffer of the points. The colours come first: Blender draws
@@ -2308,13 +1085,6 @@ def _save_pre(*_args):
 @bpy.app.handlers.persistent
 def _save_post(*_args):
     _tick()
-
-
-def see_through(space):
-    """Joints draw over every surface: X-Ray Joints, a wireframe view (no surface hides a joint, like Maya) or
-    X-Ray shading."""
-    shading = space.shading
-    return bool(space.overlay.show_xray_bone or shading.type == 'WIREFRAME' or shading.show_xray)
 
 
 def _draw():

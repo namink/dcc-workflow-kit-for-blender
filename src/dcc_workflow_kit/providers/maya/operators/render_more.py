@@ -148,7 +148,7 @@ class ALLSET_OT_toon_fill(bpy.types.Operator):
         if not obs:
             self.report({'WARNING'}, "Select objects to assign the fill shader to")
             return {'CANCELLED'}
-        mat = material.new_material('SURFACE') if self.kind == 'SOLID_COLOR' else toon_material(self.kind)
+        mat = toon_material(self.kind)
         material.assign(context, mat, obs)
         results.result(self, f"Assigned {mat.name}")
         return {'FINISHED'}

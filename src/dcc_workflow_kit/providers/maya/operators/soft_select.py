@@ -1,11 +1,13 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Maya soft selection as ONE global state (issues #1, #15) and the falloff maths of the colour overlay (#2).
 
-Maya's soft select is one global option (``cmds.softSelect(softSelectEnabled=...)``, off by default).
+Maya's soft select is one global option, off by default, for object and component mode alike.
 Blender has two per-scene flags, ``use_proportional_edit_objects`` (object mode)
-and ``use_proportional_edit`` (edit modes, UV), so the kit keeps both flags of every scene equal to ``STATE``:
-kit toggles call ``set_on``; a flag changed by Blender's own UI is pulled in (``pull``: depsgraph handler +
-msgbus); loads / undo / redo push the state back (a file saved with soft select on follows the global state).
+and ``use_proportional_edit`` (edit modes, UV). ``use_proportional_edit`` follows ``STATE``; the object-mode flag
+stays off, because with the Volume and Surface falloff the kit offers, soft select acts on components and moving,
+rotating or scaling whole objects moves only the selected ones, like Maya (#547). Kit toggles call ``set_on``; a
+flag changed by Blender's own UI is pulled in (``pull``: depsgraph handler + msgbus; the object-mode button toggles
+the state); loads / undo / redo push the state back (a file saved with soft select on follows the global state).
 
 Falloff maths = Blender's transform (``set_prop_dist``, ``transform_convert_mesh_connectivity_distance`` +
 ``geodesic_distance_propagate_across_triangle``, ``calculatePropRatio``) so the colours show what G / R / S
@@ -17,9 +19,17 @@ import bpy
 import numpy as np
 from bpy.app.handlers import persistent
 
+from .. import update_summary
+
 STATE = {"on": False}          # off by default
 
 FLAGS = ("use_proportional_edit_objects", "use_proportional_edit")
+EDIT_FLAG, OBJECT_FLAG = "use_proportional_edit", "use_proportional_edit_objects"
+
+
+def _wanted(flag):
+    """The value the kit keeps in ``flag``: the state for the component flag, off for the object-mode flag."""
+    return STATE["on"] if flag == EDIT_FLAG else False
 
 
 # --- state ---------------------------------------------------------------------------------------
@@ -36,13 +46,14 @@ def _scenes():
 
 
 def push():
-    """Write the state into both Blender flags of every scene."""
-    on = STATE["on"]
+    """Write the state into Blender's flags of every scene (the object-mode flag stays off)."""
     for sc in _scenes():
         ts = sc.tool_settings
         for f in FLAGS:
-            if getattr(ts, f) != on:
-                setattr(ts, f, on)
+            want = _wanted(f)
+            if getattr(ts, f) != want:
+                update_summary.wrote()
+                setattr(ts, f, want)
 
 
 def set_on(value, context=None):
@@ -57,16 +68,20 @@ def set_on(value, context=None):
 
 
 def pull(scene):
-    """A flag that differs from the state was changed by Blender (header button, menu, UV toolkit): it is the
-    new state for both modes. Returns True when the state changed."""
+    """A flag that differs from what the kit keeps was changed by Blender (header button, menu, UV toolkit): the
+    component flag gives the new state; the object-mode flag turned on toggles it. Returns True when the state
+    changed."""
     if scene is None:
         return False
     ts = scene.tool_settings
-    if any(getattr(ts, f) != STATE["on"] for f in FLAGS):
+    if not any(getattr(ts, f) != _wanted(f) for f in FLAGS):
+        return False
+    if getattr(ts, EDIT_FLAG) != STATE["on"]:
+        STATE["on"] = getattr(ts, EDIT_FLAG)
+    else:
         STATE["on"] = not STATE["on"]
-        push()
-        return True
-    return False
+    push()
+    return True
 
 
 def toggle(context):

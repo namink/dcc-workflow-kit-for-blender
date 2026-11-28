@@ -13,6 +13,7 @@ A short, unused D press latches pivot editing until D / Insert is pressed again.
 import bpy
 import time
 
+from .. import live_refs
 from . import keystate
 
 
@@ -174,7 +175,7 @@ def component_pivot_after(saved, moved):
 
 EDIT_MODE = 'EDIT_MESH'
 # Like Maya, the component pivot is edited with the Move / Rotate / Scale tools: the tool stays and its manipulator
-# shows the pivot handles (ui/manipulator.pivot_edit). With the Select tool D / Insert do nothing.
+# shows the pivot handles (ui/manipulator_frame.pivot_edit). With the Select tool D / Insert do nothing.
 PIVOT_TOOLS = ("builtin.move", "builtin.rotate", "builtin.scale")
 
 
@@ -612,7 +613,7 @@ class ALLSET_OT_hold(bpy.types.Operator):
             window = context.window
             from .manip_scale import TRANSFORM_MODALS
             if window is not None and any(op.bl_idname.startswith(TRANSFORM_MODALS)
-                                          for op in window.modal_operators):
+                                          for op in live_refs.running_modals(window)):
                 return {'PASS_THROUGH'}
             return self._finish(context)
         return {'PASS_THROUGH'}

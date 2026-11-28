@@ -13,9 +13,9 @@ file carries them over:
 
 - preferences: only the settings that differ from a fresh install (``maya_mode`` stays out: the Maya / Blender switch
   is not a setting to carry);
-- hotkeys: the kit hotkeys the user changed, by Maya command + context; they need Maya mode on (the kit's keys exist
-  only then): imported with Maya mode off, they wait in the extension's user folder and are given the next time
-  Maya mode starts;
+- hotkeys: the kit hotkeys the user changed, by Maya command + context + Maya key (a key taken by another command
+  is ``removed``); they need Maya mode on (the kit's keys exist only then): imported with Maya mode off, they wait in
+  the extension's user folder and are given the next time Maya mode starts;
 - shelves / marking_menus: the stored documents as they are.
 
 Importing replaces the parts that are in the file and chosen in the dialog; kit hotkeys the file doesn't name keep
@@ -34,7 +34,7 @@ FORMAT = "maya-workflow-kit-settings"
 VERSION = 1
 DEFAULT_NAME = "maya_workflow_kit_settings.json"
 PARTS = ("preferences", "hotkeys", "shelves", "marking_menus")
-SKIP_PREFS = frozenset(("maya_mode",))
+SKIP_PREFS = frozenset(("maya_mode", "user_keys"))   # user_keys: kept key edits, not a setting
 MODIFIERS = ("ctrl", "alt", "shift", "oskey")
 
 
@@ -86,33 +86,43 @@ def _hotkey_editor():
 
 
 def export_hotkeys(context):
-    """[{context, command, maya_key, key: {type, ctrl, alt, shift, oskey}}] of the changed kit hotkeys."""
+    """[{context, command, maya_key, key: {type, ctrl, alt, shift, oskey}, removed?}] of the changed kit hotkeys
+    (``removed``: the key was taken by another command)."""
     he = _hotkey_editor()
     out = []
     for row in he.changed_rows(context):
         _km, kmi = he.editable_item(context, row)
-        ev = he.item_event(kmi)
-        out.append({"context": row["context"], "command": row["command"], "maya_key": row["maya_key"],
-                    "key": {"type": ev["type"], **{m: bool(ev.get(m)) for m in MODIFIERS}}})
+        ev = he.item_event(kmi) if kmi is not None else row["event"]      # None: switched off in Preferences
+        entry = {"context": row["context"], "command": row["command"], "maya_key": row["maya_key"],
+                 "key": {"type": ev["type"], **{m: bool(ev.get(m)) for m in MODIFIERS}}}
+        if kmi is None or not he.has_key(kmi):
+            entry["removed"] = True
+        out.append(entry)
     return out
 
 
 def import_hotkeys(context, items):
     """Give the named kit hotkeys the file's keys. Returns (done, skipped [(command, reason)])."""
     he = _hotkey_editor()
-    by_name = {}
+    by_name, by_key = {}, {}
     for row in he.rows():
         if row["editable"]:
             by_name.setdefault((row["context"], row["command"]), row)
+            by_key[(row["context"], row["command"], row["maya_key"])] = row    # Undo z / Undo Ctrl+Z
     types = {i.identifier for i in bpy.types.KeyMapItem.bl_rna.properties["type"].enum_items}
     done, skipped = 0, []
+    removed = []
     for item in items:
         if not isinstance(item, dict) or not isinstance(item.get("key"), dict):
             continue
         name = (item.get("context"), item.get("command"))
-        row, key = by_name.get(name), item["key"]
+        row = by_key.get(name + (item.get("maya_key"),)) or by_name.get(name)
+        key = item["key"]
         if row is None:
             skipped.append((name[1], "no kit hotkey for this command"))
+            continue
+        if item.get("removed"):
+            removed.append(row)
             continue
         if key.get("type") not in types:
             skipped.append((name[1], f"unknown key {key.get('type')!r}"))
@@ -122,6 +132,11 @@ def import_hotkeys(context, items):
             done += 1
         else:
             skipped.append((name[1], "the kit key can't be changed here"))
+    for row in removed:             # after the new keys: a key given in the file never comes back by this
+        if he.unbind(context, row):
+            done += 1
+        else:
+            skipped.append((row["command"], "the kit key can't be changed here"))
     if done or items:
         he.refresh(context)
     return done, skipped

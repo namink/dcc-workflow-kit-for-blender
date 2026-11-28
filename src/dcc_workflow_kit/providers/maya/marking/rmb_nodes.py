@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """RMB list DG Traversal / Inputs / Outputs.
 
-Maya fills these submenus from the dependency graph when they open (Maya 2022
+Maya fills these submenus from the dependency graph when they open (Maya
 RMB marking menu). The kit's graph is what the Channel Box INPUTS and the Attribute Editor tabs already
 show: the last kit extrusion (polyExtrudeFace1), the modifiers (Maya deformers / poly nodes), the primitive's creation
 node (polyCube1), the constraints; the shape (mesh data) and its shading groups. ``nodes(ob)`` turns them into the

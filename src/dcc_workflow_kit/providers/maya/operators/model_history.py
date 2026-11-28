@@ -12,6 +12,8 @@ import bpy
 
 from . import history_references as references
 
+from .. import update_summary
+
 KEY = 'allset_model_history'
 BASE = 'allset_model_history_base'
 VERSION = 2
@@ -200,7 +202,8 @@ def _build(bm, spec, params, unit, ob, node_id=None):
     from . import extrude
     if spec is extrude.FACE:
         caps, moved = extrude.extrude(bm, [f for f in bm.faces if f.select], unit=unit,
-                                      history_id=node_id, **params, **extrude.mesh_axes(ob))
+                                      history_id=node_id, matrix=ob.matrix_world.copy(), **params,
+                                      **extrude.mesh_axes(ob))
         return caps, moved
     values = {key: params[key] for key in spec.fields+spec.hidden if key in params}
     values['_history_id'] = node_id
@@ -633,7 +636,7 @@ def changed(_scene, depsgraph):
     # a Mesh in the update flags the type (one array read; a pass over the update walks every ID of the depsgraph)
     if not depsgraph.id_type_updated('MESH'):
         return
-    for update in depsgraph.updates:
+    for update in update_summary.updates(depsgraph, changed):
         data = update.id.original
         if isinstance(data, bpy.types.Mesh) and update.is_updated_geometry and KEY in data:
             if data.session_uid not in _busy and _valid.get(data.session_uid) is not False:

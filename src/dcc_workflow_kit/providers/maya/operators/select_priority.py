@@ -169,6 +169,10 @@ def _segments(ob, kind, depsgraph):
     if kind == 'CURVE':
         ev = ob.evaluated_get(depsgraph)
         me = ev.to_mesh()
+        if me is None:
+            # no splines, or Geometry Nodes that leave no curve or mesh (only instances): no curve is drawn
+            ev.to_mesh_clear()
+            return [], [], 0.0
         try:
             co = np.empty(len(me.vertices) * 3)
             me.vertices.foreach_get("co", co)
@@ -241,6 +245,9 @@ def hits(context, region, rv3d, mouse):
         for (row, _a, _b), d in zip(thin, near):
             name, pri, _none = out[row]
             out[row] = (name, pri, max(float(d), 0.0))
+    # a distance dimension is picked on its drawn dimension line (#370), like a curve
+    from ..ui import distance_dimensions
+    out += [(name, CURVE, d) for name, d in distance_dimensions.hits(context, region, rv3d, mouse)]
     return out
 
 
@@ -267,24 +274,72 @@ def _enabled(context):
     return preferences.get(context).select_priority
 
 
+def face_edge_pick(context, region, event):
+    """#546: in edge mode Shift+click on an edge that is selected only as part of a selected face picks that edge
+    (active, still selected), like Maya, where the faces stay selected in edge mode and the edge is added to them
+    (Edit Mesh > Wedge turns the faces about it). Blender's toggle would drop the edge and so the face. True when
+    it picked. Multi-Component mode (F7) too, where a vertex near the mouse wins over the edge."""
+    if not event.shift or event.ctrl or event.alt:
+        return False
+    mode = tuple(context.tool_settings.mesh_select_mode)
+    if mode not in {(False, True, False), (True, True, True)} or context.region_data is None:
+        return False
+    from . import multi_cut, preselect
+    tool = preselect.tool_id(context)
+    if tool not in {"builtin.select", "builtin.select_box", "builtin.select_circle", "builtin.select_lasso"}             and tool not in preselect.TRANSFORM_TOOLS:
+        return False        # another tool's own Shift+click (Quad Draw) keeps it
+    import bmesh
+    hit = multi_cut.pick(context, region, context.region_data, (event.mouse_region_x, event.mouse_region_y),
+                         edges_only=not mode[0])
+    if hit is None or hit[1][0] != 'EDGE':
+        return False
+    ob = bpy.data.objects.get(hit[0])
+    if ob is None or ob.type != 'MESH' or ob.mode != 'EDIT':
+        return False
+    bm = bmesh.from_edit_mesh(ob.data)
+    bm.edges.ensure_lookup_table()
+    edge = bm.edges[hit[1][1]]
+    if not edge.select or bm.select_history.active is edge or not any(f.select for f in edge.link_faces):
+        return False
+    bm.select_history.discard(edge)
+    bm.select_history.add(edge)
+    bmesh.update_edit_mesh(ob.data, loop_triangles=False, destructive=False)
+    return True
+
+
 class ALLSET_OT_select_priority(bpy.types.Operator):
     """Click selection with Maya's priority: IK handles, joints and curves win over meshes"""
     bl_idname = "allset.select_priority"
     bl_label = "Select (Maya Priority)"
     bl_options = {'REGISTER', 'UNDO', 'INTERNAL'}
 
+    skinned_only: bpy.props.BoolProperty(options={'HIDDEN', 'SKIP_SAVE'})
+
     def invoke(self, context, event):
+        from . import joint_selection
         from ..ui import maya_joints
+        if getattr(self, 'skinned_only', False) and not joint_selection.moving_skinned(context):
+            return {'PASS_THROUGH'}
         with maya_joints.pick_memo():          # the coarse test and the joint pick read each skeleton once
             return ALLSET_OT_select_priority._invoke(self, context, event)
 
     def _invoke(self, context, event):
-        from ..ui import toolbox
+        from ..ui import maya_joints, toolbox
         space, region = context.space_data, context.region
         if context.mode == 'EDIT_LATTICE' and space is not None and not toolbox.is_toolbox(space):
             from . import lattice_pick       # #274: lattice points picked where a deformer draws them
             if lattice_pick.click(context, event):
                 return self._finish_pick(context, event, True)
+            return {'PASS_THROUGH'}
+        if context.mode == 'EDIT_MESH' and space is not None and not toolbox.is_toolbox(space):
+            if region is not None and region.type == 'WINDOW' and face_edge_pick(context, region, event):
+                return self._finish_pick(context, event, True)
+            from . import symmetry_select     # #445: with Symmetry on a pick takes the mirror partner too
+            if symmetry_select.applies(context) and region is not None and region.type == 'WINDOW':
+                changed = symmetry_select.click(context, event)
+                if event.value == 'PRESS':           # Tweak tool: a drag from here moves the selection
+                    return self._finish_pick(context, event, True)
+                return {'FINISHED'} if changed else {'CANCELLED'}
             return {'PASS_THROUGH'}
         if (context.mode not in {'OBJECT', 'POSE', 'EDIT_ARMATURE'} or space is None or space.type != 'VIEW_3D' or region is None
                 or region.type != 'WINDOW' or toolbox.is_toolbox(space)):
@@ -300,6 +355,17 @@ class ALLSET_OT_select_priority(bpy.types.Operator):
         # A click away from the skeleton releases the edit-mode lock.
         if context.mode == 'EDIT_ARMATURE':
             ob = context.active_object
+            if joint_selection.moving_skinned(context) and not maya_joints.is_maya_view(space, context.workspace):
+                if event.value == 'PRESS':
+                    return {'PASS_THROUGH'}  # Let the Tweak tool handle drags from the press.
+                # Native picking includes the width of B-Bones. With deselect_all off, even
+                # an already-selected bone counts as a hit, and a miss leaves selection alone.
+                result = bpy.ops.view3d.select(location=mouse, toggle=event.shift and not event.ctrl,
+                                               deselect=event.ctrl and not event.shift,
+                                               extend=event.shift and event.ctrl)
+                if 'FINISHED' not in result:
+                    joint_selection.select_object_at(context, mouse, event.shift, event.ctrl)
+                return {'FINISHED'}
             name = pick_joint(context, ob, mouse, radius)
             if name is not None:
                 if joint_selection.joint_mode(ob) == 'EDIT':

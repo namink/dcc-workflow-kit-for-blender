@@ -53,9 +53,13 @@ def _card(layout, title, icon='NONE', setting=None, context=None):
 def _native(layout, context, cls):
     # These native paint panels support Properties docks as well as 3D Views.
     # Keep the draw context intact; only interactive viewport actions are routed.
+    # The panels ask their ``self`` for the paint settings: ``paint_settings`` up to Blender 5.2,
+    # ``paint_settings_from_active_tool`` / ``paint_settings_from_mode`` from 5.3.
+    def settings(ctx, _mode=None):
+        return ctx.tool_settings.weight_paint
     holder = SimpleNamespace(layout=_BrushLayout(layout), is_popover=False, bl_label=cls.bl_label,
-                             paint_settings=lambda ctx: ctx.tool_settings.weight_paint,
-                             get_brush_mode=lambda ctx: 'PAINT_WEIGHT')
+                             paint_settings=settings, paint_settings_from_active_tool=settings,
+                             paint_settings_from_mode=settings, get_brush_mode=lambda ctx: 'PAINT_WEIGHT')
     cls.draw(holder, context)
 
 
@@ -246,8 +250,7 @@ def _unified(layout, context, name, label, pressure=None):
     ts = context.tool_settings
     brush = ts.weight_paint.brush
     ups = compat.unified_paint_settings(ts)
-    unified = {'weight': 'use_unified_weight', 'strength': 'use_unified_strength', 'size': 'use_unified_size'}[name]
-    owner = ups if getattr(ups, unified) or brush is None else brush
+    owner = compat.unified_value_owner(ups, brush, name)
     prop = name
     if name == 'size' and getattr(owner, 'use_locked_size', 'VIEW') == 'SCENE':
         prop = 'unprojected_size'
@@ -255,7 +258,7 @@ def _unified(layout, context, name, label, pressure=None):
     row.prop(owner, prop, text=label, slider=name != 'size')
     if pressure:
         _prop(row, brush, pressure, text='')
-    row.prop(ups, unified, text='', icon='BRUSHES_ALL')
+    _prop(row, compat.unified_switch_owner(ups, brush), 'use_unified_' + name, text='', icon='BRUSHES_ALL')
     return row
 
 
@@ -311,6 +314,16 @@ def _brush(layout, context):
     row.label(text='Mode:')
     for key in model.PAINT_MODES:
         row.operator('allset.skin_paint_mode', text=model.MODE_LABELS[key], depress=mode == key).mode = key
+    if mode == 'SELECT':
+        # Blender extra: Select mode drags a box (Maya's marquee) or draws a lasso
+        ws = context.workspace
+        tool = ws.tools.from_space_view3d_mode('PAINT_WEIGHT', create=False) if ws is not None else None
+        row = col.row(align=True)
+        row.label(text='Select:')
+        for shape, label in (('BOX', 'Box'), ('LASSO', 'Lasso')):
+            op = row.operator('allset.skin_paint_mode', text=label,
+                              depress=tool is not None and tool.idname == model.SELECT_SHAPES[shape])
+            op.mode, op.shape = 'SELECT', shape
     col.operator('allset.select_geometry')
     col.separator(factor=0.35)
     assets = col.row(align=True)
@@ -368,7 +381,7 @@ def _brush(layout, context):
             col.template_curve_mapping(brush, curve, brush=True, show_presets=True)
     # Maya "Profile" = the brush falloff
     col.separator(factor=0.5)
-    _native(col, context, paint_common.FalloffPanel)
+    _native(col, context, compat.weight_falloff_panel())
     _prop(col, brush, 'falloff_shape', text='Shape')
     _prop(col, brush, 'use_frontface', text='Front faces only')
     _prop(col, brush, 'use_frontface_falloff', text='Front-face falloff')
@@ -378,7 +391,7 @@ def _brush(layout, context):
     _prop(col, brush, 'blend', text='Blend mode')
     _prop(col, brush, 'use_accumulate', text='Accumulate strokes')
     ups = compat.unified_paint_settings(ts)
-    _prop(col, ups if ups.use_unified_size else brush, 'use_locked_size', text='Size units')
+    _prop(col, compat.unified_value_owner(ups, brush, 'size'), 'use_locked_size', text='Size units')
     _prop(col, ts, 'use_multipaint', text='Multi-paint selected joints')
     _prop(col, ts.weight_paint, 'use_group_restrict', text='Existing weights only')
 
@@ -561,14 +574,61 @@ def draw(layout, context):
 classes = (ALLSET_MT_weight_influences, ALLSET_UL_influences)
 
 
+# --- no brush shelf under the view -------------------------------------------------------------------------------
+# Maya's Paint Skin Weights has no brush strip under the view (the kit's Tool Settings pick the brush). Blender 5.3
+# opens its weight paint brush shelf the first time a view is in Weight Paint (``compat.weight_shelf_shown_first``):
+# in Maya mode that shelf type is registered again without that option, so Weight Paint opens without the shelf as
+# on 5.2 (it can still be opened, and the kit's brush picker still shows it as a popup). Blender mode gets the
+# type's own options back. Nothing in the file or the preferences changes.
+_shelf = {}
+
+
+def _register_shelf(cls, options):
+    """``cls`` (a registered asset shelf type) registered again with ``bl_options`` = ``options`` (None: its own)."""
+    bpy.utils.unregister_class(cls)
+    try:
+        if options is None:
+            if "bl_options" in cls.__dict__:
+                del cls.bl_options
+        else:
+            cls.bl_options = options
+    finally:
+        bpy.utils.register_class(cls)
+
+
+def hide_brush_shelf():
+    cls = compat.weight_shelf_shown_first()
+    if cls is None or _shelf:
+        return
+    own = cls.__dict__.get("bl_options")
+    try:
+        _register_shelf(cls, set(cls.bl_options) - {'DEFAULT_VISIBLE'})
+    except (RuntimeError, ValueError, TypeError) as ex:
+        print("Maya Workflow Kit: weight paint brush shelf left as it is:", ex)
+        return
+    _shelf.update(cls=cls, own=own)
+
+
+def restore_brush_shelf():
+    if not _shelf:
+        return
+    cls, own = _shelf.pop("cls"), _shelf.pop("own")
+    try:
+        _register_shelf(cls, own)
+    except (RuntimeError, ValueError, TypeError) as ex:
+        print("Maya Workflow Kit: could not give the weight paint brush shelf its options back:", ex)
+
+
 def register():
     status_icons.EXTRA['skin_weights'] = _weight_icon
     for cls in classes:
         bpy.utils.register_class(cls)
     bpy.types.UI_MT_list_item_context_menu.append(draw_list_item_menu)
+    hide_brush_shelf()
 
 
 def unregister():
+    restore_brush_shelf()
     bpy.types.UI_MT_list_item_context_menu.remove(draw_list_item_menu)
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)

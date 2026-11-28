@@ -7,7 +7,7 @@ a handle square (#919191) inside each end and the start / end frames next to the
 segment moves the playback range, dragging a handle moves that end.
 
 Blender has no such widget and Python can't tell where a header layout put an item, so
-``time_slider.draw_range_slider`` leaves an empty label where the bar goes (a button would take the
+``time_slider_header.draw_range_slider`` leaves an empty label where the bar goes (a button would take the
 mouse) and the header POST_PIXEL handler here finds that gap by reading one row of the header it has
 just drawn (``bar_span``), draws the bar there and remembers the rectangle for
 ``allset.range_bar_drag`` ("Screen" keymap: a click on an empty label reaches the window keymaps).
@@ -24,9 +24,12 @@ HANDLE_RGB = (0x91 / 255, 0x91 / 255, 0x91 / 255, 1.0)
 TEXT_RGB = (0.8, 0.8, 0.8, 1.0)            # light grey of the frame numbers
 
 
-def _themed(color, field):
-    """A Range Slider colour moved with the Blender theme's Timeline colours (ui/theme_follow.py)."""
+def _themed(color, field, theme=None):
+    """A Range Slider colour moved with the Blender theme's Timeline colours (ui/theme_follow.py). ``theme``: {field:
+    the theme colour} already read for this draw."""
     from . import theme_follow
+    if theme is not None:
+        return theme_follow.follow(color, "dopesheet_editor", field, theme[field])
     return theme_follow.follow(color, "dopesheet_editor", field)
 
 
@@ -46,7 +49,7 @@ _handle = []
 # stretching item, so the bar label is BAR_UNITS + the extra units here, and each draw moves the extra toward
 # the spare room it sees (the spacer after the end fields).
 _extra = {}      # area pointer -> extra ui units of the bar label
-_planned = {}    # area pointer -> the label's base ui units this draw (time_slider.row_plan: shorter on a short header)
+_planned = {}    # area pointer -> the label's base ui units this draw (time_slider_header.row_plan: shorter on a short header)
 _gaps = {}       # area pointer -> (header size and bar width, (span, spare)) of the last header row read
 row_reads = [0]  # header rows read so far
 SPARE_UNITS = 1  # room left in the spacer
@@ -137,8 +140,21 @@ def next_extra(extra, spare_px, unit, floor=0):
     return extra
 
 
+_settled = {}    # (header width, base units) -> extra units a bar settled at: where a new area's bar starts
+SETTLED_MAX = 32
+
+
+def _seed_key(area):
+    return next((r.width for r in area.regions if r.type == 'HEADER'), 0), plan_units(area)
+
+
 def extra_units(area):
-    return _extra.get(area.as_pointer(), 0) if area is not None else 0
+    """A new area (a Maya layout just appended by the switch) starts from the width the last bar in a header
+    of this size settled at, so its bar doesn't slide into place over the first frames."""
+    if area is None:
+        return 0
+    got = _extra.get(area.as_pointer())
+    return _settled.get(_seed_key(area), 0) if got is None else got
 
 
 def plan_units(area, units=None):
@@ -278,10 +294,11 @@ def active(context):
 _shapes = {}     # (x0, y0, x1, y1, r) -> GPU batch of that rounded rectangle (the bar redraws the same ones)
 
 
-def _rounded(x0, y0, x1, y1, r, colour):
+def _rounded(x0, y0, x1, y1, r, colour, shader=None):
     import math
     import gpu
-    shader = gpu.shader.from_builtin('UNIFORM_COLOR')
+    if shader is None:
+        shader = gpu.shader.from_builtin('UNIFORM_COLOR')
     key = (x0, y0, x1, y1, r)
     batch = _shapes.get(key)
     if batch is None:
@@ -314,7 +331,7 @@ def _read_row(region, y):
     buf = compat.read_region_row(fb, region, y)
     if buf is None:
         return []
-    px = np.frombuffer(buf, dtype=np.uint8).reshape(-1, 4)[:region.width].astype(np.int32)
+    px = np.frombuffer(compat.flat_buffer(buf), dtype=np.uint8).reshape(-1, 4)[:region.width].astype(np.int32)
     return px[:, 0] | (px[:, 1] << 8) | (px[:, 2] << 16)
 
 
@@ -330,9 +347,9 @@ def _codes(row):
 
 def find_gap(area, region, unit, playing):
     """(span, spare) of the bar's gap in the header just drawn: ``bar_span`` and ``spare_after`` of one header row
-    (``row_reads[0]`` counts the reads). While playback or a transform (a drag) runs the header keeps its layout, so
-    the gap found for the same header size and bar width is used again instead of reading the row on every redraw
-    (a framebuffer read and a scan of every pixel)."""
+    (``row_reads[0]`` counts the reads). While playback or a transform (a drag) runs, or a window is dragged or
+    resized, the header keeps its layout, so the gap found for the same header size and bar width is used again
+    instead of reading the row on every redraw (a framebuffer read waits for the GPU, then a scan of every pixel)."""
     key = (region.width, region.height, unit, plan_units(area), extra_units(area))
     got = _gaps.get(area.as_pointer())
     if playing and got is not None and got[0] == key:
@@ -348,6 +365,22 @@ def find_gap(area, region, unit, playing):
     return found
 
 
+_theme_colours = {}     # (theme back, theme text) -> the bar's (track, segment, handle, text) colours
+
+
+def _colours(theme):
+    """The bar's colours for the Timeline theme colours ``theme`` = (back, text), worked out once per theme (the
+    header redraws on every played frame)."""
+    got = _theme_colours.get(theme)
+    if got is None:
+        if len(_theme_colours) > 8:
+            _theme_colours.clear()
+        cur = dict(zip(("back", "text"), theme))
+        got = _theme_colours[theme] = (_themed(TRACK_RGB, "back", cur), _themed(SEGMENT_RGB, "back", cur),
+                                       _themed(HANDLE_RGB, "back", cur), _themed(TEXT_RGB, "text", cur))
+    return got
+
+
 def draw():
     """POST_PIXEL of Dope Sheet HEADER regions."""
     context = bpy.context
@@ -358,23 +391,32 @@ def draw():
     unit = round(20 * scale)
     screen = context.screen
     from .maya_joints import scrubbing, transforming
+    from . import window_motion
+    moved = window_motion.moved(("range", region.as_pointer()))
     found = find_gap(area, region, unit, (screen is not None and screen.is_animation_playing) or transforming()
-                     or scrubbing())
+                     or scrubbing() or moved)
     if found is None:
         return
     span, spare = found
     if span is None:
         _bars.pop(area.as_pointer(), None)
-        if _extra.pop(area.as_pointer(), 0):    # the bar no longer fits: start again from its base width
+        # the bar no longer fits: start again from its base width (a settled width that doesn't fit goes too)
+        if _settled.pop(_seed_key(area), 0) | _extra.pop(area.as_pointer(), 0):
             _redraw_later(area.as_pointer())
         return
     key = area.as_pointer()
-    extra = _extra.get(key, 0)
+    extra = extra_units(area)
     planned = plan_units(area)
     grown = next_extra(extra, spare, unit, floor=-max(0, int(planned - MIN_BAR_UNITS)))
+    _extra[key] = grown
     if grown != extra:
-        _extra[key] = grown
         _redraw_later(key)
+    else:
+        seed = _seed_key(area)
+        _settled.pop(seed, None)        # re-insert: newest last
+        _settled[seed] = extra
+        while len(_settled) > SETTLED_MAX:      # every width a resize passed would stay forever
+            _settled.pop(next(iter(_settled)))
     pad = round(4 * scale)
     x0, x1 = span[0] + pad, span[1] - pad
     y0 = (region.height - unit) / 2.0
@@ -387,22 +429,25 @@ def draw():
 
     import blf
     import gpu
+    from . import theme_follow
+    track, segment, handle, text = _colours(tuple(theme_follow.theme_color("dopesheet_editor", f)
+                                                  for f in ("back", "text")))
+    shader = gpu.shader.from_builtin('UNIFORM_COLOR')
     k = unit / MAYA_BAR_H
     gpu.state.blend_set('ALPHA')
-    _rounded(x0, y0, x1, y1, 4 * k, _themed(TRACK_RGB, "back"))
+    _rounded(x0, y0, x1, y1, 4 * k, track, shader)
     ps, pe = playback(scene)
     hw, hh = HANDLE[0] * k, HANDLE[1] * k
     bar["handle_w"] = (HANDLE_INSET + HANDLE[0]) * k
     xs, xe = visual_segment(bar, ps, pe, bar["handle_w"])
     inset = SEG_INSET * k
-    _rounded(xs, y0 + inset, xe, y1 - inset, 4 * k, _themed(SEGMENT_RGB, "back"))
+    _rounded(xs, y0 + inset, xe, y1 - inset, 4 * k, segment, shader)
     hy0 = (y0 + y1 - hh) / 2.0
     hx0, hx1 = xs + HANDLE_INSET * k, xe - HANDLE_INSET * k - hw
-    handle = _themed(HANDLE_RGB, "back")
-    _rounded(hx0, hy0, hx0 + hw, hy0 + hh, 3 * k, handle)
-    _rounded(hx1, hy0, hx1 + hw, hy0 + hh, 3 * k, handle)
+    _rounded(hx0, hy0, hx0 + hw, hy0 + hh, 3 * k, handle, shader)
+    _rounded(hx1, hy0, hx1 + hw, hy0 + hh, 3 * k, handle, shader)
     blf.size(0, TEXT_PX * scale)
-    blf.color(0, *_themed(TEXT_RGB, "text"))
+    blf.color(0, *text)
     ty = (y0 + y1) / 2.0 - TEXT_PX * scale * 0.35
     a_txt, b_txt = f"{ps:g}", f"{pe:g}"
     wa, wb = blf.dimensions(0, a_txt)[0], blf.dimensions(0, b_txt)[0]
@@ -514,5 +559,7 @@ def unregister():
     _planned.clear()
     _gaps.clear()
     _shapes.clear()
+    from . import window_motion
+    window_motion.forget()
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)

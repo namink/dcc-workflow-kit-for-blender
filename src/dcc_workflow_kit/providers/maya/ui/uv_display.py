@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Maya UV Editor display keys and Move UV Shell.
 
-Maya 2022 UV Editor hotkeys (context polyTexturePlacementPanel) and View menu:
+Maya UV Editor hotkeys (context polyTexturePlacementPanel) and View menu:
 
 - 4 Wireframe / 5 Shaded (Display Mode radio) -> ``SpaceUVEditor.show_faces`` off / on (Shaded also sets
   ``uv_face_opacity`` 1). ``uv_face_opacity`` 0 alone still draws grey face fills (GUI shot): no wireframe.
@@ -18,7 +18,7 @@ Maya 2022 UV Editor hotkeys (context polyTexturePlacementPanel) and View menu:
   counter-clockwise (front-facing) faces blue, clockwise (flipped) faces red; Wireframe (4) turns it off
   (``WindowManager.allset_uv_face_colors``).
 
-Shell borders follow the island rule (operators/uv_tools.islands: faces join where their UVs match at both
+Shell borders follow the island rule (operators/uv_islands.islands: faces join where their UVs match at both
 ends of an edge): an edge is a border on a face's side when no other shown face shares the same UVs across it.
 A seam edge is a border too: Cut UVs marks one, and like Maya the cut edge shows as a border at once, also a
 single edge inside a shell that stays in one piece.
@@ -37,7 +37,9 @@ import numpy as np
 from bpy.props import BoolProperty, EnumProperty
 from gpu_extras.batch import batch_for_shader
 
+from .. import live_refs
 from .. import results
+from .. import update_summary
 from .. import compat
 from ..operators import uv_arrays, uv_tools
 from .. import i18n
@@ -107,6 +109,58 @@ _cache = {}          # object pointer -> float32 array (2N x 2) of UV line point
 _handle = []
 
 
+# While a UV drag runs the borders follow it from what was kept before the drag: the BMesh loop pair of each border
+# side and the UV layer (only their UV values are read: no BMesh walk, no evaluated mesh, see
+# operators/uv_arrays.EDIT_MODALS).
+_drag = {}           # (object pointer, synced) -> (side array the loops were taken for, [(loop, next loop)], UV layer,
+                     # BMesh)
+_drag_sel = {}       # (object pointer, synced) -> bool mask of the selected border sides, last drawn
+FOLLOW_MODALS = ("TRANSFORM_OT", "UV_OT")    # they move UVs only: the loops stay
+
+
+def _keep_for_drag(ob, synced):
+    """Keep the loops of ``ob``'s border sides for a later drag (rebuilt only when the border sides change)."""
+    key = (ob.as_pointer(), synced)
+    sides = _cache.get(("sides", key))
+    kept = _drag.get(key)
+    if sides is None or (kept is not None and kept[0] is sides and kept[1][0][0].is_valid):
+        return      # (the edit BMesh can be built again without a mesh update: then the kept loops are gone)
+    bm = bmesh.from_edit_mesh(ob.data)
+    uv = bm.loops.layers.uv.active
+    if uv is None or not len(sides):
+        _drag.pop(key, None)
+        return
+    bm.faces.ensure_lookup_table()
+    faces = bm.faces
+    pairs = []
+    for f, c in sides.tolist():
+        loop = faces[f].loops[c]
+        pairs.append((loop, loop.link_loop_next))
+    _drag[key] = (sides, pairs, uv, bm)     # the BMesh kept too: its loops stay valid while it lives
+
+
+def _drag_segments(ob, synced):
+    """(border points, selected border points) of ``ob`` during a UV drag, from the kept loops; None if none kept."""
+    key = (ob.as_pointer(), synced)
+    kept = _drag.get(key)
+    if kept is None:
+        return None
+    _sides, pairs, uv, _bm = kept
+    if not pairs[0][0].is_valid:
+        return None
+    pts = np.fromiter((c for a, b in pairs for c in (*a[uv].uv, *b[uv].uv)), np.float32,
+                      4 * len(pairs)).reshape(-1, 2)
+    sel = _drag_sel.get(key)
+    if sel is None or len(sel) != len(pairs):
+        return pts, pts[:0]
+    return pts, pts.reshape(-1, 2, 2)[sel].reshape(-1, 2)
+
+
+def _only_follow_modals(wm):
+    ops = [op.bl_idname for w in wm.windows for op in live_refs.running_modals(w)]
+    return all(i.startswith(FOLLOW_MODALS) for i in ops if i.startswith(uv_arrays.EDIT_MODALS))
+
+
 def _edit_meshes(context):
     obs = getattr(context, "objects_in_mode_unique_data", None) or ()
     return [o for o in obs if o.type == 'MESH']
@@ -135,6 +189,9 @@ def segments_of(ob, synced):
 def selected_segments(ob, synced):
     """UV line points (2N x 2) of the border sides whose edge is selected, in the order of ``segments_of``: drawn
     again in the selection colour, so a selected border edge shows like any other selected edge (#361).
+    With UV Sync Selection on and the mesh selection shown (a pick in the 3D View), face select mode shows a side
+    selected when its own face is selected, like Maya and Blender's own UV lines: the other shells' sides on the
+    same mesh edges stay unselected (#527); vertex / edge mode show every side of a selected edge.
     With UV Sync Selection on a selection change sends a depsgraph update, so the answer is cached with the border
     lines; with it off a UV selection change sends none, so the selection is read on every call."""
     pts = segments_of(ob, synced)
@@ -142,7 +199,8 @@ def selected_segments(ob, synced):
         return pts
     me = ob.data
     key = (ob.as_pointer(), synced)
-    sig = (me.total_vert_sel, me.total_edge_sel, me.total_face_sel)
+    by_face = tuple(bpy.context.scene.tool_settings.mesh_select_mode) == (False, False, True)
+    sig = (me.total_vert_sel, me.total_edge_sel, me.total_face_sel, by_face)
     if synced:
         hit = _cache.get(("selected", key))
         if hit is not None and hit[0] == sig:
@@ -151,6 +209,7 @@ def selected_segments(ob, synced):
     on_loops = compat.uv_selection_on_loops(bm, synced)
     if not on_loops and not me.total_edge_sel:
         out = pts[:0]
+        _drag_sel.pop(key, None)
     else:
         loops = _cache.get(("loops", key))
         if loops is None:     # the BMesh loops (and edges) of the border sides; dropped with the lines on a mesh update
@@ -161,10 +220,13 @@ def selected_segments(ob, synced):
             _cache[("edges", key)] = [l.edge for l in loops]
         if on_loops:
             sel = np.fromiter(map(compat.uv_edge_selected_reader(), loops), bool, len(loops))
+        elif by_face:
+            sel = np.fromiter((l.face.select for l in loops), bool, len(loops))
         else:
             edges = _cache[("edges", key)]
             sel = np.fromiter(map(attrgetter("select"), edges), bool, len(edges))
         out = pts.reshape(-1, 2, 2)[sel].reshape(-1, 2)
+        _drag_sel[key] = sel
     if synced:
         _cache[("selected", key)] = (sig, out)
     return out
@@ -209,6 +271,8 @@ def _draw():
     space = context.space_data
     region = context.region
     try:
+        if context.mode != 'EDIT_MESH':
+            _drag.clear()       # the edit BMeshes are gone
         if space is None or space.mode != 'UV' or context.mode != 'EDIT_MESH' or not space.uv_editor.show_uv:
             return
         v2d = region.view2d
@@ -216,18 +280,27 @@ def _draw():
         p1 = v2d.view_to_region(1.0, 1.0, clip=False)
         if p0[0] == p1[0] or p0[1] == p1[1]:
             return
-        if uv_arrays.editing_now(wm):
-            return      # a UV drag runs: the borders come back when it ends (crash fix, operators/uv_arrays.py)
-        if wm.allset_uv_face_colors and space.uv_editor.show_faces:
-            _draw_faces(context, p0, p1)
-        if not (wm.allset_uv_shell_borders or wm.allset_uv_texture_borders):
-            return
         synced = context.scene.tool_settings.use_uv_select_sync
         obs = _edit_meshes(context)
-        pts = [p for p in (segments_of(ob, synced) for ob in obs) if len(p)]
+        if uv_arrays.editing_now(wm):
+            # a UV drag runs: the mesh is not read (crash fix, operators/uv_arrays.py); the borders follow the drag
+            # from the loops kept before it, so they stay on screen (#571)
+            if not (wm.allset_uv_shell_borders or wm.allset_uv_texture_borders) or not _only_follow_modals(wm):
+                return
+            got = [g for g in (_drag_segments(ob, synced) for ob in obs) if g is not None]
+            pts = [g[0] for g in got if len(g[0])]
+            sel = [g[1] for g in got if len(g[1])]
+        else:
+            if wm.allset_uv_face_colors and space.uv_editor.show_faces:
+                _draw_faces(context, p0, p1)
+            if not (wm.allset_uv_shell_borders or wm.allset_uv_texture_borders):
+                return
+            pts = [p for p in (segments_of(ob, synced) for ob in obs) if len(p)]
+            sel = [p for p in (selected_segments(ob, synced) for ob in obs) if len(p)]
+            for ob in obs:
+                _keep_for_drag(ob, synced)
         if not pts:
             return
-        sel = [p for p in (selected_segments(ob, synced) for ob in obs) if len(p)]
         theme = context.preferences.themes[0].image_editor
         if wm.allset_uv_shell_borders:
             rgb = SHELL_RGB
@@ -245,12 +318,13 @@ def _draw():
         gpu.state.blend_set('NONE')
     except (ReferenceError, AttributeError, ValueError):
         _cache.clear()
+        _drag.clear()      # kept loops of a mesh that has gone (undo, edit mode left)
 
 
 @bpy.app.handlers.persistent
 def _invalidate(_scene=None, depsgraph=None):
     if depsgraph is not None and not any(isinstance(u.id, (bpy.types.Mesh, bpy.types.Object))
-                                         for u in depsgraph.updates):
+                                         for u in update_summary.updates(depsgraph, _invalidate)):
         return
     _cache.clear()
     uv_arrays.invalidate()
@@ -634,6 +708,8 @@ def _load_pre(*_args):
     _iso_sets.clear()
     _hidden_image.clear()
     _cache.clear()
+    _drag.clear()
+    _drag_sel.clear()
     _shell_tool["on"] = False
     try:
         bpy.context.window_manager.allset_uv_isolate = False
@@ -687,6 +763,8 @@ def unregister():
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)
     _cache.clear()
+    _drag.clear()
+    _drag_sel.clear()
     uv_arrays.invalidate()
     _isolated.clear()
     _iso_sets.clear()

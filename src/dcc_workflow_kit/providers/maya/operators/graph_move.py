@@ -21,6 +21,8 @@ import math
 import bpy
 from bpy.props import EnumProperty
 
+from .. import live_refs
+
 DECIDE_PX = 3          # Maya: the first move reaching 3 px from the press decides the axis
 WHOLE_EPS = 1e-4       # a time this close to a whole frame counts as that frame
 SCALE_PX = 100.0       # Scale Keys tool: px of drag per 1.0 of scale
@@ -28,7 +30,9 @@ ROTATE_DEG_PER_PX = 0.5   # rotate tool on keys: tangent turn per px of drag
 
 TOOLS = (('MOVE', "Move Keys", "Middle-mouse drags move the selected keys (w)"),
          ('ROTATE', "Rotate Tangents", "Middle-mouse drags turn the selected keys' tangents (e)"),
-         ('SCALE', "Scale Keys", "Middle-mouse drags scale the selected keys around the press point (r)"))
+         ('SCALE', "Scale Keys", "Middle-mouse drags scale the selected keys around the press point (r)"),
+         ('REGION', "Region Keys", "A marquee leaves its region as a box: drag a side or corner to scale the keys "
+          "inside, drag inside it to move them"))
 
 
 # --- pure rules -------------------------------------------------------------------------------------------------
@@ -109,17 +113,20 @@ def time_snap_on(scene):
 # --- curves -----------------------------------------------------------------------------------------------------
 
 def _value_scales(context, fcurves):
-    """Per curve: stored value per display value of the Graph Editor's value axis (rotation in degrees, normalized
-    view)."""
+    """Per curve: stored value per display value of the Graph Editor's value axis (rotation in degrees, lengths in the
+    scene's length unit where Blender draws them so, normalized view)."""
     from ..ui import graph_units
     units = graph_units.curve_units(fcurves)
     degrees = getattr(context.scene.unit_settings, "system_rotation", 'DEGREES') == 'DEGREES'
+    length = graph_units.display_factor(context.scene, 'LENGTH')
     normalized = bool(getattr(context.space_data, "use_normalization", False))
     out = []
     for fc, unit in zip(fcurves, units):
         k = 1.0
         if unit == 'ROTATION' and degrees:
             k *= math.pi / 180.0
+        elif unit == 'LENGTH' and length != 1.0:
+            k /= length
         if normalized:
             pts = [(kp.co.y, kp.handle_left.y, kp.handle_right.y, kp.interpolation) for kp in fc.keyframe_points]
             f, _off = normalization(pts)
@@ -432,6 +439,8 @@ class ALLSET_OT_graph_key_drag(bpy.types.Operator):
         region = self._region = context.region
         self._press = (event.mouse_x - region.x, event.mouse_y - region.y)
         self._tool = key_tool(context)
+        if self._tool == 'REGION':
+            self._tool = 'MOVE'                 # the Region Keys tool's middle drag moves the keys
         self._lock = not unconstrained(context) and self._tool != 'ROTATE'
         self._axis = None
         self._origin = self._press
@@ -526,7 +535,7 @@ def drop_fractions(fcurves):
 
 
 def _transform_running(wm):
-    return any(op.bl_idname.startswith("TRANSFORM_OT") for w in wm.windows for op in w.modal_operators)
+    return any(op.bl_idname.startswith("TRANSFORM_OT") for w in wm.windows for op in live_refs.running_modals(w))
 
 
 def _finish_move():

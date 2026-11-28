@@ -12,6 +12,7 @@ Maya commands (meanings from Maya's annotations):
 
 import bpy
 from bpy.props import EnumProperty
+from mathutils import Vector
 
 from .. import results
 
@@ -65,10 +66,16 @@ def background_state(shading):
     return v
 
 
+_GRADIENT_LINEAR = []      # GRADIENT_BASE in linear values (worked out on first use)
+
+
 def is_gradient(shading):
     """True when ``shading`` (a 3D View's) shows the kit's Maya gradient."""
-    return (shading.background_type == 'VIEWPORT'
-            and all(abs(a - srgb_to_linear(b)) < 1e-4 for a, b in zip(shading.background_color, GRADIENT_BASE)))
+    if shading.background_type != 'VIEWPORT':
+        return False
+    if not _GRADIENT_LINEAR:
+        _GRADIENT_LINEAR.extend(srgb_to_linear(b) for b in GRADIENT_BASE)
+    return all(abs(a - b) < 1e-4 for a, b in zip(shading.background_color[:], _GRADIENT_LINEAR))
 
 
 def next_state(state):
@@ -294,6 +301,100 @@ def _batch():
     return _gpu["shader"], _gpu["batch"]
 
 
+def _plane_shader():
+    """Depth-only shader of an image plane's quad: it marks the empty background under the plane's opaque pixels as
+    just in front of the far plane (``z = 0.9999 w``), so the gradient leaves them and meshes keep their own depth."""
+    if "plane" not in _gpu:
+        import gpu
+        from gpu_extras.batch import batch_for_shader
+        iface = gpu.types.GPUStageInterfaceInfo("allset_plane_iface")
+        iface.smooth('VEC2', 'uv')
+        info = gpu.types.GPUShaderCreateInfo()
+        info.push_constant('MAT4', 'mvp')
+        info.push_constant('VEC4', 'rect')
+        info.push_constant('FLOAT', 'opacity')
+        info.sampler(0, 'FLOAT_2D', 'image')
+        info.vertex_in(0, 'VEC2', 'pos')
+        info.vertex_out(iface)
+        info.fragment_out(0, 'VEC4', 'fragColor')
+        info.vertex_source(
+            "void main() {"
+            " uv = pos;"
+            " gl_Position = mvp * vec4(rect.xy + pos * rect.zw, 0.0, 1.0);"
+            " gl_Position.z = 0.9999 * gl_Position.w; }")
+        info.fragment_source(
+            "void main() { if (texture(image, uv).a * opacity < 0.05) { discard; } fragColor = vec4(0.0); }")
+        shader = gpu.shader.create_from_info(info)
+        quad = batch_for_shader(shader, 'TRI_FAN', {"pos": ((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0))})
+        _gpu.update(plane=shader, quad=quad)
+    return _gpu["plane"], _gpu["quad"]
+
+
+def _plane_rect(ob):
+    """(x, y, width, height) of an image empty's picture in its object space (the empty's size along the longer
+    side of the image, placed by its offset)."""
+    w, h = ob.data.size[:] if ob.data.size[0] and ob.data.size[1] else (1, 1)
+    ax, ay = (1.0, h / w) if w >= h else (w / h, 1.0)
+    size = ob.empty_display_size
+    ox, oy = ob.empty_image_offset
+    return (ox * size * ax, oy * size * ay, size * ax, size * ay)
+
+
+def _plane_shown(ob, space, rv3d, view_layer):
+    """The image empty's picture is drawn in this view (Blender's per-view rules for image empties)."""
+    if ob.type != 'EMPTY' or ob.empty_display_type != 'IMAGE' or ob.data is None:
+        return False
+    if not ob.visible_get(view_layer=view_layer, viewport=space):
+        return False
+    if not (ob.show_empty_image_perspective if rv3d.is_perspective else ob.show_empty_image_orthographic):
+        return False
+    mat = ob.matrix_world
+    normal = mat.to_3x3() @ Vector((0.0, 0.0, 1.0))
+    if normal.length < 1e-12:
+        return False
+    if rv3d.is_perspective:
+        toward = rv3d.view_matrix.inverted().translation - mat.translation
+    else:
+        toward = rv3d.view_rotation @ Vector((0.0, 0.0, 1.0))
+    facing = normal.normalized().dot(toward.normalized()) if toward.length > 1e-12 else 1.0
+    if ob.empty_image_side == 'FRONT' and facing < 0.0 or ob.empty_image_side == 'BACK' and facing > 0.0:
+        return False
+    if ob.show_empty_image_only_axis_aligned and abs(facing) < 0.999:
+        return False
+    return True
+
+
+def _mark_image_planes(space):
+    """Keep the gradient off the image planes of this view: image empties drawn without depth (wireframe and X-ray
+    display, Depth Back) would otherwise be painted over (#529)."""
+    import gpu
+    context = bpy.context
+    rv3d = context.region_data
+    if rv3d is None:
+        return
+    planes = [ob for ob in context.view_layer.objects if _plane_shown(ob, space, rv3d, context.view_layer)]
+    if not planes:
+        return
+    shader, quad = _plane_shader()
+    gpu.state.depth_test_set('LESS')
+    gpu.state.depth_mask_set(True)
+    gpu.state.color_mask_set(False, False, False, False)
+    shader.bind()
+    persp = rv3d.perspective_matrix
+    for ob in planes:
+        try:
+            tex = gpu.texture.from_image(ob.data)
+        except Exception:      # an image Blender can't load for drawing: its frame is drawn, no picture
+            continue
+        shader.uniform_float("mvp", persp @ ob.matrix_world)
+        shader.uniform_float("rect", _plane_rect(ob))
+        shader.uniform_float("opacity", ob.color[3] if ob.use_empty_image_alpha else 1.0)
+        shader.uniform_sampler("image", tex)
+        quad.draw(shader)
+    gpu.state.color_mask_set(True, True, True, True)
+    gpu.state.depth_mask_set(False)
+
+
 def _draw_gradient():
     space = bpy.context.space_data
     if space is None or space.type != 'VIEW_3D':
@@ -302,6 +403,12 @@ def _draw_gradient():
     if shading.type not in {'SOLID', 'WIREFRAME'} or not is_gradient(shading):
         return
     import gpu
+    try:
+        _mark_image_planes(space)
+    except Exception:
+        import traceback
+        traceback.print_exc()
+        gpu.state.color_mask_set(True, True, True, True)
     shader, batch = _batch()
     gpu.state.depth_test_set('LESS_EQUAL')
     gpu.state.depth_mask_set(False)

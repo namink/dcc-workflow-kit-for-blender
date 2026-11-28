@@ -1,14 +1,14 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Maya Deform menu deformers (issue #34).
 
-Maya 2022 facts: the Deform option windows (fields / defaults), the deformers made with default options
+Like Maya: the Deform option windows (fields / defaults), the deformers made with default options
 (nodes, names, selection afterwards, Channel Box rows, Paint Weights targets) and the handle position / size.
 Each Maya deformer becomes the Blender
 modifier that does the same job, named like the Maya node (``ffd1``, ``deltaMush1``, ``bend1``), plus the Maya
 transform it is driven by (``ffd1Lattice``, ``bend1Handle``). Its weights are the vertex group of the node's name
 (weight 1 on the deformed points), which Deform > Paint Weights paints.
 
-``ATTRS`` are the Maya attributes the Channel Box INPUTS show for a node (ui/channel_box.py reads them as virtual
+``ATTRS`` are the Maya attributes the Channel Box INPUTS show for a node (ui/cb_inputs.py reads them as virtual
 rows ``maya:<key>``): each converts between the Maya value and the modifier's own settings.
 """
 
@@ -29,12 +29,18 @@ BASES = {
     "ffd": ('LATTICE', "ffd"), "deltaMush": ('CORRECTIVE_SMOOTH', "deltaMush"), "wrap": ('SURFACE_DEFORM', "wrap"),
     "proximityWrap": ('SURFACE_DEFORM', "proximityWrap"), "shrinkWrap": ('SHRINKWRAP', "shrinkWrap"),
     "cluster": ('HOOK', "cluster"), "softMod": ('HOOK', "softMod"),
-    "bend": ('SIMPLE_DEFORM', "nonLinear"), "twist": ('SIMPLE_DEFORM', "nonLinear"),
-    "squash": ('SIMPLE_DEFORM', "nonLinear"), "flare": ('SIMPLE_DEFORM', "nonLinear"),
-    "sine": ('WAVE', "nonLinear"), "wave": ('WAVE', "nonLinear"),
+    "bend": ('NODES', "nonLinear"),       # on a mesh: Geometry Nodes, operators/bend_deformer.py
+    # on a mesh / curve: Geometry Nodes, operators/nonlinear_nodes.py
+    "twist": ('NODES', "nonLinear"), "squash": ('NODES', "nonLinear"), "flare": ('NODES', "nonLinear"),
+    "sine": ('NODES', "nonLinear"), "wave": ('NODES', "nonLinear"),
     "textureDeformer": ('DISPLACE', "textureDeformer"), "curveWarp": ('CURVE', "curveWarp"),
     "wire": ('NODES', "wire"),            # Geometry Nodes, operators/wire_deformer.py
 }
+# a node that can also be another modifier type: a nonlinear on a lattice / surface (no Geometry Nodes there: a
+# Simple Deform / Wave modifier with no effect of its own + a shape key, operators/nonlinear_math.py), and every one
+# made by earlier versions, is a Simple Deform (Sine / Wave: a Wave modifier)
+OTHER_TYPES = {"bend": 'SIMPLE_DEFORM', "twist": 'SIMPLE_DEFORM', "squash": 'SIMPLE_DEFORM',
+               "flare": 'SIMPLE_DEFORM', "sine": 'WAVE', "wave": 'WAVE'}
 _NAME = re.compile(r"^([A-Za-z]+?)(\d+)$")
 
 
@@ -43,7 +49,8 @@ def base_of(md):
     m = _NAME.match(md.name)
     if m is None or m.group(1) not in BASES:
         return None
-    return m.group(1) if BASES[m.group(1)][0] == md.type else None
+    base = m.group(1)
+    return base if md.type in (BASES[base][0], OTHER_TYPES.get(base)) else None
 
 
 def node_type(md):
@@ -55,7 +62,7 @@ def node_type(md):
 def is_base(md):
     """The Hook that carries a kit lattice's / wrap influence's transform (``ffd1Base``, ``wrap1Base``, see
     ``_base_hook``), or a wrap's extra influence ``wrap1Influence2`` + its Hook ``wrap1Influence2Base`` (
-    operators/pins_205.py): part of that node, not an INPUTS node of its own."""
+    operators/wrap_influence.py): part of that node, not an INPUTS node of its own."""
     if md.type == 'SURFACE_DEFORM':
         return re.match(r"^wrap\d+Influence\d+$", md.name) is not None
     return md.type == 'HOOK' and re.match(r"^((ffd|wrap|proximityWrap)\d+|wrap\d+Influence\d+)Base$",
@@ -166,8 +173,193 @@ def _wire_input(name):
     return get, set_
 
 
+class _BendInput(Attr):
+    """A Maya attribute of the kit bend, held by an input of its node group (operators/bend_deformer.py); ``lo`` /
+    ``hi``: the attribute's limits in Maya."""
+
+    def __init__(self, key, label, kind, socket, lo=None, hi=None, group=None):
+        self.key, self.label, self.kind = key, label, kind
+        self.socket, self.lo, self.hi, self.group = socket, lo, hi, group
+
+    def get(self, md):
+        from . import bend_deformer
+        v = bend_deformer.get(md, self.socket)
+        return float(v) if v is not None else 0.0
+
+    def set(self, md, v):
+        from . import bend_deformer
+        v = float(v)
+        if self.lo is not None:
+            v = max(self.lo, v)
+        if self.hi is not None:
+            v = min(self.hi, v)
+        bend_deformer.set_(md, self.socket, v)
+
+    @property
+    def paths(self):
+        """Every kit bend (twist, ...) shares one node group: the data path of this input on any of them."""
+        from . import bend_deformer
+        from .. import compat
+        ng = bpy.data.node_groups.get(self.group or bend_deformer.GROUP)
+        item = ng.interface.items_tree.get(self.socket) if ng is not None else None
+        return ((compat.gn_input_path(item.identifier), -1),) if item is not None else ()
+
+
+# A Simple Deform bend made like Maya (deform axis Y: it bends along the handle's Z, Maya's Y, towards its X) on a
+# lattice / surface (no Geometry Nodes there). Blender spreads its angle over the part of the object between its limits,
+# and the limits are fractions of the object's own extent along the bend. So the Maya values (Curvature in radians,
+# Low / High Bound in handle units) are kept on the handle (``SD_PROPS``, keyable like the node's attributes) and the
+# angle / limits are worked out from them and the points' extent in the handle's space whenever the handle, the object
+# or a value changes (operators/bend_deformer.py handlers): angle = Curvature x the limited length, limits = the bounds
+# held to the object's ends (points beyond the object don't exist, so that is the same bend).
+SD_PROPS = ("allset_bend_curvature", "allset_bend_low_bound", "allset_bend_high_bound")
+SD_WRITTEN = {}     # (object pointer, modifier name) -> (angle, limits) as last worked out (an edit elsewhere differs)
+
+def _sd_points(ob):
+    """The local points a Simple Deform reads on ``ob``."""
+    if ob.type == 'MESH':
+        return [v.co for v in ob.data.vertices]
+    if ob.type == 'LATTICE':
+        return [p.co_deform for p in ob.data.points]
+    pts = []
+    for sp in getattr(ob.data, "splines", ()):
+        pts += [p.co for p in sp.bezier_points] if sp.type == 'BEZIER' else [p.co.xyz for p in sp.points]
+    return pts or [Vector(c) for c in ob.bound_box]
+
+
+def _sd_extent(md):
+    """(lowest, highest) handle-space Maya Y (the handle's local Z) of the points the bend reads, or None."""
+    h = md.origin
+    if h is None:
+        return None
+    m = h.matrix_world.inverted_safe() @ md.id_data.matrix_world
+    zs = [(m @ p).z for p in _sd_points(md.id_data)]
+    return (min(zs), max(zs)) if zs else None
+
+
+def _sd_range(md):
+    """(extent low, extent span, limited low, limited high) in handle units, or None."""
+    ext = _sd_extent(md)
+    if ext is None:
+        return None
+    span = ext[1] - ext[0]
+    return ext[0], span, ext[0] + span * md.limits[0], ext[0] + span * md.limits[1]
+
+
+def _held(md):
+    """The Maya values kept on the bend's handle, or None (no handle, or a bend made without them)."""
+    h = md.origin
+    if h is None or any(k not in h for k in SD_PROPS):
+        return None
+    try:
+        return tuple(float(h[k]) for k in SD_PROPS)
+    except (TypeError, ValueError):
+        return None
+
+
+def sd_bend_values(md):
+    """(Curvature in radians, Low Bound, High Bound) of a Simple Deform bend made like Maya."""
+    held = _held(md)
+    return held if held is not None else sd_bend_from_fields(md)
+
+
+def sd_bend_adopt(md):
+    """Keep the Maya values that the modifier's own angle / limits give now (an edit made in Blender's modifier
+    panel), so the handle doesn't put the old ones back."""
+    h = md.origin
+    if h is not None:
+        for k, v in zip(SD_PROPS, sd_bend_from_fields(md)):
+            h[k] = v
+
+
+def sd_bend_from_fields(md):
+    """(Curvature, Low Bound, High Bound) read from the Simple Deform's angle and limits on the points' extent."""
+    r = _sd_range(md)
+    if r is None:
+        return 0.0, -1.0, 1.0
+    _e, _s, a, b = r
+    return (md.angle / (b - a) if b - a > 1e-9 else 0.0), min(a, 0.0), max(b, 0.0)
+
+
+def sd_bend_apply(md):
+    """Work out the Simple Deform's angle and limits from the Maya values and where the points are in the handle's
+    space now. Writes only what changed (a depsgraph handler calls this, and says so to the update round before it
+    writes); True when something was written."""
+    from .. import update_summary
+    c, lo, hi = sd_bend_values(md)
+    r = _sd_range(md)
+    if r is None or r[1] <= 1e-9:
+        want_limits, want_angle = tuple(md.limits), 0.0
+    else:
+        e, span = r[0], r[1]
+        a, b = max(lo, e), min(hi, e + span)
+        if b < a:
+            a = b = min(max(0.0, e), e + span)
+        want_limits, want_angle = ((a - e) / span, (b - e) / span), c * (b - a)
+    done = False
+    if any(abs(x - y) > 1e-7 for x, y in zip(md.limits, want_limits)):
+        update_summary.wrote()
+        md.limits = want_limits
+        done = True
+    if abs(md.angle - want_angle) > 1e-7:
+        update_summary.wrote()
+        md.angle = want_angle
+        done = True
+    SD_WRITTEN[(md.id_data.as_pointer(), md.name)] = (md.angle, tuple(md.limits))
+    return done
+
+
+def sd_bend_set(md, curvature=None, low=None, high=None):
+    """Set a Simple Deform bend made like Maya to these Maya values (None: keep): kept on its handle, then applied."""
+    c0, lo0, hi0 = sd_bend_values(md)
+    vals = (c0 if curvature is None else float(curvature), lo0 if low is None else min(0.0, float(low)),
+            hi0 if high is None else max(0.0, float(high)))
+    h = md.origin
+    if h is not None:
+        for k, v in zip(SD_PROPS, vals):
+            h[k] = v
+        h.update_tag()
+    sd_bend_apply(md)
+
+
+_SD_BEND = [Attr("curvature", "Curvature", "ROTATION", lambda md: sd_bend_values(md)[0],
+                 lambda md, v: sd_bend_set(md, curvature=v), ((f'origin["{SD_PROPS[0]}"]', -1),)),
+            Attr("lowBound", "Low Bound", "NONE", lambda md: sd_bend_values(md)[1],
+                 lambda md, v: sd_bend_set(md, low=v), ((f'origin["{SD_PROPS[1]}"]', -1),)),
+            Attr("highBound", "High Bound", "NONE", lambda md: sd_bend_values(md)[2],
+                 lambda md, v: sd_bend_set(md, high=v), ((f'origin["{SD_PROPS[2]}"]', -1),))]
+
 _ENVELOPE = _prop("envelope", "Envelope", "NONE", "strength")
 _BOUNDS = [Attr("lowBound", "Low Bound", "NONE", *_limit(0)), Attr("highBound", "High Bound", "NONE", *_limit(1))]
+# a bend made by earlier versions (Simple Deform, deform axis Z): its own angle and limits
+_OLD_BEND = [_prop("curvature", "Curvature", "NONE", "angle")] + _BOUNDS
+
+# Twist / Squash / Flare / Sine / Wave made by earlier versions as a Simple Deform / Wave: that modifier's rows
+_OLD_NONLINEAR = {
+    "twist": [_prop("endAngle", "End Angle", "ROTATION", "angle")] + _BOUNDS,
+    "squash": [_prop("factor", "Factor", "NONE", "factor")] + _BOUNDS,
+    "flare": [_prop("endFlareX", "End Flare X", "NONE", "factor", offset=-1.0),
+              _prop("endFlareZ", "End Flare Z", "NONE", "factor", offset=-1.0)] + _BOUNDS,
+    "sine": [_handle_len("amplitude", "Amplitude", "height"), _handle_len("wavelength", "Wavelength", "width")],
+    "wave": [_handle_len("amplitude", "Amplitude", "height"), _handle_len("wavelength", "Wavelength", "width"),
+             _handle_len("maxRadius", "Max Radius", "falloff_radius")],
+}
+
+
+def _nl_rows(kind):
+    """The Channel Box rows of a kit nonlinear node (operators/nonlinear_nodes.py), Envelope first like Maya."""
+    from . import nonlinear_nodes as nl
+    group, inputs = nl.KINDS[kind]
+    rows = []
+    for name, _default, subtype in (("Envelope", 1.0, None),) + inputs:
+        words = name.split()
+        key = words[0].lower() + "".join(words[1:])
+        lo, hi = nl.LIMITS.get(name, (None, None))
+        if name == "Wavelength":
+            lo = nl.WAVELENGTH_MIN[kind]
+        rows.append(_BendInput(key, name, "ROTATION" if subtype == 'ANGLE' else "NONE", name, lo, hi, group))
+    return rows
+
 
 # Maya deformers made with default options: their Channel Box rows (only those Blender can hold)
 ATTRS = {
@@ -180,20 +372,18 @@ ATTRS = {
     "shrinkWrap": [_prop("offset", "Offset", "LENGTH", "offset"),
                    Attr("bidirectional", "Bidirectional", "BOOL", _sw_bidir_get, _sw_bidir_set, _SW_DIRECTIONS),
                    Attr("reverse", "Reverse", "BOOL", _sw_reverse_get, _sw_reverse_set, _SW_DIRECTIONS),
-                   # Maya X / Y / Z = Blender X / Z / Y (Y-up -> Z-up)
                    _prop("alongX", "Along X", "BOOL", "use_project_x"),
-                   _prop("alongY", "Along Y", "BOOL", "use_project_z"),
-                   _prop("alongZ", "Along Z", "BOOL", "use_project_y")],
+                   _prop("alongY", "Along Y", "BOOL", "use_project_y"),
+                   _prop("alongZ", "Along Z", "BOOL", "use_project_z")],
     "cluster": [_ENVELOPE],
     "softMod": [_ENVELOPE, _prop("falloffRadius", "Falloff Radius", "LENGTH", "falloff_radius")],
-    "bend": [_prop("curvature", "Curvature", "NONE", "angle")] + _BOUNDS,
-    "twist": [_prop("endAngle", "End Angle", "ROTATION", "angle")] + _BOUNDS,
-    "squash": [_prop("factor", "Factor", "NONE", "factor")] + _BOUNDS,
-    "flare": [_prop("endFlareX", "End Flare X", "NONE", "factor", offset=-1.0),
-              _prop("endFlareZ", "End Flare Z", "NONE", "factor", offset=-1.0)] + _BOUNDS,
-    "sine": [_handle_len("amplitude", "Amplitude", "height"), _handle_len("wavelength", "Wavelength", "width")],
-    "wave": [_handle_len("amplitude", "Amplitude", "height"), _handle_len("wavelength", "Wavelength", "width"),
-             _handle_len("maxRadius", "Max Radius", "falloff_radius")],
+    # Maya: Envelope -2..2, Low Bound <= 0, High Bound >= 0; Curvature in degrees (held in radians)
+    "bend": [_BendInput("envelope", "Envelope", "NONE", "Envelope", -2.0, 2.0),
+             _BendInput("curvature", "Curvature", "ROTATION", "Curvature"),
+             _BendInput("lowBound", "Low Bound", "NONE", "Low Bound", hi=0.0),
+             _BendInput("highBound", "High Bound", "NONE", "High Bound", lo=0.0)],
+    "twist": _nl_rows("twist"), "squash": _nl_rows("squash"), "flare": _nl_rows("flare"),
+    "sine": _nl_rows("sine"), "wave": _nl_rows("wave"),
     "textureDeformer": [_prop("strength", "Strength", "NONE", "strength"),
                         Attr("offset", "Offset", "NONE", _tex_offset_get, _tex_offset_set, (("mid_level", -1),))],
     "curveWarp": [],
@@ -209,6 +399,11 @@ PREFIX = "maya:"
 def attrs(md):
     """The Maya attributes of a kit deformer modifier, or None (not a kit deformer)."""
     base = base_of(md)
+    if base == "bend" and md.type == 'SIMPLE_DEFORM':
+        return _SD_BEND if md.deform_axis == 'Y' else _OLD_BEND
+    if base in _OLD_NONLINEAR and md.type != 'NODES':
+        from . import nonlinear_math
+        return nonlinear_math.rows(md) if nonlinear_math.kind_of(md) else _OLD_NONLINEAR[base]
     return ATTRS.get(base) if base else None
 
 
@@ -226,10 +421,20 @@ HANDLE_TYPES = {'EMPTY', 'LATTICE'}
 _HANDLE_FIELDS = ("object", "origin", "start_position_object")
 
 
+def handle_of(md):
+    """The lattice / handle object kit deformer modifier ``md`` takes, or None."""
+    if md.type == 'NODES':
+        from . import bend_deformer, nonlinear_nodes
+        return bend_deformer.handle_of(md) or nonlinear_nodes.handle_of(md)
+    return next((h for p in _HANDLE_FIELDS for h in [getattr(md, p, None)] if h is not None), None)
+
+
 def drives(md, ob):
     """Kit deformer modifier ``md`` takes ``ob`` as its lattice / handle."""
     if base_of(md) is None:
         return False
+    if md.type == 'NODES':
+        return handle_of(md) == ob
     return any(getattr(md, p, None) == ob for p in _HANDLE_FIELDS)
 
 
@@ -456,7 +661,7 @@ def _shrink_wrap(context, v):
         if method == 'PROJECT':
             md.use_positive_direction, md.use_negative_direction = pos, neg
             if v["projection"] == "Parallel To Axes":
-                md.use_project_x, md.use_project_z, md.use_project_y = v["along_x"], v["along_y"], v["along_z"]
+                md.use_project_x, md.use_project_y, md.use_project_z = v["along_x"], v["along_y"], v["along_z"]
         md.offset = float(v["offset"]) * units.maya_unit(context.scene)
     _select_only(context, [ob for ob, _i in items] + [drv], items[0][0])   # Maya: pCube1, pCube2
     return items[0][0]
@@ -496,49 +701,60 @@ NONLINEAR = {'BEND': ("bend", 'BEND'), 'TWIST': ("twist", 'TWIST'), 'SQUASH': ("
              'FLARE': ("flare", 'TAPER'), 'SINE': ("sine", None), 'WAVE': ("wave", None)}
 
 
+def _nl_values(kind, v):
+    """The option window's values as the inputs of a kit nonlinear node (operators/nonlinear_nodes.py)."""
+    out = {}
+    if kind in ('TWIST', 'SQUASH', 'FLARE', 'SINE'):
+        out.update({"Low Bound": float(v.get("low", -1.0)), "High Bound": float(v.get("high", 1.0))})
+    if kind == 'TWIST':
+        out["End Angle"] = math.radians(float(v.get("end_angle", 0.0)))         # the option window's degrees
+    elif kind == 'SQUASH':
+        out["Factor"] = float(v.get("factor", 0.0))
+    elif kind == 'FLARE':
+        out["End Flare X"] = float(v.get("end_flare", 1.0))
+    else:
+        out["Amplitude"] = float(v.get("amplitude", 0.0))
+        out["Wavelength"] = float(v.get("wavelength", 2.0 if kind == 'SINE' else 1.0))
+        if kind == 'WAVE':
+            out["Max Radius"] = float(v.get("max_radius", 1.0))
+    return out
+
+
 def _nonlinear(context, kind, v):
-    base, method = NONLINEAR[kind]
+    base, _method = NONLINEAR[kind]
     items = _deformed(context)
     lo, hi = _bounds(items)
     name = new_name(base)
-    # Maya: the handle at the bounding-box centre, pointing up (Maya +Y = Blender +Z),
-    # uniform scale = half the height; handle scale 0.5 on the unit cube
+    # Maya: the handle at the bounding-box centre, pointing up (Maya +Y = Blender +Z), uniform scale = half the
+    # bounding box's longest side (0.5 on the unit cube; a flat plane's width, not its zero height)
     handle = _link(context, bpy.data.objects.new(f"{name}Handle", None))
     handle.empty_display_type = 'SINGLE_ARROW'
     handle.empty_display_size = 1.0
     handle.location = (lo + hi) / 2
-    s = max((hi.z - lo.z) / 2, 1e-6)
+    s = max(max(hi - lo) / 2, 1e-6)
     handle.scale = (s, s, s)
     context.view_layer.update()
     for ob, idx in items:
-        if method is not None:
-            md = _add(ob, name, 'SIMPLE_DEFORM', idx)
-            md.deform_method = method
-            md.deform_axis = 'Z'
+        if kind == 'BEND':
+            c = math.radians(float(v.get("curvature", 0.0)))           # the option window's degrees
+            low, high = float(v.get("low", -1.0)), float(v.get("high", 1.0))
+            if ob.type in ('MESH', 'CURVE'):                 # a curve's control points bend the same way
+                from . import bend_deformer
+                bend_deformer.add(ob, name, handle, _weights(ob, name, idx), c, low, high)
+                continue
+            md = _add(ob, name, 'SIMPLE_DEFORM', idx)       # a lattice / surface: no Geometry Nodes there
+            md.deform_method = 'BEND'
+            md.deform_axis = 'Y'
             md.origin = handle
-            md.angle = 0.0
-            md.factor = 0.0
-            md.limits = (min(1.0, max(0.0, (v.get("low", -1.0) + 1) / 2)),
-                         min(1.0, max(0.0, (v.get("high", 1.0) + 1) / 2)))
-            if kind == 'BEND':
-                md.angle = float(v.get("curvature", 0.0))
-            elif kind == 'TWIST':
-                md.angle = math.radians(float(v.get("end_angle", 0.0)))
-            elif kind == 'SQUASH':
-                md.factor = float(v.get("factor", 0.0))
-            elif kind == 'FLARE':
-                md.factor = float(v.get("end_flare", 1.0)) - 1.0
-        else:
-            md = _add(ob, name, 'WAVE', idx)
-            md.start_position_object = handle
-            md.use_normal = False
-            md.use_x, md.use_y = True, kind == 'WAVE'
-            md.speed = 0.0                           # Maya's wave is still; Blender's moves with time
-            md.time_offset = 0.0
-            md.height = float(v.get("amplitude", 0.0)) * s
-            md.width = max(1e-6, float(v.get("wavelength", 2.0 if kind == 'SINE' else 1.0)) * s)
-            if kind == 'WAVE':
-                md.falloff_radius = float(v.get("max_radius", 1.0)) * s
+            sd_bend_set(md, c, low, high)
+            continue
+        if ob.type in ('MESH', 'CURVE'):                     # Maya's shape in the handle's space: Geometry Nodes
+            from . import nonlinear_nodes
+            nonlinear_nodes.add(ob, name, base, handle, _weights(ob, name, idx), _nl_values(kind, v))
+            continue
+        # a lattice / surface: no Geometry Nodes there; the same shape as a shape key (operators/nonlinear_math.py)
+        from . import nonlinear_math
+        nonlinear_math.add(ob, name, base, handle, _weights(ob, name, idx), _nl_values(kind, v))
     _select_only(context, [handle], handle)          # Maya: bend1Handle, bend1
     return handle
 
@@ -661,6 +877,12 @@ def _paint_candidates(context):
     return out
 
 
+def weight_group(md):
+    """The vertex group name that holds kit deformer ``md``'s weights ('' = none): its own, or for a Geometry Nodes
+    deformer (a mesh's bend, a wire) the group of its name."""
+    return getattr(md, "vertex_group", "") or (md.name if md.type == 'NODES' else "")
+
+
 def paint_group(ob, kind, prefer=()):
     """The vertex group that holds ``ob``'s weights of its newest deformer of Maya type ``kind`` (``prefer``:
     these modifiers first; None: no such deformer)."""
@@ -678,7 +900,7 @@ def paint_group(ob, kind, prefer=()):
                 kb.vertex_group = vg.name
         return vg.name
     for md in list(prefer) + list(reversed(ob.modifiers)):
-        group = getattr(md, "vertex_group", "") or (md.name if md.type == 'NODES' else "")   # a kit wire: its name
+        group = weight_group(md)
         if node_type(md) == kind and group in ob.vertex_groups:
             return group
     return None

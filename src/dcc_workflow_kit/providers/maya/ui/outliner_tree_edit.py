@@ -61,9 +61,12 @@ def rename(row, text):
         return rename_lead(target, text)
     name = input_line.clean_name(text)
     if name is None:
-        input_line._say(f"Rename: \"{text.strip()}\" is not a valid name (letters, digits and _, "
-                        "not starting with a digit).")
+        input_line._say(input_line.BAD_NAME.format(text.strip()))
         return None
+    taken = {o.name for o in bpy.data.objects}
+    if kind == 'JOINT':
+        taken |= {b.name for b in bpy.data.objects[row[1]].data.bones}
+    name = input_line.number_hash(name, taken - {target.name})
     if name == target.name:
         return None
     old = target.name
@@ -502,34 +505,7 @@ def _drop(context, dragged, target, where):
 
 def toggle_eye(context, row):
     """Flip the visibility of an object row (``hide_viewport``, Maya's visibility) or a joint row (its bone)."""
-    ob = bpy.data.objects.get(row.ob)
-    if ob is None:
-        return False
-    if row.kind == 'JOINT':
-        # Maya: a joint's Visibility hides everything below it too, without changing the children's own Visibility
-        # (ui/layer_joints.state); the eye sets this joint only
-        from .. import compat
-        from . import layer_joints
-        if ob.mode == 'EDIT':
-            eb = ob.data.edit_bones.get(row.sub)
-            if eb is None:
-                return False
-            eb.hide = not eb.hide
-        else:
-            pb = ob.pose.bones.get(row.sub) if ob.pose is not None else None
-            if pb is None:
-                return False
-            compat.set_bone_hidden(pb, not compat.bone_hidden(pb))
-        layer_joints.bump()
-        from ..operators import dag
-        dag.sync(context.scene, context.view_layer)       # objects under the joints follow them
-        return True
-    if row.kind in ('OBJECT', 'MEMBER', 'SHAPE'):
-        ob.hide_viewport = not ob.hide_viewport
-        from ..operators import dag
-        dag.sync(context.scene, context.view_layer)       # Maya hides what is below a hidden node
-        return True
-    return False
+    return toggle_column(context, row, 'EYE')
 
 
 def eye_state(row, names=None):
@@ -546,6 +522,69 @@ def eye_state(row, names=None):
         pb = ob.pose.bones.get(row.sub) if ob.pose is not None else None
         return None if pb is None else not compat.bone_hidden(pb)
     return not ob.hide_viewport
+
+
+def _bone_of(ob, name):
+    """The edit bone (Edit Mode) or bone ``name`` of armature ``ob``, or None."""
+    return (ob.data.edit_bones if ob.mode == 'EDIT' else ob.data.bones).get(name)
+
+
+def restrict_state(row, col, names=None):
+    """Blender's SELECT (selectable) / RENDER (renders) column of a row: True / False, None without one.
+    Joints have the select column only (a bone doesn't render on its own). ``names`` as in ``eye_state``."""
+    ob = tree.object_named(row.ob, names) if row.kind in ('OBJECT', 'JOINT', 'MEMBER') else None
+    if ob is None:
+        return None
+    if row.kind == 'JOINT':
+        b = _bone_of(ob, row.sub) if col == 'SELECT' else None
+        return None if b is None else not b.hide_select
+    return not (ob.hide_select if col == 'SELECT' else ob.hide_render)
+
+
+def column_on(row, col):
+    """True / False = a row's EYE / SELECT / RENDER column is on / off, None when the row has none."""
+    return eye_state(row) if col == 'EYE' else restrict_state(row, col)
+
+
+def toggle_column(context, row, col, recursive=False):
+    """Flip a row's EYE / SELECT / RENDER column (Shift: ``recursive``)."""
+    on = column_on(row, col)
+    return on is not None and set_column(context, row, col, not on, recursive)
+
+
+def set_column(context, row, col, on, recursive=False):
+    """Set a row's EYE / SELECT / RENDER column to ``on``. ``recursive`` (Blender's Shift): every node below the row
+    too (child objects; for a joint its child joints and the objects parented to them). A joint's eye sets that joint
+    only: Maya hides what is below it without changing the children's own Visibility (ui/layer_joints.state)."""
+    if column_on(row, col) is None:
+        return False
+    ob = bpy.data.objects[row.ob]
+    obs = [ob]
+    if row.kind == 'JOINT':
+        from .. import compat
+        b = _bone_of(ob, row.sub)
+        bones = [b, *b.children_recursive] if recursive else [b]
+        names = {x.name for x in bones}
+        for x in bones:
+            if col == 'SELECT':
+                x.hide_select = not on
+            elif ob.mode == 'EDIT':
+                x.hide = not on
+            elif ob.pose is not None and ob.pose.bones.get(x.name) is not None:
+                compat.set_bone_hidden(ob.pose.bones[x.name], not on)
+        obs = [o for o in ob.children if o.parent_type == 'BONE' and o.parent_bone in names] if recursive else []
+        if col == 'EYE':
+            from . import layer_joints
+            layer_joints.bump()
+    if recursive:
+        obs = [*obs, *(c for o in obs for c in o.children_recursive)]
+    prop = {'EYE': "hide_viewport", 'SELECT': "hide_select", 'RENDER': "hide_render"}[col]
+    for o in obs:
+        setattr(o, prop, not on)
+    if col == 'EYE':
+        from ..operators import dag
+        dag.sync(context.scene, context.view_layer)       # Maya hides what is below a hidden node
+    return True
 
 
 # --- delete --------------------------------------------------------------------------------------------------------
@@ -705,6 +744,50 @@ class ALLSET_MT_outliner_tree_hide(bpy.types.Menu):
         self.layout.operator(ALLSET_OT_outliner_tree_hide.bl_idname, text="Unhide").hide = False
 
 
+_menu_row = {"ob": "", "kind": ""}       # the row the right-click menu was opened on ("" = no object / camera row)
+
+
+def menu_camera(context):
+    """Name of the camera the right-click menu acts on: the clicked row's (a startup camera row the scene has no
+    object for included), else the active object's; "" when neither is a camera."""
+    name = _menu_row["ob"]
+    if name and _menu_row["kind"] == 'CAMERA':
+        return name
+    ob = context.scene.objects.get(name) if name else None
+    if ob is None or ob.type != 'CAMERA':
+        ob = context.active_object
+    return ob.name if ob is not None and ob.type == 'CAMERA' else ""
+
+
+class ALLSET_OT_outliner_set_active_camera(bpy.types.Operator):
+    """Make this camera the scene camera; every 3D View's camera view (Numpad 0) then looks through it"""
+    bl_idname = "allset.outliner_set_active_camera"
+    bl_label = "Set Active Camera"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    camera: StringProperty(options={'SKIP_SAVE'})   # empty: the active object
+
+    def execute(self, context):
+        from .panel_menus import enable_in_viewports
+        scene = context.scene
+        ob = scene.objects.get(self.camera) if self.camera else context.active_object
+        if ob is None and self.camera in tree.CAMERAS:      # a startup camera row the scene has no object for
+            from ..operators import startup_cameras
+            startup_cameras.ensure(scene, context.view_layer)
+            ob = scene.objects.get(self.camera)
+        if ob is None or ob.type != 'CAMERA':
+            self.report({'WARNING'}, "Not a camera")
+            return {'CANCELLED'}
+        enable_in_viewports(ob)
+        context.scene.camera = ob
+        # a kit panel looks through its own (local) camera, which Blender's camera toggle prefers to the scene's
+        for area in context.screen.areas:
+            if area.type == 'VIEW_3D':
+                area.spaces.active.use_local_camera = False
+                area.tag_redraw()
+        return {'FINISHED'}
+
+
 class ALLSET_MT_outliner_tree(bpy.types.Menu):
     """Maya's Outliner right-click menu (the same on every row and on empty space)"""
     bl_label = "Outliner"
@@ -717,6 +800,9 @@ class ALLSET_MT_outliner_tree(bpy.types.Menu):
             layout.prop(space, "use_filter_object_content", text="Shapes")
         layout.separator()
         layout.operator(ALLSET_OT_outliner_tree_reveal.bl_idname, text="Reveal Selected")
+        cam = menu_camera(context)
+        if cam:
+            layout.operator(ALLSET_OT_outliner_set_active_camera.bl_idname, icon='CAMERA_DATA').camera = cam
         layout.menu(ALLSET_MT_outliner_tree_hide.__name__)
         layout.separator()
         layout.menu(ALLSET_MT_outliner_tree_sets.__name__)
@@ -742,6 +828,8 @@ class ALLSET_OT_outliner_tree_menu(bpy.types.Operator):
         u = tree.unit(context.preferences)
         k = tree.row_index_at(context.area, context.region, event.mouse_region_y, u, len(rows))
         row = rows[k] if k is not None else None
+        on = row is not None and row.kind in ('OBJECT', 'CAMERA')
+        _menu_row["ob"], _menu_row["kind"] = (row.ob, row.kind) if on else ("", "")
         if row is not None and row.kind in ('SET', 'MEMBER'):
             # the kit's set menu (Select Set Members, Show Set Members, Add / Remove, Rename, Delete Set)
             wm = context.window_manager
@@ -773,6 +861,7 @@ classes = (ALLSET_PT_outliner_tree_rename, ALLSET_OT_outliner_tree_rename, ALLSE
            ALLSET_OT_outliner_tree_walk, ALLSET_OT_outliner_tree_hide, ALLSET_OT_outliner_tree_show_all,
            ALLSET_MT_outliner_tree_sets, ALLSET_MT_outliner_tree_add_set, ALLSET_MT_outliner_tree_remove_set,
            ALLSET_MT_outliner_tree_hide, ALLSET_MT_outliner_tree, ALLSET_OT_outliner_tree_menu,
+           ALLSET_OT_outliner_set_active_camera,
            ALLSET_OT_outliner_tree_delete)
 
 

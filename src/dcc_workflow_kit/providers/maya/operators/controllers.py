@@ -8,7 +8,7 @@ parent controller of the others. Pick walk then follows the controller hierarchy
 
 Kit translation: a controller tag is the data Bone ID property ``allset_controller`` (True), the parent controller
 ``allset_controller_parent`` (a bone name in the same armature). Only pose bones carry tags: objects are walked by
-Blender's own hierarchy. Walk rules: ``operators/joints.walk_bone``.
+Blender's own hierarchy. Walk rules: ``operators/joint_pick_walk.walk_bone``.
 """
 
 import bpy

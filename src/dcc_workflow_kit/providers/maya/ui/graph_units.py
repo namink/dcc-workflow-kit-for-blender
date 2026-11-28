@@ -176,8 +176,46 @@ def curve_units(fcurves):
     return out
 
 
+_UNIT_OF = {}         # (Action / ID pointer, data path) -> RNA unit, for curves whose owner resolved
+
+
+def curve_unit(fc):
+    """RNA unit of one F-curve (``curve_units`` for one curve), kept per owner and data path."""
+    idb = fc.id_data
+    key = (idb.as_pointer() if idb is not None else 0, fc.data_path)
+    unit = _UNIT_OF.get(key)
+    if unit is not None:
+        return unit
+    cands = [idb]
+    if isinstance(idb, bpy.types.Action):
+        cands = _owners().get(idb.as_pointer(), [])
+    for c in cands:
+        unit = path_unit(c, fc.data_path)
+        if unit is not None:
+            if len(_UNIT_OF) > 4096:
+                _UNIT_OF.clear()
+            _UNIT_OF[key] = unit
+            return unit
+    return 'NONE'
+
+
+def display_factor(scene, unit):
+    """Graph Editor display value per stored value for an RNA unit: degrees for rotations when the scene shows
+    degrees, the scene's length unit for lengths where Blender draws them so (compat.graph_length_factor)."""
+    if unit == 'ROTATION':
+        return 180.0 / math.pi if scene.unit_settings.system_rotation == 'DEGREES' else 1.0
+    if unit == 'LENGTH':
+        from .. import compat
+        return compat.graph_length_factor(scene.unit_settings)
+    return 1.0
+
+
 def factor(context):
-    """BU per display unit when this Graph Editor's numbers should be relabelled, else None."""
+    """BU per display unit when this Graph Editor's numbers should be relabelled, else None (also where Blender itself
+    draws lengths in the scene's unit)."""
+    from .. import compat
+    if compat.GRAPH_LENGTH_UNITS:
+        return None
     space = context.space_data
     if space is None or space.type != 'GRAPH_EDITOR' or space.mode != 'FCURVES' or space.use_normalization:
         return None

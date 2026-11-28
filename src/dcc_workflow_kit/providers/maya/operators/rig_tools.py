@@ -19,14 +19,14 @@ from mathutils import Vector
 
 from .. import results
 from ..ui import channel_box as cb
-from . import constrain_multi, maya_errors
+from . import constrain_multi, maya_errors, scene_axes
 
 CONSTRAINT_TYPES = (
     ('CHILD_OF', "Parent", "Maya parentConstraint (Child Of; the offset is kept like Maya's Maintain Offset)"),
     ('COPY_LOCATION', "Point", "Maya pointConstraint (Copy Location)"),
     ('COPY_ROTATION', "Orient", "Maya orientConstraint (Copy Rotation)"),
     ('COPY_SCALE', "Scale", "Maya scaleConstraint (Copy Scale)"),
-    ('TRACK_TO', "Aim", "Maya aimConstraint (Track To: aims +X at the target, +Y up = Blender +X / +Z)"),
+    ('TRACK_TO', "Aim", "Maya aimConstraint (Track To: aims +X at the target, +Z up)"),
     ('FOLLOW_PATH', "Attach to Motion Path", "Maya motion path (Follow Path)"),
     ('SHRINKWRAP', "Geometry", "Maya geometryConstraint (Shrinkwrap)"),
 )
@@ -45,7 +45,7 @@ class ALLSET_OT_constrain(bpy.types.Operator):
 
     type: EnumProperty(items=CONSTRAINT_TYPES, name="Type")
     # Maya option window values for a multi-target constraint (operators/constrain_multi.py); a one-target
-    # constraint is set up afterwards by option_windows._constraint as before
+    # constraint is set up afterwards by option_windows_spec._constraint as before
     maintain_offset: EnumProperty(name="Maintain Offset", items=(
         ('DEFAULT', "Default", "Like Maya: on for Parent, off for Point / Orient / Scale"),
         ('ON', "On", ""), ('OFF', "Off", "")), default='DEFAULT', options={'SKIP_SAVE', 'HIDDEN'})
@@ -111,7 +111,7 @@ class ALLSET_OT_constrain(bpy.types.Operator):
             cons = arm.pose.bones[owner].constraints       # the edit-mode round trip renews the pose bones
             con = cons[-1]
         if self.type == 'TRACK_TO':
-            con = aim(cons, con, bone=arm is not None)     # default aim like Maya (+X at the target, +Y up)
+            con = aim(cons, con, bone=arm is not None)     # default aim: +X at the target, +Z up
         target = getattr(con, "target", None)
         sub = getattr(con, "subtarget", "")
         results.result(self, f"{label} constraint on {owner}" +
@@ -134,10 +134,11 @@ class ALLSET_OT_constrain(bpy.types.Operator):
 
 # --- Aim (Maya aimConstraint) -----------------------------------------------------------------------
 
-# aimConstraint defaults: aim vector +X, up vector +Y, world up
-# type Vector, world up vector (0, 1, 0). Maya is Y-up: an object's Maya X / Y / Z = Blender X / Z / -Y
-#; a joint's Maya X / Y / Z = the bone's Y / Z / X (the bone's Y points at the child, Maya's primary X).
-AIM_VECTOR, UP_VECTOR, WORLD_UP = (1.0, 0.0, 0.0), (0.0, 1.0, 0.0), "Vector"
+# Aim vector / Up vector = the constrained node's own axes, as the Channel Box shows them (#453): an object's local
+# X / Y / Z; a joint's X / Y / Z = the bone's Y / Z / X (the bone's Y points at the child, the joint's X). Defaults
+# +X at the target and the object's Z (up at rest) towards the world up, like Maya's upright aim; world up type
+# Vector. ``world_up_vector`` arguments are in the Y-up frame (option windows turn scene axes into it).
+AIM_VECTOR, UP_VECTOR, WORLD_UP = (1.0, 0.0, 0.0), (0.0, 0.0, 1.0), "Vector"
 # Maya aimConstraint world up types (enum order of the node's worldUpType: Scene Up / Object Up / Object Rotation Up /
 # Vector / None, command default Vector)
 WORLD_UP_TYPES = ("Scene up", "Object up", "Object rotation up", "Vector", "None")
@@ -146,9 +147,10 @@ UP_SUFFIX = " up"                 # the Locked Track that turns an Object up aim
 
 
 def local_axis(v, bone=False):
-    """Maya local vector -> Blender local vector of an object (X, -Z, Y) or a joint / pose bone (Z, X, Y)."""
+    """A node's own axes -> Blender local vector: an object's are its local axes, a joint's / pose bone's (X, Y, Z)
+    = bone (Y, Z, X)."""
     x, y, z = v
-    return Vector((z, x, y)) if bone else Vector((x, -z, y))
+    return Vector((z, x, y)) if bone else Vector((x, y, z))
 
 
 def axis_of(v):
@@ -239,7 +241,7 @@ def aim(cons, con, aim_vector=AIM_VECTOR, up_vector=UP_VECTOR, world_up=WORLD_UP
     target, sub = con.target, con.subtarget
     h = _aim_helper(con, f"{con.name}_upAxis")
     # the empty's Z axis = w: Vector = the world vector, Object rotation up = the up object's matrix times the vector
-    zl = local_axis(world_up_vector, False)
+    zl = Vector(scene_axes.from_yup(world_up_vector))      # Y-up frame -> scene
     rot = zl.to_track_quat('Z', 'Y').to_matrix().to_4x4() if zl.length > 1e-12 else Vector((0, 0, 1)).to_track_quat(
         'Z', 'Y').to_matrix().to_4x4()
     h.matrix_basis = rot

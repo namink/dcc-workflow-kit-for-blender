@@ -4,7 +4,7 @@
 The kit's own drawings, one per toolbar button, in the Status Line / panel toolbar style (``status_icons``: grey line
 art, teal accents, dark outline, numpy at the icon size). Each picture shows what its button does: tangent buttons
 draw the curve shape the tangent gives around a teal key, key tools draw keys with the tool's motion, view buttons
-draw how the curves are laid out. Keyed by the editor button's name (``editor_chrome.ICONS``); Dope Sheet buttons
+draw how the curves are laid out. Keyed by the editor button's name (``editor_icon_data.ICONS``); Dope Sheet buttons
 with the same name and meaning share a picture.
 """
 

@@ -7,9 +7,9 @@ regions, a screenshot taken in ``execute`` already shows the menu closed). Two t
 - where the click was: a nested ``INVOKE_DEFAULT`` call inside ``execute`` gets the window's latest event, the
   LEFTMOUSE release on the row (``ALLSET_OT_click_point``);
 - where a Maya pulldown sits: the kit lays out the top bar itself (every menu button has ``ui_units_x``,
-  ``status_line.menu_bar_widths``), Blender opens a pulldown with its left edge on the button's left edge and a
+  ``menu_bar_fit.menu_bar_widths``), Blender opens a pulldown with its left edge on the button's left edge and a
   submenu against its parent's right edge, every row's text starts ``TEXT_UNITS`` from the menu edge and the kit's
-  label + hotkey + ❒ texts are right-aligned (``menu_sets.item_texts``), so the ❒ ends at menu left + text start +
+  label + hotkey + ❒ texts are right-aligned (``menu_item_text.item_texts``), so the ❒ ends at menu left + text start +
   the aligned text width (checked on screenshots at UI scale 1.0 / 1.25, ``tests/test_step183_option_click.py`` +
   ``tests/gui/gui_step183_option_click.py``).
 A Maya menu the Space hotbox opens is a popup at the pointer (``wm.call_menu``): Blender puts the pointer at
@@ -106,14 +106,14 @@ def rows(path):
     items, prefix, top_label = got
     kids = menu_sets.menu_rows(items, prefix)       # labels in the interface language
     plain = [(p, it[0], p in menu_sets.OPTION_BOXES) for p, it in kids
-             if p is not None and not (menu_sets.sub_items(p, it) and p not in menu_map.MAP)]
+             if p is not None and not menu_map.is_submenu(p, menu_sets.sub_items(p, it))]
     texts = menu_sets.item_texts(plain)
     out = [(maya_dock.TEAR_LINE, False)]
     for p, it in kids:
         if p is None:
             if len(it) > 1 and it[1]:
                 out.append((i18n.iface(it[1]), False))   # drawn by Blender, translated
-        elif menu_sets.sub_items(p, it) and p not in menu_map.MAP:
+        elif menu_map.is_submenu(p, menu_sets.sub_items(p, it)):
             out.append((it[0] + (menu_sets.BOX_MARK if p in menu_sets.OPTION_BOXES else ""), True))
         else:
             out.append((texts[p], False))

@@ -19,6 +19,7 @@ import numpy as np
 from gpu_extras.batch import batch_for_shader
 
 from .. import compat
+from .. import update_summary
 from ..operators import uv_arrays, uv_shell_select
 
 FILL = (0.85, 0.26, 0.25, 0.35)       # pre-selection red, as a translucent fill (3D View face pre-selection)
@@ -262,7 +263,7 @@ class ALLSET_OT_uv_shell_hover(bpy.types.Operator):
 @bpy.app.handlers.persistent
 def _invalidate(_scene=None, depsgraph=None):
     if depsgraph is not None and not any(isinstance(u.id, (bpy.types.Mesh, bpy.types.Object))
-                                         for u in depsgraph.updates):
+                                         for u in update_summary.updates(depsgraph, _invalidate)):
         return
     _cache.clear()
 

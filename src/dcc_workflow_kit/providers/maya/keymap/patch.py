@@ -14,10 +14,10 @@ Pure Python (no bpy) so the mapping-doc tool and tests can reuse it.
 
 MODS = ("shift", "ctrl", "alt", "oskey")
 
-# Strict on the Blender the kit is checked on (5.2, the main target): a patch that finds
+# Strict on the Blenders the kit is checked on (the supported 5.2 and 5.3): a patch that finds
 # nothing raises, which catches Industry Compatible drift. On other versions (5.0 / 5.1)
 # the missing items are recorded in ``DRIFT`` instead, so the keymap still builds; keymap/__init__.py sets STRICT
-# from bpy.app.version.
+# from compat.STRICT_VERSIONS.
 STRICT = True
 DRIFT = []
 

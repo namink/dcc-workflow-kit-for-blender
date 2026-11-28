@@ -5,7 +5,7 @@ Maya 2026: W on a joint changes only its
 translate, its subtree follows, and **no jointOrient changes** — the parent's X stops aiming at the moved child.
 Preserve Children (``cmds.move(preserveChildPosition=True)``) keeps the children's world positions instead. A Blender
 bone always points at its tail, so moving a connected child re-aims the parent bone; the joint's Maya frame is then
-written back into ``joints.MAYA_FRAME`` (the bone-relative frame the FBX writer already reads).
+written back into ``joint_frames.MAYA_FRAME`` (the bone-relative frame the FBX writer already reads).
 
 ``process`` runs from tool_keys' 0.25 s watch in Edit Armature mode: while no transform runs it snapshots every bone's
 (head, tail, roll, MAYA_FRAME, Maya frame); a bone whose head or tail afterwards moved with the same MAYA_FRAME (= it
@@ -16,6 +16,7 @@ head / tail change) and kit commands that write MAYA_FRAME are left alone; the J
 import bpy
 from mathutils import Matrix, Quaternion
 
+from .. import live_refs
 from . import joints
 
 TRANSLATE_OPS = frozenset({"TRANSFORM_OT_translate"})
@@ -149,7 +150,7 @@ def process(context):
     if ob is None:
         _snap.update(ob=None, bones={})
         return []
-    running = [op.bl_idname for w in wm.windows for op in w.modal_operators]
+    running = [op.bl_idname for w in wm.windows for op in live_refs.running_modals(w)]
     if any(i.startswith("TRANSFORM_OT_") for i in running):
         return []                                   # a move is running: keep the snapshot from before it
     if any(i.startswith(SKIP_MODALS[1:]) for i in running):
@@ -176,7 +177,6 @@ def process(context):
 
 
 TICK = 0.05
-_timer = {"on": False}
 
 
 def _tick():
@@ -184,7 +184,6 @@ def _tick():
         context = bpy.context
         if context.mode != 'EDIT_ARMATURE':
             _snap.update(ob=None, bones={})
-            _timer["on"] = False
             return None
         process(context)
     except (AttributeError, RuntimeError, ReferenceError):
@@ -195,8 +194,7 @@ def _tick():
 def watch():
     """Keep watching while Edit Armature mode lasts (tool_keys' watch starts it; a fast tick so a move followed at once
     by F8 / E is still caught before the mode changes)."""
-    if not _timer["on"]:
-        _timer["on"] = True
+    if not bpy.app.timers.is_registered(_tick):      # also after a file load, which drops the timer
         bpy.app.timers.register(_tick, first_interval=TICK)
 
 
@@ -210,7 +208,7 @@ def rebase(context=None):
 def joint_translate(eb):
     """Maya translate of a joint in rest (Blender length, armature space): the head in the parent's Maya frame. A top
     joint's translate is its position, in the kit's Z-up axes like every object Translate (the
-    same numbers as the Pose-mode Channel Box, ``channel_box.root_translate``)."""
+    same numbers as the Pose-mode Channel Box, ``cb_nodes.root_translate``)."""
     if eb.parent is None:
         return eb.head.copy()
     return local_frame(eb.parent).transposed() @ (eb.head - eb.parent.head)
@@ -309,7 +307,6 @@ def unregister():
         del bpy.types.Bone.allset_ssc
     if bpy.app.timers.is_registered(_tick):
         bpy.app.timers.unregister(_tick)
-    _timer["on"] = False
     for a in AXES:
         if hasattr(bpy.types.Scene, f"allset_joint_t{a}"):
             delattr(bpy.types.Scene, f"allset_joint_t{a}")

@@ -5,7 +5,7 @@
   selected objects + one curve in any order (Maya takes the curve as the path). Per
   object one Follow Path constraint ``motionPathN`` (Maya's node name, numbered one past the highest) with Fixed
   Position on: its Offset = Maya's ``uValue`` in fraction mode (arc-length fraction), keyed at the Time Slider start
-  (0) and end (1) with Maya auto tangents (two keys = flat ends; ``driven_key.maya_auto``), constant extrapolation.
+  (0) and end (1) with Maya auto tangents (two keys = flat ends; ``driven_key_drivers.maya_auto``), constant extrapolation.
   Maya places the object on the path without adding its own position or rotation, so the object's Translate (and
   Rotate while Follow is on) are zeroed (Blender's Follow Path adds the owner's transform).
 - Arc length: Blender's path is the evaluated polyline of the curve; at the default 12 per segment the position
@@ -49,8 +49,8 @@ MSG_SELECT = "Select the objects to animate and one curve for the path."
 MSG_AXES = "The front and up axes must differ."
 MSG_NO_PATH = "Select an object attached to a motion path."
 
-# Maya local axis -> Blender local axis and sign (Maya Y-up)
-AXIS = {"X": ("X", 1), "Y": ("Z", 1), "Z": ("Y", -1)}
+# Front / Up axis = the object's own local axis, as the Channel Box shows it (#453)
+AXIS = {"X": ("X", 1), "Y": ("Y", 1), "Z": ("Z", 1)}
 FORWARD = {("X", 1): 'FORWARD_X', ("Y", 1): 'FORWARD_Y', ("Z", 1): 'FORWARD_Z',
            ("X", -1): 'TRACK_NEGATIVE_X', ("Y", -1): 'TRACK_NEGATIVE_Y', ("Z", -1): 'TRACK_NEGATIVE_Z'}
 
@@ -289,7 +289,7 @@ def time_keys(scene, time_range, start, end, last):
 
 
 def attach(context, objects, cob, time_range='TIME_SLIDER', start=1.0, end=30.0, parametric=False, follow=True,
-           front="X", up="Y", inverse_front=False, inverse_up=False):
+           front="X", up="Z", inverse_front=False, inverse_up=False):
     """Attach ``objects`` to curve object ``cob``; the constraints made."""
     ax = axes(front, up, inverse_front, inverse_up)
     if ax is None:
@@ -392,7 +392,7 @@ class ALLSET_OT_motion_path_attach(bpy.types.Operator):
                              description="Move by curve parameter (Maya fraction mode off) instead of by length")
     follow: BoolProperty(name="Follow", default=True, description="Turn the object along the path")
     front_axis: EnumProperty(name="Front axis", items=_XYZ, default="X")
-    up_axis: EnumProperty(name="Up axis", items=_XYZ, default="Y")
+    up_axis: EnumProperty(name="Up axis", items=_XYZ, default="Z")
     inverse_up: BoolProperty(name="Inverse up", default=False)
     inverse_front: BoolProperty(name="Inverse front", default=False)
 
@@ -476,12 +476,12 @@ def windows():
                 F("parametric", "Parametric length:", "bool", False),
                 F("follow", "Follow:", "bool", True),
                 F("front_axis", "Front axis:", "enum", "X", items=["X", "Y", "Z"]),
-                F("up_axis", "Up axis:", "enum", "Y", items=["X", "Y", "Z"]),
+                F("up_axis", "Up axis:", "enum", "Z", items=["X", "Y", "Z"]),
                 F("inverse_up", "", "bool", False, text="Inverse up"),
                 F("inverse_front", "", "bool", False, text="Inverse front"),
             ], _run, paths=("Constrain/Motion Paths/Attach to Motion Path",),
             missing=("World up type Object up / Object rotation up / Normal (Blender keeps the up axis toward world Z "
-                     "= Scene up / Vector 0 1 0)", "World up vector / object", "Bank / Bank scale / Bank limit")))
+                     "= Scene up / Vector 0 0 1)", "World up vector / object", "Bank / Bank scale / Bank limit")))
     return WINDOWS
 
 

@@ -16,7 +16,7 @@ or ``OUTLINER_OT_parent_clear`` (empty space); MMB does nothing. So
 Maya: MMB-drag a camera from the Outliner into a view panel = that panel looks through the camera (each panel has its
 own camera); other items dropped on a panel do nothing. The modal keeps the window's mouse events after the cursor
 leaves the Outliner, so a release outside it is mapped to the 3D View under it (any window, ``ui/hs_drag.view_under``)
-and that view looks through the camera (``ui/panel_menus.look_through``).
+and that view looks through the camera (``ui/panel_cameras.look_through``).
 """
 
 import json
@@ -25,9 +25,9 @@ import math
 import bpy
 import gpu
 from bpy.app.handlers import persistent
-from gpu_extras.batch import batch_for_shader
 from mathutils import Matrix
 
+from .. import compat
 from . import parenting
 
 DROP_OPS = ("OUTLINER_OT_parent_drop", "OUTLINER_OT_parent_clear")
@@ -243,7 +243,7 @@ def _rect(x0, y0, x1, y1, width=2.0):
     sh = gpu.shader.from_builtin('UNIFORM_COLOR')
     gpu.state.blend_set('ALPHA')
     gpu.state.line_width_set(width)
-    batch = batch_for_shader(sh, 'LINE_LOOP', {"pos": ((x0, y0), (x1, y0), (x1, y1), (x0, y1))})
+    batch = compat.closed_line_batch(sh, ((x0, y0), (x1, y0), (x1, y1), (x0, y1)))
     sh.uniform_float("color", COLOR)
     batch.draw(sh)
     gpu.state.line_width_set(1.0)
@@ -449,11 +449,11 @@ class ALLSET_OT_outliner_drag(bpy.types.Operator):
         if cycles:
             self.report({'WARNING'}, "Skipped (the drop target is their descendant): "
                         + ", ".join(ob.name for ob in cycles))
-        from ..ui import outliner_order
+        from ..ui import outliner_order, outliner_tree
         if done and not context.space_data.use_filter_collection:
             outliner_order.to_end(done, context.scene)      # Maya: last among the new siblings
         ordered = False
-        if target is not None and where != 'ON' and context.space_data.sort_method != "ALPHA":
+        if target is not None and where != 'ON' and not outliner_tree.sort_alpha(context.space_data):
             keep = [ob for ob in movers if ob not in cycles]
             # the Maya Outliner's order = creation order numbers (ui/outliner_order.py)
             ordered = not context.space_data.use_filter_collection and outliner_order.place(

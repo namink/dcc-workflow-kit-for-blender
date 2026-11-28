@@ -23,9 +23,10 @@ def _hidden(context):
     if region is None or region.type != 'WINDOW':
         return False
     # A Maya panel's own dock area (ui/maya_dock.py) shows only that panel.
-    from . import maya_dock
+    from . import maya_dock, tool_settings
     if maya_dock.area_role(context) is not None:
-        return True
+        # the Tool Settings tab keeps Blender's tool panels for tools without Maya sections
+        return maya_dock.shown_kind(context) != 'TOOL_SETTINGS' or tool_settings.has_maya_sections(context)
     from . import hypershade         # a Hypershade pane shows only its own panel
     if hypershade.context_pane(context) is not None:
         return True
@@ -37,7 +38,6 @@ def _hidden(context):
         return True
     # The Tool Settings dock (a Properties Tool tab): Maya sections replace Blender's tool panels
     # for Move / Rotate / Scale.
-    from . import tool_settings
     return tool_settings.hides_blender_panels(context)
 
 
@@ -99,6 +99,13 @@ def _reregister(cls, kids, poll, raw=None):
 
 
 def unregister():
+    from .. import safe_reg
     for cls, raw, kids in _wrapped:   # forward: the original order again
-        _reregister(cls, kids, raw, raw)   # never raises: one foreign panel can't stop the rest
+        if not cls.is_registered:
+            # its owner took it out while Maya mode was on (another add-on switched off, #423): it gets its own
+            # poll back but stays out; registering it again would bring back a panel of an add-on that is off
+            safe_reg._set_poll(cls, raw)
+            continue
+        # never raises: one foreign panel can't stop the rest
+        _reregister(cls, [k for k in kids if k.is_registered], raw, raw)
     _wrapped.clear()

@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Mesh > Cleanup... as Maya's command (#104): a menu leaf with an option box, not Blender's Clean Up submenu.
 
-Maya 2022: the item runs ``cmds.polyCleanup`` with the Cleanup Options values
-(factory: Operation 1 "Cleanup matching polygons", Scope selected objects,
+Maya: the item runs Cleanup with the Cleanup Options values
+(default: Operation 1 "Cleanup matching polygons", Scope selected objects,
 history on, every criterion off, tolerances 1e-5; the meaning of
 each option: the "Fix by Tesselation" boxes triangulate, the "Remove Geometry" boxes delete).
 

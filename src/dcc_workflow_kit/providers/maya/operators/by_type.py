@@ -5,9 +5,9 @@ Maya selects the transforms of the type (``SelectAllIKHandles`` = every ikHandle
 clusterHandle; category "Menu items.Common.Select.All by Type") and deletes the
 nodes with them. The kit's counterparts:
 
-- IK handle = the ``ikHandleN`` empty an IK constraint targets (operators/skin.create_ik); a Spline IK handle is the
-  ``ikHandleN`` Spline IK constraint itself (operators/rig_maya.py, no object to select).
-- cluster = the Hook modifier ``clusterN`` and its ``clusterNHandle`` empty (operators/rig_maya.ALLSET_OT_cluster); a
+- IK handle = the ``ikHandleN`` empty an IK constraint targets (operators/ik_handle.create_ik); a Spline IK handle is the
+  ``ikHandleN`` Spline IK constraint itself (operators/ik_spline_handle.py, no object to select).
+- cluster = the Hook modifier ``clusterN`` and its ``clusterNHandle`` empty (operators/cluster_soft_mod.ALLSET_OT_cluster); a
   plain Blender Hook counts as a cluster too, a soft modification (``softModN``) and the lattice / wrap base hooks
   (``ffd1Base``) don't.
 - particles / rigid bodies: objects with a particle system / a rigid body.

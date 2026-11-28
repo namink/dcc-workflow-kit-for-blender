@@ -16,7 +16,7 @@ without a mouse.
 import bpy
 from bpy.props import EnumProperty
 
-from .. import compat
+from .. import compat, live_refs
 
 EDITORS = {   # editor -> (area type, click operator, box operator bl_idname as listed in Window.modal_operators)
     'OUTLINER': ('OUTLINER', "outliner.item_activate", "OUTLINER_OT_select_box"),
@@ -129,45 +129,108 @@ def uv_sync():
     return bool(ts and ts.use_uv_select_sync)
 
 
+def _uv_domain():
+    """What one selection item is in the UV Editor: with UV sync on the mesh select mode's element ('VERT', 'EDGE',
+    'FACE'); with it off the UV select mode's ('UV', 'UV_EDGE', 'UV_FACE'; shells = faces)."""
+    ts = bpy.context.scene.tool_settings
+    if ts.use_uv_select_sync:
+        vert, edge, _face = ts.mesh_select_mode
+        return 'VERT' if vert else 'EDGE' if edge else 'FACE'
+    if compat.uv_island_mode(ts) or ts.uv_select_mode == 'FACE':
+        return 'UV_FACE'
+    return 'UV_EDGE' if ts.uv_select_mode == 'EDGE' else 'UV'
+
+
+def _uv_key(name, loop, uv):
+    """One UV (Maya): the corners of a mesh vertex that share a UV position move and select together."""
+    p = loop[uv].uv
+    return (name, loop.vert.index, round(p.x, 6), round(p.y, 6))
+
+
 def uv_state():
-    """UV Editor selection: (object, loop index) of selected UV corners; with UV sync on, (object, vertex index)."""
+    """UV Editor selection as items of the current select mode (``_uv_domain``): mesh vertices / edges / faces with
+    UV sync on; UVs (shared position), UV edges or faces with it off. Toggling works on what the user sees picked."""
+    domain = _uv_domain()
     out = set()
     for ob in _edit_meshes():
         bm = _bmesh(ob)
-        if uv_sync():
-            out.update((ob.name, v.index) for v in bm.verts if v.select)
+        if domain == 'VERT':
+            out.update(('V', ob.name, v.index) for v in bm.verts if v.select)
+            continue
+        if domain == 'EDGE':
+            out.update(('E', ob.name, e.index) for e in bm.edges if e.select)
+            continue
+        if domain == 'FACE':
+            out.update(('F', ob.name, f.index) for f in bm.faces if f.select)
             continue
         uv = bm.loops.layers.uv.active
         if uv is None:
             continue
         for f in bm.faces:
+            if domain == 'UV_FACE':
+                if all(compat.uv_vert_selected(lp, uv) for lp in f.loops):
+                    out.add(('F', ob.name, f.index))
+                continue
             for loop in f.loops:
-                if compat.uv_vert_selected(loop, uv):
-                    out.add((ob.name, loop.index))
+                if domain == 'UV':
+                    if compat.uv_vert_selected(loop, uv):
+                        out.add(_uv_key(ob.name, loop, uv))
+                elif compat.uv_edge_selected(loop, uv):
+                    out.add(frozenset((_uv_key(ob.name, loop, uv), _uv_key(ob.name, loop.link_loop_next, uv))))
     return frozenset(out)
+
+
+def _set_mesh_items(bm, domain, name, selected):
+    for seq in (bm.verts, bm.edges, bm.faces):
+        for el in seq:
+            el.select = False
+    tag, seq = {'VERT': ('V', bm.verts), 'EDGE': ('E', bm.edges), 'FACE': ('F', bm.faces)}[domain]
+    for el in seq:
+        if (tag, name, el.index) in selected:
+            el.select = True
+    bm.select_flush_mode()
+    compat.uv_sync_from_mesh(bm)             # 5.x: the UV Editor draws its own copy of the synced selection
+
+
+def _set_uv_items(bm, uv, domain, name, selected):
+    loops = [lp for f in bm.faces for lp in f.loops]
+    if domain == 'UV_FACE':
+        for f in bm.faces:
+            compat.set_uv_face_selected(f, uv, False)
+        for f in bm.faces:
+            if ('F', name, f.index) in selected:
+                compat.set_uv_face_selected(f, uv, True)
+        return
+    if domain == 'UV':
+        on = {lp: _uv_key(name, lp, uv) in selected for lp in loops}
+    else:                                       # a UV is picked when a picked UV edge ends on it
+        edges = {lp: frozenset((_uv_key(name, lp, uv), _uv_key(name, lp.link_loop_next, uv))) in selected
+                 for lp in loops}
+        ends = {k for lp, picked in edges.items() if picked
+                for k in (_uv_key(name, lp, uv), _uv_key(name, lp.link_loop_next, uv))}
+        on = {lp: _uv_key(name, lp, uv) in ends for lp in loops}
+    for lp in loops:
+        compat.set_uv_vert_selected(lp, uv, on[lp])
+    for lp in loops:
+        picked = edges[lp] if domain == 'UV_EDGE' else (on[lp] and on[lp.link_loop_next])
+        compat.set_uv_edge_selected(lp, uv, picked)
+    for f in bm.faces:
+        if hasattr(f, "uv_select"):
+            f.uv_select = all(compat.uv_edge_selected(lp, uv) for lp in f.loops)
 
 
 def set_uv_state(selected):
     import bmesh
+    domain = _uv_domain()
     for ob in _edit_meshes():
         bm = _bmesh(ob)
-        if uv_sync():
-            for v in bm.verts:
-                v.select = (ob.name, v.index) in selected
-            bm.select_flush(True)
-            bm.select_flush(False)
-            bmesh.update_edit_mesh(ob.data, loop_triangles=False, destructive=False)
-            continue
-        uv = bm.loops.layers.uv.active
-        if uv is None:
-            continue
-        for f in bm.faces:
-            for loop in f.loops:
-                compat.set_uv_vert_selected(loop, uv, (ob.name, loop.index) in selected)
-        for f in bm.faces:                    # an edge is selected when both of its corners are
-            for loop in f.loops:
-                on = compat.uv_vert_selected(loop, uv) and compat.uv_vert_selected(loop.link_loop_next, uv)
-                compat.set_uv_edge_selected(loop, uv, on)
+        if domain in ('VERT', 'EDGE', 'FACE'):
+            _set_mesh_items(bm, domain, ob.name, selected)
+        else:
+            uv = bm.loops.layers.uv.active
+            if uv is None:
+                continue
+            _set_uv_items(bm, uv, domain, ob.name, selected)
         bmesh.update_edit_mesh(ob.data, loop_triangles=False, destructive=False)
 
 
@@ -258,7 +321,7 @@ def _last_pointer(wm):
 
 
 def _modal_running(wm, idname):
-    return any(op.bl_idname == idname for win in wm.windows for op in win.modal_operators)
+    return any(op.bl_idname == idname for win in wm.windows for op in live_refs.running_modals(win))
 
 
 def _finish_box():

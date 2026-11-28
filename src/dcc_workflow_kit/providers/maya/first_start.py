@@ -6,7 +6,7 @@
   older versions nothing is copied into the user's scripts folder, and the preferences are kept.
 - ``allset.make_maya``: "Start in Maya Layout" on (this add-on's own setting) and the Maya layout now: a new Maya
   scene when the open file is untouched, else the layout workspace appended to the open file
-  (``switch.enter_layout``). It writes none of Blender's preferences: the Maya theme, splash, density, font, wire,
+  (``switch_layout.enter_layout``). It writes none of Blender's preferences: the Maya theme, splash, density, font, wire,
   navigation, undo and panel presets of older versions are gone.
 - Start in the Maya layout: armed on register, the first load_post (Blender's startup file, loaded right after the
   add-ons register) opens a new Maya scene when Blender started without a file; the first timer tick disarms it, so
@@ -54,6 +54,11 @@ def new_maya_scene(options=None):
     if scene is not None:
         startup_cameras.ensure(scene, scene.view_layers[0])
         option_windows.apply_new_scene(scene, options, full, before)
+    win = _window()
+    if win is not None and win.workspace is not None:
+        # sizes, shading, Outliner, icons final before the first frame, like a switch (else timers settle them
+        # one after another over the first second)
+        switch._prepare_layout(win, win.workspace, fresh=True)
     return res
 
 

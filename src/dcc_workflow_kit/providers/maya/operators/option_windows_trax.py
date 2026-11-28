@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Maya option windows of the Trax Editor: Create > Animation Clip (Create Clip Options).
 
-Same spec as operators/option_windows.py. Defaults like Maya: Name clip1, keys leave the timeline, the clip goes on
+Same spec as operators/option_windows_spec.py. Defaults like Maya: Name clip1, keys leave the timeline, the clip goes on
 the Trax tracks and into the library, time range = the animation curves' key range (Start / End 0 / 10), the
 hierarchy below the selection and the subcharacters are included. The clip keeps its absolute values: Maya's
 Offset Relative (a clip continuing from the previous clip's last value) and the time warp curve have no field.

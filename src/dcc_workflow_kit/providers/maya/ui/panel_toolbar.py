@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Maya viewport panel bar in the Maya Workflow Kit layout: the panel menu bar alone, and the panel toolbar under it.
 
-Maya 2022: every model panel has a menu bar
+Maya: every model panel has a menu bar
 (View Shading Lighting Show Renderer Panels) and under it a toolbar of small icons in groups —
 camera, gates and grid, shading modes and lights, effects, isolate / X-ray — then exposure and gamma fields and the
 colour management view. Blender's 3D View header mixed Maya's menus with its own editor-type button, mode selector,
@@ -20,7 +20,8 @@ import math
 import bpy
 import numpy as np
 
-from . import panel_menus, status_icons, toolbar_fit
+from . import own_draw, panel_menus, status_icons, toolbar_fit
+from .. import preferences
 from .toolbar_fit import BAR_UNITS
 from .status_icons import DARK, DIM, GREY, LIGHT, TEAL, TEAL_DARK, TEAL_LIGHT, letter
 
@@ -308,7 +309,7 @@ def g_more(cv):
 GLYPHS = {name[2:]: fn for name, fn in globals().items() if name.startswith("g_")}
 
 
-# --- the toolbar (Maya 2022 order) -----
+# --- the toolbar (Maya order) -----
 
 # The toolbar rows: ui/panel_menu_data.TOOLBAR (bpy-free, counted by tools/menu_count.py).
 from . import panel_menu_data  # noqa: E402
@@ -347,8 +348,10 @@ def _draw_item(row, context, item, text=""):
     if kind == "set":
         on = bool(panel_menus.state(context, data))
         sub = _flat(row, on, bool(text))
-        if data in panel_menus.CAMERA_KEYS:
+        if data == "CAMERA_LOCK":
             sub.enabled = panel_menus.view_camera(context) is not None
+        elif data in panel_menus.CAMERA_KEYS:   # Blender's own view: the button looks through its startup camera
+            sub.enabled = panel_menus.has_panel_camera(context)
         elif data in ("SELECT_CAMERA", "BOOKMARK"):
             sub.enabled = panel_menus.has_panel_camera(context)
         op = sub.operator(panel_menus.ALLSET_OT_panel_set.bl_idname, text=text, icon_value=_icon(glyph),
@@ -416,6 +419,7 @@ def _draw_cm(layout, context, menu=False):
 # area pointer -> index of the first group in the » popover (written by the tool header draw, read by the popover;
 # a plain dict, no ID data is written while drawing)
 _FIRST_HIDDEN = {}
+SHADING_UNITS = 5.5  # Four native shading modes and their settings popover.
 
 
 def shown_groups(context):
@@ -424,7 +428,11 @@ def shown_groups(context):
     system = context.preferences.system
     if region is None or region.type != 'TOOL_HEADER':
         return len(TOOLBAR) + 1
-    return toolbar_fit.fit(fit_groups(), region.width, system.ui_scale, system.pixel_size)
+    reserved = 0
+    if preferences.get(context).show_viewport_shading:
+        reserved = toolbar_fit.px(SHADING_UNITS, toolbar_fit.unit(system.ui_scale, system.pixel_size))
+        reserved += toolbar_fit.spacing(system.ui_scale)
+    return toolbar_fit.fit(fit_groups(), region.width - reserved, system.ui_scale, system.pixel_size)
 
 
 def draw_toolbar(layout, context):
@@ -439,12 +447,17 @@ def draw_toolbar(layout, context):
     if n > len(TOOLBAR):
         _bar(layout)
         _draw_cm(layout.row(align=True), context)
-        return
-    # Maya's overflow arrow at the right end of the bar: the groups that don't fit, in a popover
     layout.separator_spacer()
-    sub = layout.row(align=True)
-    sub.ui_units_x = toolbar_fit.MORE_UNITS
-    sub.popover(ALLSET_PT_panel_toolbar_more.bl_idname, text="", icon_value=_icon("more"))
+    if n <= len(TOOLBAR):
+        # Keep overflow next to the shading controls when the Maya groups don't fit.
+        sub = layout.row(align=True)
+        sub.ui_units_x = toolbar_fit.MORE_UNITS
+        sub.popover(ALLSET_PT_panel_toolbar_more.bl_idname, text="", icon_value=_icon("more"))
+    if preferences.get(context).show_viewport_shading:
+        row = layout.row(align=True)
+        row.ui_units_x = SHADING_UNITS
+        row.prop(context.space_data.shading, "type", text="", expand=True)
+        row.popover(panel="VIEW3D_PT_shading", text="")
 
 
 class ALLSET_PT_panel_toolbar_more(bpy.types.Panel):
@@ -474,13 +487,13 @@ class ALLSET_PT_panel_toolbar_more(bpy.types.Panel):
 # --- right-click menus ----------------------------------------------------------------------------------------
 # Maya: right-click on the camera icon at the left of the panel toolbar lists the scene's cameras (picking one looks
 # through it in that view), on Bookmarks the camera's bookmarks, on 2D Pan/Zoom its 2D bookmarks
-# (ui/camera_bookmarks.py). Blender opens its own button context menu on a right-click over a button before any
+# (ui/camera_bookmarks.py), on Image Plane Import Image / Display Mode / Delete (ui/panel_image_plane.py). Blender opens its own button context menu on a right-click over a button before any
 # keymap runs, so ``allset.pt_hover`` (3D View Generic MOUSEMOVE, first; poll = tool header) remembers which of these
 # buttons the mouse is over and starts ``allset.pt_camera_rmb``, a window modal (window handlers run before the
 # UI) that lives while the mouse is in that tool header and opens the button's menu on a right-click there.
 
 RMB_MENUS = {"cam_select": "ALLSET_MT_panel_cameras", "bookmark": "ALLSET_MT_pt_bookmarks",
-             "pan_zoom": "ALLSET_MT_pt_pan_zoom"}
+             "image_plane": "ALLSET_MT_pt_image_plane", "pan_zoom": "ALLSET_MT_pt_pan_zoom"}
 _over_camera = {}     # window pointer -> the right-click menu of the button under the mouse ("" = none; last move)
 _watching = set()
 
@@ -616,9 +629,12 @@ def torn_off(context):
 
 
 def maya_screen(context):
-    """The window shows the Maya Workflow Kit layout: its screen has the Maya strip, or it is a panel torn off it."""
-    from .shelf import strip_area
-    return context.screen is not None and (strip_area(context.screen) is not None or torn_off(context))
+    """The window shows the Maya Workflow Kit layout: its screen has the Maya strip or the shelf row (Status Line
+    off), or it is a panel torn off it."""
+    from .shelf import shelf_row_area, strip_area
+    screen = context.screen
+    return screen is not None and (strip_area(screen) is not None or shelf_row_area(screen) is not None
+                                   or torn_off(context))
 
 
 def maya_layout(context):
@@ -628,9 +644,10 @@ def maya_layout(context):
             and panel_menus._enabled(context))
 
 
+@own_draw.kit_draw("VIEW3D_HT_header")
 def _header(self, context):
     if not maya_layout(context):
-        return _orig["header"](self, context)
+        return own_draw.original("VIEW3D_HT_header", _header)(self, context)
     layout = self.layout
     row = layout.row(align=True)
     for label, idname in panel_menus.BAR:
@@ -638,39 +655,25 @@ def _header(self, context):
     return None
 
 
+@own_draw.kit_draw("VIEW3D_HT_tool_header")
 def _tool_header(self, context):
     if not maya_layout(context):
-        return _orig["tool_header"](self, context)
+        return own_draw.original("VIEW3D_HT_tool_header", _tool_header)(self, context)
     draw_toolbar(self.layout, context)
     return None
 
 
-HEADERS = (("header", "VIEW3D_HT_header", _header), ("tool_header", "VIEW3D_HT_tool_header", _tool_header))
-_orig = {}
-
-
-def _own_index(cls_name, funcs):
-    """Index of the class's own draw among its draw functions (something may have been prepended)."""
-    for i, f in enumerate(funcs):
-        if getattr(f, "__qualname__", "") == f"{cls_name}.draw":
-            return i
-    return 0
+HEADERS = (("VIEW3D_HT_header", _header), ("VIEW3D_HT_tool_header", _tool_header))
 
 
 def patch_headers():
-    for key, name, fn in HEADERS:
-        funcs = getattr(bpy.types, name)._dyn_ui_initialize()
-        i = _own_index(name, funcs)
-        if key not in _orig:
-            _orig[key] = funcs[i]
-        funcs[i] = fn
+    for name, fn in HEADERS:
+        own_draw.swap(name, fn)
 
 
 def unpatch_headers():
-    for key, name, fn in HEADERS:
-        if key in _orig:
-            funcs = getattr(bpy.types, name)._dyn_ui_initialize()
-            funcs[funcs.index(fn)] = _orig.pop(key)
+    for name, fn in HEADERS:
+        own_draw.restore(name, fn)
 
 
 CLASSES = (ALLSET_PT_panel_toolbar_more, ALLSET_MT_panel_cameras, ALLSET_OT_pt_hover, ALLSET_OT_pt_camera_rmb)

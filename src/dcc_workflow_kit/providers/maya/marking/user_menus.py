@@ -18,7 +18,8 @@ entry = ``{"label": str, "type": T, ...}`` with T:
 - ``"item"``: a Maya main menu item, ``path`` ("Edit Mesh/Bevel"; runs it like the menu does);
 - ``"python"``: ``code`` run like a shelf button / the Command Line (``maya.cmds`` look-alike available);
 - ``"shelf"``: a shelf button, ``shelf`` id + ``button`` label (Maya: a shelf button dragged into the editor), run
-  like a click on it; found by label, so it follows the shelf's edits;
+  like a click on it; found by label, so it follows the shelf's edits; ``nth`` (2, 3, ...) picks a later button of
+  the same label on that shelf (absent = the first);
 - ``"sub"``: a submenu, ``radial`` / ``items`` / ``options`` like a tree;
 - ``"kit"``: any kit action value (``ui/menu_map.py`` forms) as JSON, ``action``;
 - ``"factory"``: an entry of a kit menu (``menu`` + ``path`` + ``factory_label``), kept as the kit defines it
@@ -63,7 +64,7 @@ def _package():
 
 
 def store_path():
-    """``marking_menus.json`` in the extension's user folder (like ``ui/shelf.store_path``; the legacy add-on build:
+    """``marking_menus.json`` in the extension's user folder (like ``ui/shelf_store.store_path``; the legacy add-on build:
     a folder inside the add-on's own folder — nothing is written to the user's Blender config)."""
     import bpy
     try:
@@ -320,6 +321,9 @@ def entry_action(e):
     if t == "shelf":
         shelf, button = e.get("shelf"), e.get("button")
         if isinstance(shelf, str) and isinstance(button, str) and shelf and button:
+            nth = e.get("nth")
+            if isinstance(nth, int) and not isinstance(nth, bool) and nth > 1:
+                return (SHELF_OP, {"shelf": shelf, "button": button, "nth": nth})
             return (SHELF_OP, {"shelf": shelf, "button": button})
         return None
     if t == "kit":
@@ -681,7 +685,7 @@ def describe(entry):
         lines = (entry.get("code") or "").strip().splitlines()
         return "Python: " + (lines[0] + (" …" if len(lines) > 1 else "") if lines else "")
     if t == "shelf":
-        return f"Shelf button: {shelf_text(entry.get('shelf', ''))} / {entry.get('button', '')}"
+        return f"Shelf button: {shelf_text(entry.get('shelf', ''))} / {entry.get('button', '')}{nth_text(entry)}"
     if t == "sub":
         return "Submenu"
     if t == "kit":
@@ -697,6 +701,12 @@ def describe(entry):
             return "Kit submenu"
         return f"Kit default: {_action_text(act)}"
     return ""
+
+
+def nth_text(entry):
+    """" (2)" for the second button of one label on a shelf (the Shelf Button field and list text), "" for the first."""
+    nth = entry.get("nth")
+    return f" ({nth})" if isinstance(nth, int) and not isinstance(nth, bool) and nth > 1 else ""
 
 
 def shelf_text(shelf_id):

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Maya 2022 curve commands on Blender curves (
+"""Maya curve commands on Blender curves (
 maths in ``curves_math``, bpy-free).
 
 Representation: a Maya clamped-uniform NURBS curve = a Blender NURBS spline with

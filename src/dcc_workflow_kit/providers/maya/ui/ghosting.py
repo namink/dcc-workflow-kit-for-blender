@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Maya ghosting (Visualize > Ghost Selected / Unghost Selected / Unghost All / Open Ghosting Editor).
 
-Maya 2022 rules:
-- Ghost Selected turns ``ghosting`` on for the selection and, with Include Hierarchy (factory on), everything under
+Maya rules:
+- Ghost Selected turns ``ghosting`` on for the selection and, with Include Hierarchy (on by default), everything under
   it; Unghost Selected / Unghost All turn it off. Each ghosted node carries its own settings, copied from the
   Ghosting Editor's values when it was ghosted (an editor change applies to every current ghost).
 - Default settings: mode Pre And Post Frames, Pre Frames 3, Post Frames 3, Step: 1 (presets 1s / 2s / 4s / 5s / 10s
@@ -28,15 +28,16 @@ import bpy
 from bpy.app.handlers import persistent
 from bpy.props import BoolProperty, EnumProperty, FloatProperty, FloatVectorProperty, IntProperty, StringProperty
 from .. import i18n
+from .. import update_summary
 
 GEOMETRY = {'MESH', 'CURVE', 'SURFACE', 'FONT', 'META'}
 MODES = ("Pre And Post Frames", "Pre Frames", "Post Frames", "Custom Frames", "Pre And Post Keyframes",
          "All Keyframes")                                  # ghostingMode enum
 MODE_IDS = ("PRE_POST", "PRE", "POST", "CUSTOM", "KEYS_PRE_POST", "KEYS_ALL")
 PRESETS = ("1s", "2s", "4s", "5s", "10s", "Custom")
-PRE_COLOR = (0.447, 1.0, 1.0)                              # ghostColorPre factory
-POST_COLOR = (0.878, 0.678, 0.663)                         # ghostColorPost factory
-NEAR, FAR = 0.5, 0.15                                      # ghostNearOpacity / ghostFarOpacity factory
+PRE_COLOR = (0.447, 1.0, 1.0)                              # ghostColorPre default
+POST_COLOR = (0.878, 0.678, 0.663)                         # ghostColorPost default
+NEAR, FAR = 0.5, 0.15                                      # ghostNearOpacity / ghostFarOpacity default
 # Maya's ghosting command error when nothing selected can be ghosted
 NOTHING_TO_GHOST = "Nothing selected can be ghosted using the current settings."
 FACTORY = {"hierarchy": True, "mode": MODES[0], "preset": "1s", "custom_pre": 3, "custom_post": 3, "custom_step": 1,
@@ -427,11 +428,11 @@ def _batch(key):
 
 def _draw():
     context = bpy.context
+    scene = context.scene
+    if not _ghosting_in(scene):          # #191: no walk over every object on each redraw (checked first)
+        return
     space, rv3d = context.space_data, context.region_data
     if rv3d is None or space.shading.type == 'RENDERED' or not space.overlay.show_overlays:
-        return
-    scene = context.scene
-    if not _ghosting_in(scene):          # #191: no walk over every object on each redraw
         return
     obs = [ob for ob in ghosted(scene) if ob.type in GEOMETRY and ob.visible_get()]
     if not obs:
@@ -503,7 +504,7 @@ def _on_depsgraph(scene, depsgraph):
     if anim_snapshot._busy or not _geom:
         return
     uids = set()
-    for update in depsgraph.updates:
+    for update in update_summary.updates(depsgraph, _on_depsgraph):
         idb = update.id
         if isinstance(idb, bpy.types.Action):
             drop()
@@ -521,10 +522,10 @@ def _on_depsgraph(scene, depsgraph):
 
 @persistent
 def _on_frame(scene, _depsgraph=None):
-    from ..operators import anim_snapshot
-    if anim_snapshot._busy:
+    if not _ghosting_in(scene):         # checked first: the usual case reads nothing more
         return
-    if _ghosting_in(scene):
+    from ..operators import anim_snapshot
+    if not anim_snapshot._busy:
         _schedule(0.05)
 
 

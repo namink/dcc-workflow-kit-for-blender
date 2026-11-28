@@ -26,9 +26,9 @@ import time
 import bpy
 import gpu
 from bpy.props import EnumProperty, FloatProperty
-from gpu_extras.batch import batch_for_shader
 from mathutils import Matrix, Quaternion, Vector
 
+from .. import compat
 from . import keystate
 
 TAP_SECONDS = 0.25          # a \\ press let go within this is a tap
@@ -505,7 +505,7 @@ class ALLSET_OT_pan_zoom_box(bpy.types.Operator):
             return
         (x0, y0), (x1, y1) = self._start, self._end
         shader = gpu.shader.from_builtin('UNIFORM_COLOR')
-        batch = batch_for_shader(shader, 'LINE_LOOP', {"pos": [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]})
+        batch = compat.closed_line_batch(shader, [(x0, y0), (x1, y0), (x1, y1), (x0, y1)])
         gpu.state.blend_set('ALPHA')
         shader.uniform_float("color", (1.0, 1.0, 1.0, 0.8))
         batch.draw(shader)

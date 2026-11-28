@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Maya 2022 Hypershade window layout as Blender area splits (no bpy: tested headless).
+"""Maya Hypershade window layout as Blender area splits (no bpy: tested headless).
 
 Maya's standard Hypershade is a
 menu bar over five docked panels: Browser top-left, Material Viewer top-right, Create
 bottom-left, the Graph work area (node editor) between Create and the right column, Property Editor bottom-right.
-``MAYA_RECTS`` are those panels (x, y, w, h; y down, window px); ``plan`` turns them into
+``LAYOUT_RECTS`` are those panels (x, y, w, h; y down, window px); ``plan`` turns them into
 ``screen.area_split`` calls on one area (the whole new window), ``simulate`` replays a plan on a rectangle with
 Blender's split rules:
 
@@ -13,9 +13,9 @@ Blender's split rules:
 - VERTICAL, factor < 0.5: the new area is the left part, ``factor`` of the width.
 """
 
-MAYA_SIZE = (1440, 900)
+LAYOUT_SIZE = (1440, 900)
 # Hypershade panels in a 1440 x 900 window
-MAYA_RECTS = {
+LAYOUT_RECTS = {
     "MENU": (0, 0, 1440, 24),
     "BROWSER": (0, 24, 987, 237),
     "VIEWER": (987, 24, 453, 383),
@@ -27,15 +27,15 @@ ROLES = ("MENU", "BROWSER", "CREATE", "GRAPH", "VIEWER", "PROPERTY")
 
 
 def shares():
-    """Maya's proportions: right column / window width, Material Viewer / column height, Browser / left block
+    """The layout's proportions: right column / window width, Material Viewer / column height, Browser / left block
     height, Create / left block width (all below the menu bar)."""
-    w, h = MAYA_SIZE
-    body = h - MAYA_RECTS["MENU"][3]
-    left = MAYA_RECTS["BROWSER"][2]
-    return {"right": MAYA_RECTS["VIEWER"][2] / w,
-            "viewer": MAYA_RECTS["VIEWER"][3] / body,
-            "browser": MAYA_RECTS["BROWSER"][3] / body,
-            "create": MAYA_RECTS["CREATE"][2] / left}
+    w, h = LAYOUT_SIZE
+    body = h - LAYOUT_RECTS["MENU"][3]
+    left = LAYOUT_RECTS["BROWSER"][2]
+    return {"right": LAYOUT_RECTS["VIEWER"][2] / w,
+            "viewer": LAYOUT_RECTS["VIEWER"][3] / body,
+            "browser": LAYOUT_RECTS["BROWSER"][3] / body,
+            "create": LAYOUT_RECTS["CREATE"][2] / left}
 
 
 def plan(height, menu_px):
@@ -82,7 +82,7 @@ def normalized(rects, width, height):
 
 
 def compare(rects, width, height, menu_px=None):
-    """Largest difference (fraction of the window) between ``rects`` and Maya's, panel by panel below the menu
+    """Largest difference (fraction of the window) between ``rects`` and ``LAYOUT_RECTS``, panel by panel below the menu
     strip (the strip's height follows Blender's header, so the body is compared on its own)."""
     def body(r, top, total_h):
         out = {}
@@ -91,9 +91,9 @@ def compare(rects, width, height, menu_px=None):
                 continue
             out[k] = (x, (y - top) / (total_h - top), w, h / (total_h - top))
         return out
-    mw, mh = MAYA_SIZE
-    mt = MAYA_RECTS["MENU"][3]
+    mw, mh = LAYOUT_SIZE
+    mt = LAYOUT_RECTS["MENU"][3]
     top = rects["MENU"][3] if menu_px is None else menu_px
-    maya = {k: (x / mw, y, w / mw, h) for k, (x, y, w, h) in body(MAYA_RECTS, mt, mh).items()}
+    want = {k: (x / mw, y, w / mw, h) for k, (x, y, w, h) in body(LAYOUT_RECTS, mt, mh).items()}
     kit = {k: (x / width, y, w / width, h) for k, (x, y, w, h) in body(rects, top, height).items()}
-    return {k: max(abs(a - b) for a, b in zip(maya[k], kit[k])) for k in maya if k in kit}
+    return {k: max(abs(a - b) for a, b in zip(want[k], kit[k])) for k in want if k in kit}

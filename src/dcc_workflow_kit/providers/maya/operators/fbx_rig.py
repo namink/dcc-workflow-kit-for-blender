@@ -15,7 +15,7 @@ first into the second with Blender's bundled ``io_scene_fbx.parse_fbx`` / ``enco
    (``rest_rotations``): the writer's own axis conventions, never the current frame.
    Lcl Rotation default and keys become Pre^-1 R(t), compat Euler (``rotation_display.euler_curve``'s rule).
 
-3. Joints whose Maya frame a bone can't take (``joints.MAYA_FRAME``: an oriented end joint lines up with
+3. Joints whose Maya frame a bone can't take (``joint_frames.MAYA_FRAME``: an oriented end joint lines up with
    the world, a Behavior-mirrored joint points X back up the chain) turn their frame by Q_j (joint axes). The local
    matrix becomes Q_p^-1 L Q_j (Q_p = the parent joint's turn): PreRotation = Q_p^-1 R_rest Q_j, Lcl Rotation =
    Q_j^-1 R_rest^-1 R(t) Q_j, Lcl Translation = Q_p^-1 t; models under a turned joint get Q_p^-1 on rotation and
@@ -483,7 +483,7 @@ def set_time_span(path, start, end, fps):
 
 def rewrite(path, rest_path, turns=None, parents=None):
     """Rewrite the rig FBX at ``path`` the Maya way; ``rest_path`` = the same export at the rest pose; ``turns`` =
-    {joint name: Q} (joints.maya_frames); ``parents`` = {joint name: parent name or None}: only those joints stay,
+    {joint name: Q} (joint_frames.maya_frames); ``parents`` = {joint name: parent name or None}: only those joints stay,
     hung there (``fbx_skeleton.reparent``). Returns (joints given a PreRotation, Nulls folded)."""
     tree, version = load(path)
     rest_tree, _v = load(rest_path)

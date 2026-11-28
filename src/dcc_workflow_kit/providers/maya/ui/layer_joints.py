@@ -32,7 +32,8 @@ HIDDEN, TEMPLATE, REFERENCE = "HIDDEN", "TEMPLATE", "REFERENCE"
 # drawn colour of a joint in a Template / Reference layer: grey and black lines, like Maya
 COLOURS = {TEMPLATE: (0x78 / 255, 0x78 / 255, 0x78 / 255), REFERENCE: (0.0, 0.0, 0.0)}
 _EMPTY = types.MappingProxyType({})
-SHOW_FILTER = "allset_hidden_by_curves"   # ui/curve_controls.MARK: hidden by a Show filter, not by its Visibility
+SHOW_FILTERS = ("allset_hidden_by_curves", "allset_hidden_by_joints")   # ui/curve_controls.MARKS: hidden by a Show filter,
+                                                                        # not by its Visibility
 _REV = [0]          # bumped by every change that can change a skeleton's layer state
 _STATES = {}        # skeleton object pointer -> (key, state)
 _ROOTS = {}         # kit skeleton object pointer -> (key, first root joint name)
@@ -125,6 +126,10 @@ def set_playing(on):
         bump()
 
 
+def _show_hidden(pb):
+    return any(pb.get(m) for m in SHOW_FILTERS)
+
+
 def _own_hidden(ob, bones, editing):
     """Joints whose own Visibility is off (Edit Mode: the edit bones' hide)."""
     import numpy as np
@@ -133,7 +138,7 @@ def _own_hidden(ob, bones, editing):
     seq.foreach_get("hide", flags)
     if not flags.any():
         return []
-    return [b.name for i, b in enumerate(seq) if flags[i] and (editing or not b.get(SHOW_FILTER))]
+    return [b.name for i, b in enumerate(seq) if flags[i] and (editing or not _show_hidden(b))]
 
 
 def _object_kind(ob):
@@ -176,7 +181,7 @@ def _signature(ob):
     flags = np.zeros(len(pbs), bool)
     pbs.foreach_get("hide", flags)
     hidden = tuple(int(i) for i in np.flatnonzero(flags))
-    return ob.name, tuple(pbs.keys()), hidden, tuple(bool(pbs[i].get(SHOW_FILTER)) for i in hidden)
+    return ob.name, tuple(pbs.keys()), hidden, tuple(_show_hidden(pbs[i]) for i in hidden)
 
 
 def _compute(ob):
@@ -368,7 +373,7 @@ def _on_depsgraph(scene, depsgraph=None):
         return
     try:
         if depsgraph is not None:
-            look = depsgraph_filter.Look(depsgraph)
+            look = depsgraph_filter.look(depsgraph, _on_depsgraph)
             if look.scene_only:
                 return
             obs, data, editing = _touched(look)
@@ -394,7 +399,7 @@ def _on_reload(*_args):
 
 
 def _handlers():
-    h = bpy.app.handlers     # playback start / end: layer_editor.on_playback_pre / _post call set_playing
+    h = bpy.app.handlers     # playback start / end: display_layers.on_playback_pre / _post call set_playing
     return ((h.undo_post, _on_reload), (h.redo_post, _on_reload), (h.load_post, _on_reload))
 
 

@@ -14,7 +14,7 @@ visibility in the scene, and an Illuminates by Default switch on lights:
 
 - the World's "Maya Ambient" nodes are taken out (the World's own output linked back; a World the kit made for
   them is removed when nothing else uses it);
-- a kit Ambient / Volume Light becomes a plain kit point light with the same Maya intensity, No Decay;
+- a kit Ambient / Volume Light becomes a plain point light (its power as saved);
 - a Light Editor Isolate still on is undone (the other lights' visibility comes back);
 - the Illuminates by Default value is dropped (Blender's light linking collections stay as they are).
 
@@ -118,11 +118,9 @@ def _clean_worlds():
 
 
 def _clean_light(light):
-    """An old Ambient / Volume Light -> a plain kit point light with its Maya intensity (No Decay)."""
+    """An old Ambient / Volume Light -> a plain point light; its power stays as saved."""
     if LIGHT_KIND not in light.keys():
         return False
-    value = light.get(LIGHT_INTENSITY, 1.0)
-    intensity = float(value) if isinstance(value, (int, float)) else 1.0
     tree = light.node_tree
     if tree is not None:
         for name in VOLUME_NODES:
@@ -130,14 +128,10 @@ def _clean_light(light):
             if node is not None:
                 tree.nodes.remove(node)
     if light.get(VOLUME_NODES_ON):
-        from . import lights
-        light[lights.NODES_PROP] = True       # the kit turned the nodes on: the Decay Rate rule may turn them off
+        compat.release_light_nodes(light)       # the kit had turned the nodes on for the volume set-up
     for key in (*LIGHT_PROPS, VOLUME_NODES_ON):
         if key in light.keys():
             del light[key]
-    if light.type == 'POINT':
-        from . import lights
-        lights.apply(light, intensity, 0)
     return True
 
 

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Rows of the Maya viewport panel menus (``ui/panel_menus.py``), the panel toolbar (``ui/panel_toolbar.py``) and the
 greyed Status Line widgets (``ui/status_line.py``) as plain data — no ``bpy`` — so ``tools/menu_count.py``,
-``tools/menu_consistency.py`` and the notice rules can walk them like the main menus (until then
+the menu consistency checks and the notice rules can walk them like the main menus (until then
 these 36 + 9 greyed items were outside every count).
 
 Item paths (``allset.menu_unavailable`` ``item``, ``notices.PANEL_MENU`` keys): ``Panel menu/<menu>/<sub>/<label>``,
@@ -53,13 +53,45 @@ VIEW = [
     _run("Camera Attribute Editor...", "allset.camera_attribute_editor"),
     ("menu", "Camera Tools", "ALLSET_MT_panel_camera_tools"),
     _sep(),
+    ("menu", "Image Plane", "ALLSET_MT_panel_image_plane"),    # Maya View > Image Plane (operators/image_plane.py)
+    _sep(),
     _grey("View Sequence Time"),
+    _sep(),
+    ("prop", "preferences", "show_viewport_shading", "Viewport Shading Controls"),
+    ("prop", "preferences", "show_view_cube_buttons", "Camera / Projection Buttons"),
 ]
 
-# Maya viewSet -vx = seen from +X (Maya 2022 panel View menu); axis names as Blender's
+# Maya viewSet -vx = seen from +X (Maya panel View menu); axis names as Blender's
 # (X = X, Y = Y, Z = Z).
 VIEW_AXIS = [_view("X", 'RIGHT'), _view("Y", 'BACK'), _view("Z", 'TOP'),
              _view("-X", 'LEFT'), _view("-Y", 'FRONT'), _view("-Z", 'BOTTOM')]
+
+# View > Image Plane: import an image / a movie onto this view's camera, its image planes in the Attribute Editor
+# (the list of the camera's planes is built when the submenu opens: ui/panel_image_plane.py)
+IMAGE_PLANE = [
+    _run("Import Image...", "allset.image_plane", import_image=True),
+    _run("Import Movie...", "allset.image_plane", import_image=True, movie=True),
+    ("menu", "Image Plane Attributes", "ALLSET_MT_panel_image_plane_attributes"),
+]
+
+# Right-click on the panel toolbar's Image Plane button (the Delete row names the camera's first image plane)
+PT_IMAGE_PLANE = [
+    _run("Import Image...", "allset.image_plane", import_image=True),
+    _sep(),
+    ("menu", "Display Mode", "ALLSET_MT_pt_image_plane_display"),
+    _sep(),
+    _run("Delete:", "allset.image_plane_delete"),
+]
+
+# Display Mode of the camera's first image plane: Blender draws an image empty with its colours and alpha or not at all
+PT_IMAGE_PLANE_DISPLAY = [
+    _run("None", "allset.image_plane_display", mode='NONE'),
+    _grey("Outline"),
+    _grey("RGB"),
+    _run("RGBA", "allset.image_plane_display", mode='RGBA'),
+    _grey("Luminance"),
+    _grey("Alpha"),
+]
 
 CAMERA_TOOLS = [
     # Maya's camera tools (ui/camera_tools.py: LMB drag tumbles / tracks / dollies until another tool)
@@ -116,15 +148,15 @@ LIGHTING = [
 ]
 
 # Maya object type -> SpaceView3D.show_object_viewport_<type> (None = no Blender filter, "@" = an overlay flag,
-# "!" = a kit ``set`` key: ui/panel_menus.state / apply).
+# "!" = a kit ``set`` key: ui/panel_state.state / apply).
 SHOW_TYPES = (
     ("Controllers", None), ("NURBS Curves", "!SHOW_NURBS_CURVES"), ("NURBS Surfaces", "surf"),
     ("NURBS CVs", None), ("NURBS Hulls", None), ("Polygons", "mesh"), ("Subdiv Surfaces", None),
-    ("Planes", None), ("Lights", "light"), ("Cameras", "camera"), ("Image Planes", "!SHOW_IMAGE_PLANES"),
-    ("Joints", "armature"), ("IK Handles", "!SHOW_IK_HANDLES"), ("Deformers", "lattice"), ("Dynamics", None),
+    ("Planes", None), ("Lights", "!SHOW_LIGHTS"), ("Cameras", "!SHOW_CAMERAS"), ("Image Planes", "!SHOW_IMAGE_PLANES"),
+    ("Joints", "!SHOW_JOINTS"), ("IK Handles", "!SHOW_IK_HANDLES"), ("Deformers", "lattice"), ("Dynamics", None),
     ("Particle Instancers", None), ("Fluids", "volume"), ("Hair Systems", "curves"),
     ("Follicles", None), ("nCloths", None), ("nParticles", None), ("nRigids", None),
-    ("Dynamic Constraints", None), ("Locators", "empty"), ("Dimensions", None),
+    ("Dynamic Constraints", None), ("Locators", "!SHOW_LOCATORS"), ("Dimensions", None),
     ("Pivots", "@show_object_origins"), ("Handles", None), ("Texture Placements", None),
     ("Strokes", None), ("Motion Trails", "@show_motion_paths"), ("Plugin Shapes", None),
     ("Clip Ghosts", None), ("Grease Pencil", "grease_pencil"),
@@ -159,7 +191,9 @@ SHOW = [
 ]
 
 ISOLATE = [
-    _run("View Selected", "allset.isolate"),          # with the children
+    _run("View Selected", "allset.isolate"),          # with the children; components: only their faces
+    _run("Add Selected Objects", "allset.isolate_edit", action='ADD'),
+    _run("Remove Selected Objects", "allset.isolate_edit", action='REMOVE'),
 ]
 
 RENDERER = [
@@ -168,7 +202,11 @@ RENDERER = [
     _grey("Legacy High Quality Viewport"),
     _sep(),
     ("set", "RENDER_ENGINE", "{engine}"),   # Maya lists render overrides here (Arnold)
+    # Renderer Engine Items preference (off by default): these set the scene engine + Rendered shading instead
+    ("set", "RENDER_EEVEE", "Eevee"),
+    ("set", "RENDER_CYCLES", "Cycles"),
 ]
+ENGINE_ROWS = {"RENDER_EEVEE", "RENDER_CYCLES"}
 
 PANELS = [
     ("menu", "Perspective", "ALLSET_MT_panel_perspective"),
@@ -197,7 +235,7 @@ LAYOUTS = [
     ("set", "LAYOUT_FOUR", "Four View"),
 ]
 
-# The menu bar, in Maya 2022's order.
+# The menu bar, in Maya's order.
 BAR = (("View", "ALLSET_MT_panel_view"), ("Shading", "ALLSET_MT_panel_shading"),
        ("Lighting", "ALLSET_MT_panel_lighting"), ("Show", "ALLSET_MT_panel_show"),
        ("Renderer", "ALLSET_MT_panel_renderer"), ("Panels", "ALLSET_MT_panel_panels"))
@@ -208,21 +246,21 @@ BAR = (("View", "ALLSET_MT_panel_view"), ("Shading", "ALLSET_MT_panel_shading"),
 #
 # #10: every Maya toggle (a check button on Maya's panel toolbar) is a
 # toggle here too — "set" keys are drawn with ``toggle=True`` so Wireframe / Smooth Shade All / Use All Lights turn
-# off to Maya's off state (panel_menus.TOGGLE_OFF); camera buttons act on the camera the view looks through and are
+# off to Maya's off state (panel_state.TOGGLE_OFF); camera buttons act on the camera the view looks through and are
 # disabled in Blender's persp / ortho views (Maya disables Lock Camera there too).
 TOOLBAR = (
     (("cam_select", "set", "SELECT_CAMERA", "Select Camera"),
      ("cam_lock", "set", "CAMERA_LOCK", "Lock Camera"),
      ("cam_attr", "run", ("allset.camera_attribute_editor", {}), "Camera Attributes"),
      ("bookmark", "set", "BOOKMARK", "Bookmarks"),          # a new camera bookmark (ui/camera_bookmarks.py)
-     ("image_plane", "run", ("allset.create", {"kind": 'IMAGE_PLANE'}), "Image Plane"),
+     ("image_plane", "run", ("allset.image_plane", {}), "Image Plane"),   # import an image / show or hide it
      ("pan_zoom", "set", "PAN_ZOOM", "2D Pan/Zoom"),        # the view's 2D pan / zoom off / on
      ("grease", "run", ("wm.tool_set_by_id", {"name": "builtin.annotate"}), "Grease Pencil (Blender: Annotate tool)")),
     (("grid", "set", "GRID", "Grid"),
      ("film_gate", "set", "FILM_GATE", "Film Gate"),
-     ("res_gate", "grey", None, "Resolution Gate"),
+     ("res_gate", "set", "RES_GATE", "Resolution Gate"),
      ("gate_mask", "set", "GATE_MASK", "Gate Mask"),
-     ("field_chart", "grey", None, "Field Chart"),
+     ("field_chart", "set", "FIELD_CHART", "Field Chart"),
      ("safe_action", "set", "SAFE_ACTION", "Safe Action"),
      ("safe_title", "set", "SAFE_TITLE", "Safe Title")),
     (("wire", "set", "SHADE_WIRE", "Wireframe"),
@@ -234,7 +272,7 @@ TOOLBAR = (
      ("shadows", "prop", ("shading", "show_shadows"), "Shadows")),
     (("ssao", "prop", ("shading", "show_cavity"), "Screen Space Ambient Occlusion (Blender: cavity)"),
      ("motion_blur", "grey", None, "Motion Blur"),
-     ("aa", "grey", None, "Multisample Anti-aliasing"),
+     ("aa", "set", "SELECTION_WIRE_AA", "Multisample Anti-aliasing"),
      ("dof", "prop", ("shading", "use_dof"), "Depth of Field")),
     (("isolate", "set", "ISOLATE", "Isolate Select"),
      ("xray", "prop", ("shading", "show_xray"), "X-Ray"),
@@ -249,6 +287,9 @@ MENUS = {
     "ALLSET_MT_panel_view": ("View", VIEW),
     "ALLSET_MT_panel_view_axis": ("View/View Along Axis", VIEW_AXIS),
     "ALLSET_MT_panel_camera_tools": ("View/Camera Tools", CAMERA_TOOLS),
+    "ALLSET_MT_panel_image_plane": ("View/Image Plane", IMAGE_PLANE),
+    "ALLSET_MT_pt_image_plane": ("Image Plane button", PT_IMAGE_PLANE),
+    "ALLSET_MT_pt_image_plane_display": ("Image Plane button/Display Mode", PT_IMAGE_PLANE_DISPLAY),
     "ALLSET_MT_panel_shading": ("Shading", SHADING),
     "ALLSET_MT_panel_lighting": ("Lighting", LIGHTING),
     "ALLSET_MT_panel_show": ("Show", SHOW),
@@ -267,7 +308,7 @@ STATUS_LINE = ("Status Line/Select by hierarchy", "Status Line/Select by handle 
 
 
 # Maya runTimeCommand of panel rows whose command is one (Maya panel menus):
-# tools/menu_consistency.py compares these with the main / editor / marking menus.
+# checked against the main / editor / marking menus, so a command that works there is not greyed here.
 COMMANDS = {"Tumble Tool": "TumbleTool", "Track Tool": "TrackTool", "Dolly Tool": "DollyTool",
             "Center View of Selection": "CenterViewOfSelection", "Default View": "GoToDefaultView"}
 

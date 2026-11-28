@@ -3,7 +3,7 @@
 Grow / Shrink Along Loop, To Vertex / Edge / Face Perimeter, To Face Path, To Shell Border, To UV Shell Border,
 To UVs, To UV Perimeter, To UV Edge Loop.
 
-Every rule is Maya 2022's, checked on a 4 x 4 plane, a 6 x 6 plane and a cube.
+Every rule follows Maya's.
 
 - Grow Along Loop (PolySelectTraverse 5): a face / vertex / edge with a selected neighbour grows one step past each
   end of that line (faces: the face across the quad's opposite edge; vertices: through the selected edges between
@@ -19,9 +19,12 @@ Every rule is Maya 2022's, checked on a 4 x 4 plane, a 6 x 6 plane and a cube.
   border component (same type) of those shells; nothing otherwise. To UV Shell Border (polySelectBorderShell 1):
   the open-border components of the shells the selection touches (UVs: the UV shell border).
 - To UVs (PolySelectConvert 4): faces -> their UVs; edges -> their UVs in the faces beside them; vertices -> every UV.
+- To Contained Edges / Faces: what the selection fully holds. Edges from faces = the edges inside the face selection
+  (two or more faces, all selected; the outline and the open border of the mesh are left out), from vertices = both
+  ends selected; faces = every vertex (from edges: every edge) selected. Nothing contained = the selection stays.
 
 Blender has no UV component in the 3D View: a UV result is the UV Editor's selection with UV Sync Selection off
-(the kit's Maya UV component, operators/uv_tools.set_component). In that state the selection *is* the UV
+(the kit's Maya UV component, operators/uv_components.set_component). In that state the selection *is* the UV
 selection, so a conversion reads it as vertices (the selected UVs' vertices); sync off alone is Blender's factory
 state, so ``uv_source`` decides.
 """
@@ -48,9 +51,13 @@ KINDS = (
     ('UVS', "To UVs", "The UVs of the selection (UV Editor, UV Sync Selection off)"),
     ('UV_PERIMETER', "To UV Perimeter", "The UVs on the perimeter of the selection (UV Editor)"),
     ('UV_EDGE_LOOP', "To UV Edge Loop", "The edge loops of the selected edges, up to a UV seam"),
+    ('CONTAINED_EDGES', "To Contained Edges", "The edges the selection fully contains"),
+    ('CONTAINED_FACES', "To Contained Faces", "The faces the selection fully contains"),
 )
 # kinds whose result is a UV selection
 UV_TARGET = {'UVS', 'UV_PERIMETER'}
+# kinds that leave the selection alone when they find nothing
+CONTAINED = {'CONTAINED_EDGES', 'CONTAINED_FACES'}
 
 
 # --- reading the selection ---------------------------------------------------------------------------
@@ -196,6 +203,15 @@ def contained_faces(bm, kind, elems):
         return {f for f in bm.faces if not f.hide and all(e in elems for e in f.edges)}
     vs = verts_of(kind, elems)
     return {f for f in bm.faces if not f.hide and all(v in vs for v in f.verts)}
+
+
+def contained_edges(bm, kind, elems):
+    if kind == 'EDGE':
+        return set(elems)
+    if kind == 'FACE':
+        return {e for e in bm.edges if not e.hide and len(e.link_faces) >= 2
+                and all(f in elems for f in e.link_faces)}
+    return {e for e in bm.edges if not e.hide and all(v in elems for v in e.verts)}
 
 
 def region(bm, kind, elems):
@@ -382,6 +398,10 @@ def convert(bm, kind_in, elems, what, uv=None):
         return 'LOOP', uv_loops('VERT', perimeter_verts(region(bm, kind_in, elems)), uv)
     if what == 'UV_EDGE_LOOP':
         return 'EDGE', uv_edge_loop(touching_edges(kind_in, elems), uv)
+    if what == 'CONTAINED_EDGES':
+        return 'EDGE', contained_edges(bm, kind_in, elems)
+    if what == 'CONTAINED_FACES':
+        return 'FACE', set(elems) if kind_in == 'FACE' else contained_faces(bm, kind_in, elems)
     raise ValueError(what)
 
 
@@ -407,7 +427,7 @@ def uv_border_loops(bm, uv, loops):
 
 def uv_source(context, bm, uv):
     """Is the selection UVs (the kit's Maya UV component)? Sync off is also Blender's factory state, so
-    only in the UV Editor, or in the 3D View when every shown face is selected (how uv_tools.set_component shows
+    only in the UV Editor, or in the 3D View when every shown face is selected (how uv_components.set_component shows
     the UVs) and some but not all UVs are."""
     if uv is None or context.scene.tool_settings.use_uv_select_sync:
         return False
@@ -474,11 +494,13 @@ class ALLSET_OT_select_convert(bpy.types.Operator):
             if res is not None and uv_mode and self.kind in ('GROW_LOOP', 'SHRINK_LOOP'):
                 res = ('LOOP', uv_loops('VERT', res[1], uv))      # UVs grow / shrink with their vertices
             results.append((ob, bm, uv, res))
+        if self.kind in CONTAINED and not any(r[3] and r[3][1] for r in results):
+            return {'FINISHED'}     # nothing contained: the selection stays
         if not results:
             self.report({'WARNING'}, "Select a mesh with UVs" if self.kind in UV_TARGET else "Select a mesh")
             return {'CANCELLED'}
         if any(r[3] is not None and r[3][0] == 'LOOP' for r in results):
-            # a UV selection: Maya's UV component = sync off, every face shown (uv_tools.set_component)
+            # a UV selection: Maya's UV component = sync off, every face shown (uv_components.set_component)
             uv_tools.forget_mesh_selection()      # a conversion: no F12 selection to bring back (#80)
             uv_tools.set_component(context, 'UV')
             ts.uv_select_mode = 'VERTEX'
@@ -491,9 +513,10 @@ class ALLSET_OT_select_convert(bpy.types.Operator):
             return {'FINISHED'}
         targets = {r[3][0] for r in results if r[3] is not None}
         if from_uvs and targets:
-            ts.use_uv_select_sync = True
+            uv_tools.sync_on(ts)
         if len(targets) == 1:
             ts.mesh_select_mode = _MODES[targets.pop()]
+        uv_tools.match_sticky(ts)
         for ob, bm, _uv, res in results:
             if res is not None:
                 select_only(bm, res[0], res[1])
@@ -501,4 +524,85 @@ class ALLSET_OT_select_convert(bpy.types.Operator):
         return {'FINISHED'}
 
 
-classes = (ALLSET_OT_select_convert,)
+# UV Editor Ctrl+RMB menu (marking/menus.UV_CONVERT): Maya converts to the vertices, edges and UVs the selection
+# touches and to the faces it contains (a face whose every corner is selected), then picks that component type.
+UV_CONVERT_TO = (('VERTEX', "To Vertices", "The vertices the selection touches"),
+                 ('EDGE', "To Edges", "The edges the selection touches"),
+                 ('FACE', "To Faces", "The faces the selection contains (every corner selected)"),
+                 ('UV', "To UVs", "The UVs of the selection"))
+
+
+def uv_convert(bm, uv, loops, kind_in, elems, to):
+    """Elements of UV Editor conversion ``to``; ``loops`` = the selected UV corners when the selection is UVs (sync
+    off), else None."""
+    if to == 'VERTEX':
+        return verts_of(kind_in, elems)
+    if to == 'EDGE':
+        return touching_edges(kind_in, elems)
+    if to == 'FACE':
+        if loops is not None:
+            return {f for f in bm.faces if f.select and not f.hide and all(lp in loops for lp in f.loops)}
+        return set(elems) if kind_in == 'FACE' else contained_faces(bm, kind_in, elems)
+    if loops is not None:       # UVs to UVs: the same UVs
+        return set(loops)
+    return uv_loops(kind_in, elems, uv) if uv is not None else set()
+
+
+class ALLSET_OT_uv_convert(bpy.types.Operator):
+    """Convert the selection like Maya's UV Editor Ctrl+RMB menu: to the vertices, edges or UVs it touches, or to
+    the faces it contains, in that component type"""
+    bl_idname = "allset.uv_convert"
+    bl_label = "Convert Selection"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    to: EnumProperty(name="To", items=UV_CONVERT_TO, options={'SKIP_SAVE'})
+
+    @classmethod
+    def poll(cls, context):
+        if context.mode == 'EDIT_MESH':
+            return True
+        return bpy.ops.allset.uv_component.poll()
+
+    @classmethod
+    @i18n.translated
+    def description(cls, context, props):
+        return next(d for k, _l, d in UV_CONVERT_TO if k == props.to)
+
+    def execute(self, context):
+        if context.mode != 'EDIT_MESH':
+            # object mode: nothing to convert yet, the object goes into that component type (allset.uv_component)
+            return bpy.ops.allset.uv_component('EXEC_DEFAULT', mode=self.to)
+        ts = context.scene.tool_settings
+        mode = tuple(ts.mesh_select_mode)
+        found = []
+        for ob in context.objects_in_mode_unique_data:      # read everything before the component type changes
+            if ob.type != 'MESH':
+                continue
+            bm = bmesh.from_edit_mesh(ob.data)
+            uv = bm.loops.layers.uv.active
+            loops = None
+            if uv_source(context, bm, uv):
+                loops = {lp for f in bm.faces if f.select and not f.hide for lp in f.loops
+                         if compat.uv_vert_selected(lp, uv)}
+                kind_in, elems = 'VERT', {lp.vert for lp in loops}
+            else:
+                kind_in, elems = selection(bm, mode)
+            found.append((ob, bm, uv, uv_convert(bm, uv, loops, kind_in, elems, self.to)))
+        if not found:
+            self.report({'WARNING'}, "Select a mesh")
+            return {'CANCELLED'}
+        uv_tools.forget_mesh_selection()      # a conversion: no F12 selection to bring back
+        uv_tools.set_component(context, self.to)
+        if self.to == 'UV':
+            ts.uv_select_mode = 'VERTEX'
+        for ob, bm, uv, elems in found:
+            if self.to == 'UV':
+                if uv is not None:
+                    select_loops(bm, uv, elems)
+            else:
+                select_only(bm, {'VERTEX': 'VERT'}.get(self.to, self.to), elems)
+            bmesh.update_edit_mesh(ob.data)
+        return {'FINISHED'}
+
+
+classes = (ALLSET_OT_select_convert, ALLSET_OT_uv_convert)

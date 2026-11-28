@@ -15,6 +15,7 @@ import hashlib
 
 import bpy
 
+from .. import compat
 from . import naming, prim_shapes, units
 
 KEY = "allset_history"        # the node, on the shape data or the group empty
@@ -82,6 +83,39 @@ def attrs(owner):
     if "createUVs" in out and "createUVs" not in node["attrs"] and node.get("createUVs") == 0:
         out["createUVs"] = 0          # a node saved before Create UVs was a Channel Box attribute
     return out
+
+
+# The node keeps Axis / Pivot / Normal / Center in the Y-up frame its shapes are built in (Y up). The Channel Box
+# and the Attribute Editor show them on the scene's axes, like the Create option windows (#454): shown name ->
+# (stored name, sign); shown (x, y, z) = stored (x, -z, y) (scene_axes.from_yup).
+SCENE_VIEW = {f"{base}{shown}": (f"{base}{stored}", sign)
+              for base in ("axis", "pivot", "normal", "center")
+              for shown, stored, sign in (("Y", "Z", -1.0), ("Z", "Y", 1.0))}
+
+
+def to_scene(values):
+    """Node values (Y-up) -> the values the Channel Box / Attribute Editor show."""
+    out = dict(values)
+    for shown, (stored, sign) in SCENE_VIEW.items():
+        if stored in values:
+            out[shown] = sign * values[stored] + 0.0       # + 0.0: no -0
+    return out
+
+
+def from_scene(changes):
+    """Changes typed on the shown (scene axis) attributes -> node attribute changes."""
+    out = {}
+    for name, v in changes.items():
+        if name in SCENE_VIEW:
+            stored, sign = SCENE_VIEW[name]
+            out[stored] = sign * v + 0.0
+        else:
+            out[name] = v
+    return out
+
+
+def shown_attrs(owner):
+    return to_scene(attrs(owner))
 
 
 def uvs_on(values, extra):
@@ -186,10 +220,10 @@ def drop(ob):
 # --- building ---------------------------------------------------------------------------------------------------
 
 def fill_bmesh(bm, shape, k, uvs=True):
-    """Write a ``prim_shapes.Mesh`` into an empty bmesh (Maya units -> Blender, scaled by ``k``)."""
+    """Write a ``prim_nodes.Mesh`` into an empty bmesh (Maya units -> Blender, scaled by ``k``)."""
     verts = [bm.verts.new(to_blender(p, k)) for p in shape.verts]
     bm.verts.index_update()
-    if shape.edges:     # Maya's edge ids = the bmesh edge index (bevel_maya.maya_edge_ids)
+    if shape.edges:     # Maya's edge ids = the bmesh edge index (bevel_numbering.maya_edge_ids)
         for a, b in shape.edges:
             bm.edges.new((verts[a], verts[b]))
     uv = bm.loops.layers.uv.new(UV_NAME) if uvs and shape.uvs is not None else None
@@ -213,7 +247,7 @@ def _write_mesh(me, shape, k, uvs):
     ob = next((o for o in bpy.data.objects if o.data is me and o.mode == 'EDIT'), None)
     if ob is not None:
         bm = bmesh.from_edit_mesh(me)
-        bm.clear()
+        compat.clear_bmesh(bm)
         for layer in list(bm.loops.layers.uv.values()):
             bm.loops.layers.uv.remove(layer)
         fill_bmesh(bm, shape, k, uvs)

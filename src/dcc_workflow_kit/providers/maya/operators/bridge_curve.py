@@ -10,6 +10,8 @@ from mathutils import Matrix, Quaternion, Vector
 
 from . import curves_math
 
+from .. import update_summary
+
 RAMP_DEFAULT = '[[0.0,1.0,1],[1.0,1.0,1]]'
 REFERENCE = 'allset_bridge_path_'
 _dirty = set()
@@ -312,7 +314,7 @@ def cleanup(ob, previous, params):
 def changed(_scene, depsgraph):
     if _updating:
         return
-    for update in depsgraph.updates:
+    for update in update_summary.updates(depsgraph, changed):
         data = update.id.original
         if isinstance(data, bpy.types.Curve):
             _dirty.add(data.session_uid)

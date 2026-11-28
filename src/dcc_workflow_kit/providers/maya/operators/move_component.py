@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Edit Mesh > Transform (Maya's Transform Component): a polyMoveFace / polyMoveEdge / polyMoveVertex history node
-on the selected components, editable afterwards like the kit's extrusions (operators/extrude.py records).
+on the selected components, editable afterwards like the kit's extrusions (operators/extrude_record.py records).
 
 Like Maya: the node acts on the selected component type; its pivot is the centre of the selection's bounding box;
 its local frame has Z = the selection's normal (faces: the face normals, edges: the mean normal of their faces,
@@ -10,7 +10,7 @@ Local Translate Z moves every vertex along its own normal (a vertex shared by se
 mean of their normals); Local Rotate / Local Scale act in the local frame about the pivot (faces and edges only,
 like Maya's polyMoveVertex). Random scales each vertex's move by a random amount. The menu item leaves the mesh as it
 is and shows the manipulator (Local Translate / Local Scale handles; faces and edges also a rotate ring and a world /
-local switch, ui/in_view.py), the In-View Editor and the node in Channel Box INPUTS. Order: local scale, local rotate,
+local switch, ui/extrude_manipulator.py), the In-View Editor and the node in Channel Box INPUTS. Order: local scale, local rotate,
 local translate, then world scale, rotate and translate.
 """
 

@@ -133,8 +133,9 @@ def plan(rows, bindings, names, key_of=None):
                 skipped.append((b, "the kit has no hotkey for this command"))
             continue
         wanted = {key_of(ev) for _b, ev in items}
-        free = [r for r in cands if r["editable"] and key_of(r["event"]) not in wanted]
-        have = {key_of(r["event"]) for r in cands}
+        # a menu item command row (no Maya hotkey, event None) takes the file's key
+        free = [r for r in cands if r["editable"] and (r["event"] is None or key_of(r["event"]) not in wanted)]
+        have = {key_of(r["event"]) for r in cands if r["event"] is not None}
         for b, ev in items:
             if key_of(ev) in have:
                 continue                       # the Maya key: the kit row already has it

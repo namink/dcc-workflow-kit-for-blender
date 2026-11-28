@@ -24,10 +24,6 @@ def _key(kind):
     return ("anim.keyframe_insert_by_name", {"type": kind})
 
 
-def _shader(kind):
-    return ("allset.shelf_material", {"kind": kind})
-
-
 _CONSTRAINTS = {
     "ParentConstraint": (_con('CHILD_OF'), 'CON_CHILDOF'),
     "PointConstraint": (_con('COPY_LOCATION'), 'CON_LOCLIKE'),
@@ -127,20 +123,11 @@ BY_COMMAND = {
 
 BY_LABEL = {
     "UVEditing/Planar Mapping": (("v3d", "uv.project_from_view", {}), 'UV_FACESEL'),
-    "UVEditing/Cylindrical Mapping": (("v3d", "uv.cylinder_project", {}), 'MESH_CYLINDER'),
-    "UVEditing/Spherical Mapping": (("v3d", "uv.sphere_project", {}), 'MESH_UVSPHERE'),
+    "UVEditing/Cylindrical Mapping": (("item", "UV/Cylindrical"), 'MESH_CYLINDER'),
+    "UVEditing/Spherical Mapping": (("item", "UV/Spherical"), 'MESH_UVSPHERE'),
     "UVEditing/Automatic Mapping": (("item", "UV/Automatic"), 'UV_DATA'),
-    "Rendering/Standard Surface Material": (_shader('STANDARD_SURFACE'), 'MATERIAL'),
-    "Rendering/Lambert Material": (_shader('LAMBERT'), 'SHADING_SOLID'),
-    "Rendering/Blinn Material": (_shader('BLINN'), 'SHADING_RENDERED'),
-    "Rendering/Phong Material": (_shader('PHONG'), 'SHADING_TEXTURE'),
-    "Rendering/Surface Material": (_shader('SURFACE'), 'LIGHT'),
-    # Maya shader kinds (operators/material.MATERIALS)
-    "Rendering/Anisotropic Material": (_shader('ANISOTROPIC'), 'MATERIAL'),
-    "Rendering/Phong E Material": (_shader('PHONG_E'), 'MATERIAL'),
-    "Rendering/Layered Material": (_shader('LAYERED'), 'MATERIAL'),
-    "Rendering/Ramp Material": (_shader('RAMP'), 'MATERIAL'),
-    "Rendering/Use Background": (_shader('USE_BACKGROUND'), 'MATERIAL'),
+    # Blender's one material: the first material button makes it, the other shader kinds point to it (NOTICES)
+    "Rendering/Standard Surface Material": ("allset.shelf_material", 'MATERIAL'),
     "FX/Create nCloth": (("object.modifier_add", {"type": 'CLOTH', "use_selected_objects": True}), 'MOD_CLOTH'),
     "FX/Remove nCloth": ("allset.fx_remove_ncloth", 'X'),
     "FXCaching/Create New Cache": (("allset.ncache", {"action": 'CREATE', "kind": 'NOBJECT'}), 'FILE_CACHE'),
@@ -160,6 +147,11 @@ _HAIR = {"Current Position": "Display/Current Position", "Start Position": "Disp
              "Hair Systems", "Follicles", "Start Curves", "Rest Curves", "Start Curve End CVs",
              "Rest Curve End CVs")}}
 MENU = {
+    # Maya shaders that are a node set-up in Blender: greyed with the Hypershade item's notice
+    "Rendering/Ramp Material": "Hypershade/Create/Materials/Ramp Shader",
+    "Rendering/Layered Material": "Hypershade/Create/Materials/Layered Shader",
+    "Rendering/Surface Material": "Hypershade/Create/Materials/Surface Shader",
+    "Rendering/Use Background": "Hypershade/Create/Materials/Use Background",
     # Curves, Surfaces (one Curves / Surfaces shelf in Maya 2022, two shelves in Maya 2026)
     "Curves/NURBS Square": "Create/NURBS Primitives/Square",
     "Surfaces/NURBS Cube": "Create/NURBS Primitives/Cube",
@@ -251,11 +243,13 @@ NOTICES = {
     "Rendering/Render Diagnostics": (
         "Info editor", "Blender reports render problems in the Info editor and the status bar; there is no "
         "diagnostics window."),
-    # Maya 2026 shelf; the kit's Maya materials have no openPBRSurface kind
+    # Blender has one material (Principled BSDF): the Standard Surface Material button makes it
     "Rendering/OpenPBR Surface Material": (
-        "Standard Surface Material", "Maya Workflow Kit has no OpenPBR Surface material: use the Standard Surface "
-        "Material button (a Principled BSDF material)."),
+        "Standard Surface Material", "Blender has one material, the Principled BSDF: the Standard Surface Material "
+        "button makes a new one."),
 }
+NOTICES.update({f"Rendering/{kind} Material": NOTICES["Rendering/OpenPBR Surface Material"]
+                for kind in ("Anisotropic", "Blinn", "Lambert", "Phong", "Phong E")})
 
 
 def menu_path(shelf, label):

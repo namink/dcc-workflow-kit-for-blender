@@ -14,15 +14,15 @@ Clips themselves: operators/trax_clips.py.
 import bpy
 from bpy.props import IntProperty
 
-from . import editor_chrome
+from . import editor_chrome, own_draw
 
 TX = "Trax Editor"
-_orig = {}
 
 
+@own_draw.kit_draw("NLA_HT_header")
 def _header(self, context):
     if not editor_chrome.enabled(context):
-        return _orig["nla"](self, context)
+        return own_draw.original("NLA_HT_header", _header)(self, context)
     from bl_ui.space_dopesheet import dopesheet_filter
     layout = self.layout
     layout.template_header()
@@ -36,15 +36,11 @@ def _header(self, context):
 
 
 def patch():
-    funcs = bpy.types.NLA_HT_header._dyn_ui_initialize()
-    if "nla" not in _orig:
-        _orig["nla"] = funcs[0]
-    funcs[0] = _header
+    own_draw.swap("NLA_HT_header", _header)
 
 
 def unpatch():
-    if "nla" in _orig:
-        bpy.types.NLA_HT_header._dyn_ui_initialize()[0] = _orig.pop("nla")
+    own_draw.restore("NLA_HT_header", _header)
 
 
 def _sources():

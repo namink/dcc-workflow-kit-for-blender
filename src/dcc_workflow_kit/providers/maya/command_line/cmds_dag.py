@@ -48,7 +48,7 @@ def delete(*args, **kwargs):
     obs = _objects(names)
     if ch:
         from ..operators import history
-        history.delete_history(context, obs)
+        history.delete_history(context, obs, share=True)      # an instance's shared mesh, for all of them
         return None
     from ..operators import dag
     dag.delete_hierarchy(context, obs)
@@ -273,8 +273,9 @@ def group(*args, **kwargs):
             c.objects.unlink(grp)
         obs[0].users_collection[0].objects.link(grp)
     if target is not None:
+        from ..operators.freeze import frame_inverse
         grp.parent = target
-        grp.matrix_parent_inverse = Matrix.Identity(4)
+        grp.matrix_parent_inverse = frame_inverse(target)     # in a frozen parent's frame, like Edit > Group
     grp.matrix_basis = Matrix.Identity(4)
     _view_layer()
     for ob in obs:

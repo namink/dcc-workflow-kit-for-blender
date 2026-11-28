@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Maya 2022 Curves menu (maths in
+"""Maya Curves menu (maths in
 ``curves_math`` / ``surfaces_math``, bpy-free).
 
 - Bend / Curl / Scale Curvature = Maya's Curves menu commands on the CVs in object space (Maya Y-up: Blender local
   (x, y, z) is Maya (x, z, -y), the frame's twist axis comes from Maya's world up). Object selected = every CV; in edit
   mode the selected CV range of a spline = Maya's ``cv[a:b]`` (the CVs after b follow).
 - Lock / Unlock Length = Maya's ``lockLength`` attribute (curve data ID property); while it is on, CV edits keep every
-  CV leg length (``curves_math.keep_leg_lengths``, a depsgraph handler; Maya's CV manipulator rule is).
+  CV leg length (``curves_math_cv_tools.keep_leg_lengths``, a depsgraph handler; the kit's own rule for the CV manipulator).
 - CV Hardness = ``cmds.hardenPointCurve(multiplicity=-1)`` on the last selected CV (knots; shape exact through
   write_spline).
 - Fit B-spline = fitBspline on degree-1 curves: a new ``fitBsplineCurveN``.
@@ -22,6 +22,7 @@ from bpy.props import EnumProperty, FloatProperty
 from mathutils import Matrix, Vector
 
 from .. import results, undo_steps
+from .. import update_summary
 from . import curves_math as cm
 from . import naming, units
 from .curves_maya import MCurve, _curves_selected, _new_curve_object, _replace_splines, read_spline
@@ -173,12 +174,13 @@ def _on_depsgraph(scene, depsgraph):
     if not depsgraph.id_type_updated('CURVE'):
         return
     try:
-        datas = {u.id.original for u in depsgraph.updates if isinstance(u.id, bpy.types.Curve)
-                 and u.id.original.get(LOCK)}
+        datas = {u.id.original for u in update_summary.updates(depsgraph, _on_depsgraph)
+                 if isinstance(u.id, bpy.types.Curve) and u.id.original.get(LOCK)}
     except (ReferenceError, AttributeError):
         return
     if not datas:
         return
+    update_summary.wrote()
     _busy[0] = True
     try:
         for data in datas:

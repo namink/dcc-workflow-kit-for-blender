@@ -1,17 +1,23 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+# Large table file: search it (grep) or read line ranges; reading it whole is rarely needed.
 """Not-in-Blender notices: the near substitute + one line, for Maya menu items.
 
 One table for every place a Maya item has no Blender equivalent, or a different one: the item's tooltip
 (greyed items: ``allset.menu_unavailable``; items with a substitute: ``allset.menu_item``) and the Help
 Line, which shows the notice while the tooltip is up — Maya's Help Line shows a menu item's annotation the same
-way. Keys are Maya menu label paths (``ui/menu_sets.iter_items``).
-"""
+way. Keys are Maya menu label paths (``ui/menu_tree.iter_items``).
 
-import time
+Data file: four tables of (Blender substitute, one line) — ``NOTICES`` (Maya menu items by label path),
+``CATEGORIES`` (greyed items by path prefix), ``PANEL_MENU`` (panel menus, panel toolbar, Status Line) and
+``MARKING`` (marking menus, by kit menu name + label path). Grep a path or a key prefix and read that line range.
+Lookups: ``notice``, ``category``, ``greyed_notice``, ``tooltip``; the Help Line display is in ``help_line``.
+"""
 
 import bpy
 
-from .. import i18n, live_refs
+from .. import i18n
+from .help_line import (SHOW_SECONDS, ALLSET_OT_tip, _current, _expire, _redraw_status,  # noqa: F401
+                        _redraw_status_later, _status_area, current, remember_status_area, show, tip)
 
 # The line shown on Maya FX items that create a simulation: Blender's simulations are not rescaled.
 METRE_SCENES = ("Blender simulates one unit as one metre: FX works in metre scenes (in the centimetre layout 100 "
@@ -19,6 +25,23 @@ METRE_SCENES = ("Blender simulates one unit as one metre: FX works in metre scen
 
 # path: (substitute in Blender, one line). Paths with an action in menu_map.MAP run that substitute.
 NOTICES = {
+    **{f"Mesh/Booleans/{item}": ("Boolean modifier (applied)", "Blender's Exact Boolean, applied at once; the second object is "
+                                 "deleted, like Maya with construction history off.")
+       for item in ("Slice", "Hole Punch", "Cut Out", "Split Edges")},
+    **{f"Edit/LOD (Level of Detail)/{item}": ("Empty + Decimate modifier", "Blender has no level of detail "
+                                              "switching: every level stays visible; hide the ones you don't need.")
+       for item in ("Create LOD Group", "Generate LOD Meshes", "Ungroup LOD Group")},
+    **{f"Generate/Interactive Grooming Tools/{item} Brush": (
+        "Hair sculpt brushes", "Blender grooms hair Curves in Sculpt mode: Place = Add, Length = Grow/Shrink, "
+        "Grab = Pull Tips, Clump = Pinch.")
+       for item in ("Density", "Place", "Length", "Cut", "Comb", "Grab", "Smooth", "Clump", "Select")},
+    **{f"Generate/Interactive Grooming Tools/{item} Brush": (
+        "none", "Blender's hair sculpt brushes have no width, twist, noise, part or freeze brush: use Geometry "
+        "Nodes hair modifiers.")
+       for item in ("Width", "Twist", "Noise", "Part", "Freeze")},
+    "Modify/Convert/Displacement to Polygons": (
+        "Displace modifier (baked copy)", "Blender bakes the Displace modifiers into a new mesh; material "
+        "displacement only shows in renders and is not baked."),
     "Mesh Display/Assign Existing Set/No bakesets defined": ("Render Properties > Bake", "Maya lists the scene's bake sets here; Blender bakes from Render Properties > Bake (Cycles)."),
     # Skin
     **{f"Skin/{item}": ("Bind Skin / Paint Skin Weights", "Blender has no volume capsules to drag: Bind Skin gives Maya's "
@@ -122,9 +145,6 @@ NOTICES = {
         "Spline IK constraint", "Blender makes a Spline IK constraint on the end bone and the curve curve1; there is no "
         "ikHandle / effector node."),
     # IK / FK (operators/ik_fk.py)
-    "Skeleton/Enable IK/FK Control": (
-        "Always on", "Blender always lets you rotate joints in an IK chain: the rotation shows where the handle's "
-        "Ik Blend is 0 (Key > IK/FK Keys)."),
     "Key/IK/FK Keys/Set IK/FK Key": (
         "Ik Blend + joint keys", "Keys the handle (Ik Blend included) and the chain joints' solved rotation; Blender "
         "has no handle Offset channel to key."),
@@ -151,12 +171,6 @@ NOTICES = {
     **{f"nCache/{item}": (
         "Baked caches", "Blender always plays a baked cache: Delete Cache to simulate again.")
        for item in ("Enable All Caches on Selected", "Disable All Caches on Selected")},
-    # Lights (operators/lights.py)
-    **{f"Create/Lights/{kind} Light": (
-        f"{kind} light", "Maya Decay Rate No Decay renders in Cycles; Blender EEVEE and the viewport get darker with the "
-        "square of the distance, the power matching Maya intensity 1 at 10 units.") for kind in ("Point", "Spot")},
-    "Create/Lights/Area Light": (
-        "Area light", "Blender's area light falls off like Maya's; its power matches Maya intensity 1 (2 x 2 units)."),
     **{f"{menu}/Lights/Ambient Light": (
         "World colour or Point Light", "Blender has no ambient light: raise the World colour (World Properties > "
         "Surface) for light from every side, or add a Point Light.") for menu in ("Create", "Hypershade/Create")},
@@ -192,7 +206,27 @@ NOTICES = {
     "Fields/Solvers/Gravity": (
         "Wind field", "Blender has no gravity field: a Wind field blowing down (Blender's strength); the scene's "
         "gravity is global (Scene properties)."),
+    # Maya surface shaders that are a node set-up in Blender (greyed; the command line's shadingNode says the same)
+    "Hypershade/Create/Materials/Ramp Shader": (
+        "Shader Editor: Layer Weight + Color Ramp", "Blender builds a ramp shader in the Shader Editor: Layer Weight "
+        "(Facing) into a Color Ramp into Base Color."),
+    "Hypershade/Create/Materials/Layered Shader": (
+        "Shader Editor: Mix Shader", "Blender layers shaders in the Shader Editor with a Mix Shader (Fac = the top "
+        "layer's transparency)."),
+    "Hypershade/Create/Materials/Surface Shader": (
+        "Shader Editor: Emission", "Blender's flat, unlit surface is an Emission shader in the Shader Editor."),
+    "Hypershade/Create/Materials/Use Background": (
+        "Shader Editor: Holdout", "Blender shows the background through a surface with a Holdout shader in the Shader "
+        "Editor (Cycles: Object > Visibility > Shadow Catcher catches shadows)."),
+    "UV Editor/Image/Unfiltered": (
+        "Image display", "Blender's UV Editor always draws the image unfiltered: zoomed in, each pixel is a sharp "
+        "square. It has no smoothed (filtered) display."),
 }
+# Maya node type -> its greyed Hypershade Create item (the notice the command line's shadingNode gives)
+NODE_SETUPS = {"rampShader": "Hypershade/Create/Materials/Ramp Shader",
+               "layeredShader": "Hypershade/Create/Materials/Layered Shader",
+               "surfaceShader": "Hypershade/Create/Materials/Surface Shader",
+               "useBackground": "Hypershade/Create/Materials/Use Background"}
 
 
 # mapped items whose Blender result differs from Maya's.
@@ -499,12 +533,13 @@ NOTICES.update({
 # Greyed items (no Blender action in Maya Workflow Kit) by Maya menu path prefix: (closest Blender feature, one line).
 # notices.category picks the longest matching prefix; tests/test_step101_menu_honesty.py checks that every
 # greyed menu item has a notice and that every rule here matches at least one greyed item.
-# (Create Description... / Create Interactive Groom Splines are mapped to a new hair Curves object.)
+# (Create Description... / Create Interactive Groom Splines are mapped to a new hair Curves object, the Interactive
+# Grooming Tools brushes to the hair sculpt brushes or their own notice.)
 _XGEN_ITEMS = ("XGen Editor", "XGen Library", "Import Collections or Descriptions...",
                "Export Collections or Descriptions...", "Export Selection as Archive(s)...",
                "Batch Convert Scenes to Archives...", "Convert XGen Primitives to Polygons...",
                "Convert to Interactive Groom...", "Import Preset...", "Export as Preset...",
-               "Interactive Groom Editor", "Interactive Grooming Tools", "Cache",
+               "Interactive Groom Editor", "Cache",
                "Convert Interactive Groom to Polygons...", "Display HUD")
 CATEGORIES = {
     # whole Maya-only systems
@@ -555,17 +590,12 @@ CATEGORIES = {
     # rigging / animation
     "Key": ("Copy Transforms constraints", "Blender has no character mapping or redirection: retarget with Copy "
             "Transforms constraints. Character sets: Key > Create Character Set."),
-    # Set IK/FK Key / Enable IK Solver / Move IK to FK work (operators/ik_fk.py); Connect to IK/FK is left
-    "Key/IK": ("Ik Blend property", "Blender has no Connect to IK/FK: drive the handle's Ik Blend from a control "
-               "with Key > Set Driven Key or a driver."),
     "Key/Scene Time Warp": ("NLA strip time", "Blender has no scene time warp: remap time per action with an NLA "
                             "strip's Scale / Repeat or a Time Offset modifier."),
-    "Skeleton": ("Armature edit / pose mode", "Blender: IK handles are IK constraints (switch with Influence), "
-                 "joints are bone heads edited in armature edit mode."),
     "Deform": ("Modifiers", "Blender deformers are modifiers (Properties > Modifiers) with vertex-group weights: no "
                "deformer sets or tweak nodes."),
-    "Visualize": ("Motion Paths", "Blender shows motion with Motion Paths (Object properties); there is no turntable "
-                  "camera rig or animated sweep surface (the kit has Animation Snapshot and ghosting)."),
+    "Visualize": ("Motion Paths", "Blender shows motion with Motion Paths (Object properties); there is no animated "
+                  "sweep surface (the kit has Animation Snapshot, ghosting and Create Turntable)."),
     "Playback": ("Timeline Playback popover", "Blender's playback options are in the Timeline's Playback popover; "
                  "there is no cached-playback toggle."),
     # rendering
@@ -609,7 +639,7 @@ CATEGORIES = {
                "Linked and Select Similar are the closest."),
     **{f"Select/{sub}": ("Curve edit mode", "Blender selects curve and surface control points in edit mode (Tab); "
                          "hulls, isoparms and edit points aren't separate components.")
-       for sub in ("Components#2", "Components#3", "CV Selection Boundary", "Surface Border", "Cluster Curve")},
+       for sub in ("Components#2", "Components#3", "Cluster Curve")},
     # the conversions work (operators/select_convert.py); Blender has no face-corner (vertex face) selection.
     "Select/Convert Selection": ("Faces / UV Editor", "Blender has no vertex-face component: per-corner normals and "
                                  "colours follow the selected faces (Mesh > Normals > Set from Faces); single "
@@ -622,8 +652,6 @@ CATEGORIES = {
                      "data-blocks as assets, expose values with library overrides or custom properties."),
     "Modify/Convert": ("Object > Convert", "Blender converts curves, text, meshes and Grease Pencil; subdiv surfaces, "
                        "Paint Effects, displacement and fluids aren't separate types."),
-    "Edit": ("Edit menu", "Blender has no LOD groups, fur or attribute-value transfer: Object > Link/Transfer Data "
-             "copies data between objects."),
     **{f"Edit/{sub}": ("Outliner / Purge", "Blender has no node of this type: delete it in the Outliner, or File > "
                        "Clean Up > Purge for unused data.") for sub in ("Delete All by Type", "Delete by Type")},
     "File": ("File menu", "Blender has no ATOM files or After Effects Live Link: move animation with "
@@ -632,9 +660,9 @@ CATEGORIES = {
                 "Viewport Display; there is no per-camera visibility."),
     "Windows": ("Blender editors", "Blender has no editor by this name: any area's editor-type menu gives the "
                 "closest editor."),
-    **{f"Windows/{item}": ("Window menu", "Blender windows are managed by the OS (Window > Toggle Window Fullscreen); "
-                           "there is no Home screen.")
-       for item in ("Home", "Minimize Application", "Raise Main Window", "Raise Application Windows")},
+    **{f"Windows/{item}": ("Window menu", "Blender windows are managed by the OS (Window > Toggle Window "
+                           "Fullscreen).")
+       for item in ("Minimize Application", "Raise Main Window", "Raise Application Windows")},
 }
 
 
@@ -642,8 +670,8 @@ def _anim_editor_categories(ed):
     """Greyed items of the Graph Editor / Dope Sheet menu bars (Maya 2026's menus)."""
     m = {
         f"{ed}/Edit/Transformation Tools": (
-            "G / S on keys", "Blender moves and scales keys with G and S (or by dragging): it has no lattice or "
-            "region key tool (the Retime Tool is the kit's)."),
+            "G / S on keys", "Blender moves and scales keys with G and S (or by dragging): it has no lattice for "
+            "keys (the Region and Retime tools are the kit's)."),
         f"{ed}/Edit/Scene Time Warp": (
             "Time Stretching", "Blender has no time warp curve: Output Properties > Frame Range > Time Stretching "
             "remaps the whole scene."),
@@ -729,9 +757,6 @@ CATEGORIES.update({
     "Graph Editor/View/Theme": (
         "Themes", "Blender's colours come from the theme: Preferences > Themes (install a Maya-like theme there if you want "
         "Maya's colours)."),
-    "Graph Editor/Select/Pre-Select Highlight": (
-        "Hover", "Blender's Graph Editor doesn't highlight the curve under the mouse: the picked curve is drawn "
-        "brighter once selected."),
     "Dope Sheet/View": (
         "View menu", "Blender's Dope Sheet has no scene summary, channel sets or key value display: a key's value "
         "shows in the Graph Editor."),
@@ -740,25 +765,13 @@ CATEGORIES.update({
     "UV Editor/Select": (
         "Select menu", "Blender's UV Editor shows one image, so there is no per-image face filter: Select Linked, "
         "Overlapping and the face filters (Connected / Contained Faces) are there."),
-    "UV Editor/Tools": (
-        "UV tools", "Blender's UV tools are Select, Move / Rotate / Scale, Rip and the Grab / Relax / Pinch sculpt "
-        "brushes."),
     "UV Editor/View": (
         "Overlays", "Blender's UV Editor has no such display option: see its Overlays popover and View menu."),
     "UV Editor/View/Isolate Select": (
         "Add Selected / Remove Selected", "Blender has no saved quick-select sets to load into the isolate view: "
         "build it with Add Selected / Remove Selected (Ctrl+1 isolates the selection)."),
-    # Maya's Symmetrize UV changes UVs only after the brush's own seam pick (without it no UV changes):
-    # no rule to copy.
-    "UV Editor/Modify/Symmetrize": (
-        "UV > Mirror / Snap", "Blender has no UV symmetrize: mirror the UVs (Modify > Flip) and weld them (Match UVs), "
-        "or unwrap with the mesh's symmetry (Mirror modifier with Mirror U)."),
-    "UV Editor/Tools/Symmetrize": (
-        "UV > Mirror / Snap", "Blender has no UV symmetrize brush: mirror the UVs (Modify > Flip) and weld them "
-        "(Match UVs), or unwrap with the mesh's symmetry (Mirror modifier with Mirror U)."),
     "UV Editor/Image": (
-        "Image field", "Blender shows one image (header image field): no dimming, PSD networks, bake preview or pixel "
-        "ruler."),
+        "Image field", "Blender shows one image (header image field): no PSD networks or bake preview."),
     "UV Editor/Textures": (
         "Image field", "Blender lists the images in the header image field."),
     "UV Editor/UV Sets": (
@@ -769,13 +782,6 @@ CATEGORIES.update({
     "UV Toolkit/Options": (
         "Panel sections", "Blender's panels have no settings reset: fold the sections by hand."),
 })
-
-
-SHOW_SECONDS = 5.0
-_current = {"text": "", "until": 0.0}
-# [(window pointer, status bar area)] seen while drawing it. Global areas aren't in screen.areas, so the area can't be
-# found again by pointer; it lives as long as its window, so it is only touched while that window is open (#36).
-_status_area = []
 
 
 def notice(path):
@@ -803,13 +809,16 @@ PANEL_NOTICES = {}
 
 # Greyed rows of the viewport panel menus, the panel toolbar and the Status Line (ui/panel_menu_data.leaves()):
 # same (substitute, line) form; keys = their ``allset.menu_unavailable`` items. Not Maya main-menu paths, so kept out
-# of NOTICES (test_step54 checks those against menus.json); tests/test_step177_panel_menus.py: every greyed row has one.
+# of NOTICES (every NOTICES key is a Maya menu path); tests/test_step177_panel_menus.py: every greyed row has one.
 _PM, _PT, _SL = "Panel menu/", "Panel toolbar/", "Status Line/"
 _PER_OBJECT = ("Object Properties > Viewport Display", "Blender sets this per object, not per view: Object Properties > "
                "Viewport Display > Display As (Bounds / Wire / Solid).")
 _NO_FILTER = ("Show > All / None", "Blender's views filter by object type only (mesh, curve, light, camera, empty ...): "
               "this Maya node type has no type of its own, so it shows with its object type.")
+_IMAGE_DISPLAY = ("None / RGBA", "Blender draws an image plane (an image empty) with its colours and alpha (RGBA) or "
+                  "hides it (None): it has no outline, RGB-only, luminance or alpha-only display.")
 PANEL_MENU = {
+    **{_PM + f"Image Plane button/Display Mode/{t}": _IMAGE_DISPLAY for t in ("Outline", "RGB", "Luminance", "Alpha")},
     _PM + "View/View Sequence Time": (
         "Timeline markers", "Blender has no camera sequencer view time: bind scene cameras to timeline markers "
         "(Ctrl+B in the Timeline) or cut camera strips in the Video Sequencer."),
@@ -873,19 +882,9 @@ PANEL_MENU = {
         "Windows > Workspaces", "Blender saves layouts as workspaces (Windows > Workspaces, the Status Line drop-down)."),
     _PM + "Panels/Panel Editor...": (
         "Workspaces", "Blender has no panel editor: split / join areas by their corners and keep layouts as workspaces."),
-    _PT + "Resolution Gate": (
-        "Camera view frame (always on)", "Blender's camera view always draws the render resolution frame (Maya's "
-        "resolution gate; a new Maya camera has it off, overscan 1.0): it can't be "
-        "hidden. Gate Mask dims the outside (Blender passepartout)."),
-    _PT + "Field Chart": (
-        "Safe Action / Safe Title", "Blender has no field chart: the safe areas (Safe Action / Safe Title) are the "
-        "camera guides it draws."),
     _PT + "Motion Blur": (
         "Render Properties > Motion Blur", "Blender's viewport doesn't preview motion blur: it is a render setting "
         "(EEVEE / Cycles Motion Blur)."),
-    _PT + "Multisample Anti-aliasing": (
-        "Preferences > Viewport > Anti-Aliasing", "Blender's viewport anti-aliasing is a preference, not a per-view "
-        "button (the kit doesn't change preferences)."),
     _PT + "X-Ray Active Components": (
         "X-Ray", "Blender X-rays the whole view (X-Ray), not only the components being edited."),
     _SL + "Select by hierarchy": (
@@ -923,78 +922,6 @@ def tooltip(path, mapped):
     return f"{head}\n{line}"
 
 
-def show(text):
-    """Put ``text`` in the Help Line for a few seconds."""
-    _current["text"] = text
-    _current["until"] = time.monotonic() + SHOW_SECONDS
-    _redraw_status_later()
-    if not bpy.app.timers.is_registered(_expire):
-        bpy.app.timers.register(_expire, first_interval=SHOW_SECONDS + 0.1)
-
-
-def current():
-    return _current["text"] if time.monotonic() < _current["until"] else ""
-
-
-def remember_status_area(area, window=None):
-    window = window or bpy.context.window
-    if area is not None and window is not None and (not _status_area or _status_area[0][1] != area):
-        _status_area[:] = [(window.as_pointer(), area)]
-
-
-def _redraw_status():
-    for win_ptr, area in list(_status_area):
-        if live_refs.window(win_ptr) is None:
-            _status_area.clear()
-            continue
-        try:
-            area.tag_redraw()
-        except ReferenceError:
-            _status_area.clear()
-    return None
-
-
-def _redraw_status_later():
-    # Not from inside a tooltip / draw callback: one tick later.
-    if not bpy.app.timers.is_registered(_redraw_status):
-        bpy.app.timers.register(_redraw_status, first_interval=0.0)
-
-
-def _expire():
-    if not current():
-        _current["text"] = ""
-        _redraw_status()
-        return None
-    return 0.5
-
-
-class ALLSET_OT_tip(bpy.types.Operator):
-    """A note about the Blender side of a Maya window, shown as a tooltip instead of a sentence in the window;
-    clicking puts it in the Help Line"""
-    bl_idname = "allset.tip"
-    bl_label = "Note"
-    bl_options = {'INTERNAL'}
-
-    text: bpy.props.StringProperty(options={'SKIP_SAVE'})
-
-    @classmethod
-    @i18n.translated
-    def description(cls, context, props):
-        return i18n.tip(props.text)
-
-    def execute(self, context):
-        if self.text:
-            show(i18n.tip(self.text))
-        return {'FINISHED'}
-
-
-def tip(layout, text, label="", icon='INFO'):
-    """A flat button whose tooltip is ``text`` (Maya windows carry no Blender explanation sentences)."""
-    op = layout.operator(ALLSET_OT_tip.bl_idname, text=label, icon=icon, emboss=False)
-    op.text = text
-    return op
-
-
 def register():
     bpy.utils.register_class(ALLSET_OT_tip)
 
@@ -1007,7 +934,7 @@ def unregister():
     _current.update(text="", until=0.0)
     _status_area.clear()
 
-# Mapped editor items that run a near substitute: Maya 2022's newer auto tangents are one Blender handle.
+# Mapped editor items that run a near substitute: Maya's newer auto tangents are one Blender handle.
 NOTICES.update({
     f"{ed}/Tangents/{sub}Auto/{kind}": (
         "Auto Clamped handles", "Blender has one auto tangent (Auto Clamped): Maya's Ease / Mix / Custom weights "
@@ -1022,14 +949,8 @@ _SHAPES = ("Shape Keys filter", "Blender shows shape key channels or not (header
 NOTICES.update({
     **{f"{ed}/List/Show Animated Shapes/{item}": _SHAPES for ed in ("Graph Editor", "Dope Sheet")
        for item in ("One", "None")},
-    "Graph Editor/Select/Prefer Selected Curves": (
-        "Hide unselected (Shift+H)", "Blender picks keys on every curve it shows: hide the unselected curves "
-        "(Shift+H) to pick only on the selected ones."),
     "Graph Editor/View/Channel Sets": (
         "Not in Blender", "Blender's channel list has no channel sets."),
-    "Dope Sheet/Channels/Offset Keys": (
-        "G with a number", "Blender moves the selected keys by a typed number of frames: G, then the amount, then "
-        "Enter."),
     "Dope Sheet/Edit/Transformation Tools/Select Tool": (
         "Click / box select", "Blender selects keys with a click or a box drag: no tool to pick."),
     "Dope Sheet/Edit/Transformation Tools/Select Keys": (
@@ -1099,8 +1020,7 @@ CATEGORIES.update({
         "Shift+A in the Shader Editor", "Blender has no node of this Maya type: add the closest node with Shift+A "
         "in the Shader Editor."),
     "Hypershade/Create/Materials": (
-        "Principled BSDF", "Blender has no game, hair-tube, ocean or USD Preview shader of this kind: start from a "
-        "Standard Surface (Principled BSDF)."),
+        "Principled BSDF", "Blender has no shader of this kind: start from New Material (a Principled BSDF)."),
     "Hypershade/Create/Volumetric Materials": (
         "Volume shaders", "Blender's volumes are shaders on the material's Volume output (Principled Volume) or the "
         "World's: add them with Shift+A > Volume."),
@@ -1188,8 +1108,6 @@ CATEGORIES.update({
         "Flat target list", "Blender's shape keys are one flat list per mesh: no target groups."),
     "Shape Editor/Shapes/Merge Targets": (
         "New Shape from Mix", "Blender's Shape Keys menu > New Shape from Mix makes one key of the current mix."),
-    "Shape Editor/Shapes/Rebuild Target": (
-        "Duplicate + Apply", "Blender keeps no target mesh to rebuild: duplicate the mesh and apply the key."),
     "Shape Editor/Options/Show Edit HUD": (
         "Edit button", "Blender draws no edit HUD here: the target being edited has the red Edit button."),
     "Shape Editor/Help/What's New/Highlight What's New": (
@@ -1221,7 +1139,7 @@ _RMB_LIST = {
                     "Editors)."),
 }
 MARKING = {
-    **{f"{menu}/{label}": n for menu in ("RMB_MESH", "RMB_CURVE", "RMB_LATTICE") for label, n in _RMB_LIST.items()},
+    **{f"{menu}/{label}": n for menu in ("RMB_MESH", "RMB_CURVE", "RMB_LATTICE", "RMB_JOINT") for label, n in _RMB_LIST.items()},
     "RMB_MESH/Vertex Face": (
         "Face corners", "Blender has no vertex-face component: per-corner values (normals, colours, UVs) are edited "
         "on the face corners through their tools."),
@@ -1301,16 +1219,13 @@ _IDS = ("Indices overlay", "Blender shows element numbers with the Indices overl
 MARKING.update({
     **{f"{m}/Scene Assembly": ("Library overrides", "Blender has no scene assembly nodes: link and override "
                                "collections (File > Link) for swappable pieces.")
-       for m in ("RMB_MESH", "RMB_CURVE", "RMB_LATTICE")},
+       for m in ("RMB_MESH", "RMB_CURVE", "RMB_LATTICE", "RMB_JOINT")},
     "SHIFT_OBJECT/Project Curve on mesh": (
         "Shrinkwrap / Knife Project", "Blender projects a curve onto a mesh with a Shrinkwrap modifier on the curve, "
         "or cuts it in with Knife Project."),
     "SHIFT_OBJECT/Transfer Vertex Order": (
         "Sort Mesh Elements", "Blender can't copy another mesh's vertex order: Mesh > Sort Elements reorders vertices "
         "by a rule."),
-    **{f"SHIFT_OBJECT/Booleans/{label}": ("Boolean modifier", "Blender's Boolean modifier does Union, Difference "
-                                          "and Intersect only: split pieces with Separate after a Difference.")
-       for label in ("Slice", "Hole Punch", "Cut Out", "Split Edges")},
     "SHIFT_OBJECT/Polygon Display/Toggle Border Edges": _BORDER,
     "SHIFT_EDGE/Polygon Display/Toggle Border Edges": _BORDER,
     "SHIFT_DEFAULT/Polygon Display All/Toggle All Geometry Border Edges": _BORDER,
@@ -1349,9 +1264,10 @@ MARKING.update({
     **{f"{m}/Select/Automatic Camera-Based Selection": (
         "Camera-Based Selection", "Blender has no automatic switch: turn Camera-Based Selection on or off yourself.")
        for m in _TOOLS},
-    **{f"{m}/Selection Constraints": (
-        "Select Loops / Linked", "Blender has no selection constraints: use Select > Select Loops or Select Linked "
-        "after picking.") for m in _TOOLS},
+    **{f"{m}/Selection Constraints/{label}": (
+        "Select Loops / Linked", "Only the Angle constraint is in the kit: for this one use Select > Select Loops "
+        "or Select Linked after picking.")
+       for m in _TOOLS for label in ("Border", "Edge Loop", "Edge Ring", "Shell", "UV Edge Loop")},
 })
 
 
@@ -1369,21 +1285,84 @@ _UV_MENUS = ("SHIFT_UV", "SHIFT_UV_SHELL", "SHIFT_UV_FACE")
 _UV_CONSTRAINTS = ("Select menu / Snapping", "Blender has no UV selection or transform constraints: pick with Select "
                    "Linked / Select Split and move along edges with snapping.")
 MARKING.update({
-    **{f"{m}/Symmetrize": CATEGORIES["UV Editor/Modify/Symmetrize"] for m in ("SHIFT_UV", "SHIFT_UV_FACE")},
-    "SHIFT_UV/Measure Pixel Distance": (
-        "Sidebar UV Vertex", "Blender has no pixel ruler: the sidebar (N) Image tab shows the selected UVs' position, "
-        "so two readings give the distance."),
-    **{f"{m}/Tools/Symmetrize Tool": CATEGORIES["UV Editor/Tools/Symmetrize"] for m in _UV_MENUS},
-    **{f"{m}/Tools/Lattice Tool": (
-        "Proportional Editing", "Blender's UV Editor has no lattice tool: move UVs with proportional editing (O) for "
-        "a smooth falloff.") for m in _UV_MENUS},
-    **{f"{m}/Tools/Smear Tool": (
-        "Grab brush", "Blender's UV sculpt brushes are Grab, Relax and Pinch: Grab drags the UVs under the brush.")
-       for m in _UV_MENUS},
     **{f"{m}/Pinning/Reset Settings": CATEGORIES["UV Editor/Edit/Reset UV Editor UI"] for m in _UV_MENUS},
-    **{f"{m}/Pinning/{label}": _UV_CONSTRAINTS for m in _UV_MENUS
+    **{f"{m}/{label}": _UV_CONSTRAINTS for m in (*(f"{n}/Pinning" for n in _UV_MENUS), "UV_CONVERT")
        for label in ("Selection Constraints", "Transform Constraints")},
     **{f"SHIFT_UV_SHELL/Distribute Shells/{label}": (
         "Distribute Shells Right", "The kit lines shells up to the right only: run Right, then rotate or move the "
         "row.") for label in ("Left", "Up", "Down", "Towards Target")},
+})
+
+
+# UV Editor Ctrl+Shift+RMB tool option menus: the 3D View option menus' notices where Blender lacks the same thing.
+_UV_OPTS = ("UV_OPT_MOVE", "UV_OPT_ROTATE", "UV_OPT_SCALE", "UV_OPT_SELECT")
+_UV_SOFT = {"Object": MARKING["OPT_MOVE/Select/Soft Select/Object"],
+            "Global": MARKING["OPT_MOVE/Select/Soft Select/Global"],
+            "Color Feedback": MARKING["OPT_MOVE/Select/Soft Select/Color Feedback"]}
+_UV_BACKFACES = ("UV Editor", "Blender's UV Editor pre-selects no components: it highlights the selection only.")
+MARKING.update({
+    **{f"{m}/{label}": _UV_CONSTRAINTS for m in _UV_OPTS
+       for label in ("Selection Constraints", "Transform Constraints")},
+    **{f"{m}/Select/{label}": _UV_CONSTRAINTS for m in _UV_OPTS[:3]
+       for label in ("Selection Constraints", "Transform Constraints")},
+    **{f"{m}/Select/Highlight Backfaces": _UV_BACKFACES for m in _UV_OPTS[:3]},
+    "UV_OPT_SELECT/Highlight Backfaces": _UV_BACKFACES,
+    **{f"{m}/Select/Soft Select/{label}": text for m in _UV_OPTS[:3] for label, text in _UV_SOFT.items()},
+    **{f"UV_OPT_SELECT/Soft Select/{label}": text for label, text in _UV_SOFT.items()},
+    "UV_OPT_MOVE/Keep Spacing": (
+        "Snap With", "Blender moves the selected UVs together while snapping; there is no separate keep-spacing "
+        "switch."),
+    "UV_OPT_SCALE/Prevent Negative Scale": (
+        "Scale gizmo", "Blender's UV scale can pass zero and flip the UVs: stop the drag before the handle crosses "
+        "the pivot."),
+})
+
+
+# Hypershade graph / Shader Editor RMB marking menus (marking/menus.NODE_*): what Blender's node editor does instead
+_SOLO = ("Material Preview", "Blender has no shader soloing: preview a node's result by linking it to the Material "
+         "Output (Ctrl+Shift+click with Node Wrangler) or in Material Preview.")
+_ATTRS = {
+    "Edit Custom Attribute List": ("Ctrl+H", "Blender has no custom socket lists: Ctrl+H hides the unconnected "
+                                   "sockets, 3 shows them all."),
+    "Add Attributes...": ("Group inputs", "Blender shader nodes have fixed sockets: a node group gets its own "
+                          "inputs (Ctrl+G, then the group's Interface panel)."),
+    "Delete Attributes...": ("Group inputs", "Blender shader nodes have fixed sockets: remove inputs from a node "
+                             "group's Interface panel."),
+}
+_TEXTURE_GREYED = {
+    "Solo": _SOLO,
+    "Remove Material Soloing": _SOLO,
+    "Test Texture": ("Material Preview", "Blender has no texture test render: look at the texture in Material "
+                     "Preview or the node's preview (Toggle Swatch Size)."),
+    "Render Texture Range": ("Image > Save As", "Blender doesn't render texture frames to files from the graph: bake "
+                             "or render the texture, then save the image."),
+}
+MARKING.update({
+    "NODE_EMPTY/Remove Material Soloing": _SOLO,
+    "NODE_EMPTY/Solo Last Connection": _SOLO,
+    "NODE_EMPTY/Sync Node Editor/Viewport Selection": (
+        "Active material", "Blender's graph shows the active object's material; selecting nodes doesn't select "
+        "objects."),
+    "NODE_EMPTY/Add to Graph on Create": (
+        "Shader Editor", "Blender's graph always shows the whole material: every new node is in it."),
+    "NODE_EMPTY/Regraph Connected Nodes": (
+        "Shader Editor", "Blender's graph always shows the whole material: there is nothing to regraph."),
+    "NODE_EMPTY/Additive Graphing Mode": (
+        "Shader Editor", "Blender's graph shows one material tree at a time: graphs can't be added together."),
+    "NODE_EMPTY/Pin all nodes by default": (
+        "Shader Editor", "Blender's graph has no node pinning: nodes stay where they are placed."),
+    "NODE_EMPTY/Display": (
+        "Shader Editor", "Blender's graph shows only shader nodes: objects and shapes are not drawn in it."),
+    "NODE_EMPTY/Show": (
+        "Shader Editor", "Blender's graph shows only the material's nodes: there are no object type filters."),
+    "NODE_MATERIAL/Paint Assign Shader": (
+        "Assign Material", "Blender has no paint tool for assigning materials: select faces and use Assign Material "
+        "To Viewport Selection."),
+    "NODE_MATERIAL/Solo": _SOLO,
+    "NODE_MATERIAL/Remove Material Soloing": _SOLO,
+    **{f"NODE_{m}/{label}": n for m in ("TEXTURE", "UTILITY") for label, n in _TEXTURE_GREYED.items()},
+    **{f"NODE_{m}/{label}": n for m in ("MATERIAL", "TEXTURE", "UTILITY", "OUTPUT") for label, n in _ATTRS.items()},
+    "NODE_OUTPUT/Remove Stream Nodes": (
+        "Shader Editor", "Blender's graph always shows the whole material: nodes can't be taken out of the view "
+        "without deleting them."),
 })

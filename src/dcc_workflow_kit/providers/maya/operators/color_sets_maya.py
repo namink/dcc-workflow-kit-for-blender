@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Maya 2022 Mesh Display colour commands: Apply Color, Rename / Modify Current Set, Set Keyframe for
+"""Maya Mesh Display colour commands: Apply Color, Rename / Modify Current Set, Set Keyframe for
 Vertex Color, Prelight (Maya), vertex bake sets (Assign New / Existing, Edit Assigned Set), Select Shared Instances.
 
 A Maya colour set = a Blender colour attribute, the current set = the active colour attribute; Maya colours live per
@@ -31,7 +31,7 @@ BAKE_DEFAULTS = {"bakeColor": True, "bakeAlpha": False, "colorBlending": 0, "alp
 PRELIGHT_SAMPLES = 16          # Cycles bake samples [Maya's polyGeoSampler samples the shading network once]
 
 
-# --- pure rules (tests/test_step189_colors.py) ---------------------------------------------------------------
+# --- pure rules (no bpy) ---------------------------------------------------------------------------------------
 
 def apply(rgba, color, alpha, operation, channels=(True, True, True, True)):
     """Maya Apply Color on one corner (polyColorPerVertex -r -g -b -a [-rel] / -rem): None = Maya's uncoloured."""
@@ -180,6 +180,25 @@ class _Picked:
             bpy.ops.object.mode_set(mode='EDIT')
 
 
+def show_colors(context):
+    """Maya shows a mesh's colours as soon as a colour command writes them (the mesh's Display Colors turns on), so
+    the result is seen at once: every Solid 3D View shows the colour attribute (shading colour type Attribute).
+    Material Preview / Rendered keep Blender's shading. Returns how many views changed."""
+    wm = context.window_manager
+    n = 0
+    for win in (wm.windows if wm is not None else ()):
+        screen = win.screen
+        for area in (screen.areas if screen is not None else ()):
+            if area.type != 'VIEW_3D':
+                continue
+            for space in area.spaces:
+                if space.type == 'VIEW_3D' and space.shading.type == 'SOLID' and space.shading.color_type != 'VERTEX':
+                    space.shading.color_type = 'VERTEX'
+                    area.tag_redraw()
+                    n += 1
+    return n
+
+
 def _read(attr, me, corners):
     if attr.domain == 'POINT':
         return {c: tuple(attr.data[me.loops[c].vertex_index].color) for c in corners}
@@ -226,6 +245,8 @@ class ALLSET_OT_apply_color(bpy.types.Operator):
             self.report({'WARNING'}, "No vertex or vertex-face components were selected." if picked.kind == 'EDGE'
                         else "Select vertices, faces or meshes to colour.")
             return {'CANCELLED'}
+        if self.operation != 'REMOVE':
+            show_colors(context)
         results.result(self, "polyColorPerVertex")
         return {'FINISHED'}
 
@@ -516,6 +537,7 @@ class ALLSET_OT_prelight(bpy.types.Operator):
                 a = blend(old[3], baked[3] * s["scaleRgba"], int(s["alphaBlending"])) if s["bakeAlpha"] else old[3]
                 d.color = (*rgb, a)
             ob.data.update()
+        show_colors(context)
         results.result(self, "polyGeoSampler")
         return {'FINISHED'}
 

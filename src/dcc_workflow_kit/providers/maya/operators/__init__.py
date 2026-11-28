@@ -8,13 +8,15 @@ Operator ids use the ``allset.`` prefix. Each module lists its classes in
 
 import bpy
 
-from . import (auto_key, undo_pairs, bookmarks, ik_fk, component, create, curve_tools, curves_maya, cut_sew, display, driven_key, duplicate, extrude, file_io, freeze, option_windows, fx, global_keys4, graph_keys, graph_key_menu, deformer_weights, joint_labels, group, history, hold, joints, pivot_menu, key_batch, key_batch3, key_insert, loop_pick, manip, marquee,
-               anim_layers, lights, material, menu_extras, menu_items, mesh_maya, multi_cut, poly_maya, rig_maya, mesh_tools, outliner_drag, parenting, pickwalk, pivot, playblast, preselect, project, rig_tools, select_convert, select_priority, sets, shading_maps, skin, snap_align, soft_select, symmetry, taphold,
+from . import (auto_key, undo_pairs, bookmarks, ik_fk, component, create, curve_tools, curves_maya, cut_sew, display, driven_key, duplicate, extrude, file_io, freeze, option_windows, fx, global_keys4, graph_keys, graph_key_menu, deformer_weights, joint_labels, wedge_hinge, group, history, hold, joints, pivot_menu, key_batch, key_batch3, key_insert, loop_pick, manip, marquee,
+               anim_layers, lights, material, menu_extras, menu_items, mesh_maya, multi_cut, poly_maya, rig_maya, mesh_tools, outliner_drag, parenting, pickwalk, pivot, playblast, preselect, project, rig_tools, select_convert, select_priority, sets, shading_maps, skin, snap_align, soft_select, symmetry, symmetry_select, taphold,
                time_keys, tool_keys, units, uv_shells, uv_tools, uv_modify, uv_select_178, view, view_keys3, visibility)
 from . import poly_draw, quad_draw  # Create Polygon / Append to Polygon / Quad Draw (#30)
 from . import edge_loops  # Insert / Offset Edge Loop, Slide Edge (#31)
 from . import connect_tool  # Mesh Tools > Connect tool (#322)
 from . import move_component  # Edit Mesh > Transform (Transform Component)
+from . import duplicate_face  # Edit Mesh > Duplicate (polyChipOff)
+from . import window_toggle  # Hotkey Editor: Custom Scripts > Windows toggles (#541)
 from . import extrude_curve  # Edit Mesh > Extrude of faces along a selected curve
 from . import ik_rp  # #162: Maya ikRPsolver pole vector / twist
 from . import joint_edit  # #160: joint moves keep Maya frames, Preserve Children, Edit-mode Translate
@@ -26,24 +28,27 @@ from . import smart_extrude
 from . import smart_bevel  # Edit Mesh > Smart Bevel (Maya 2027, polySmartBevel)
 from . import component_scale
 from . import xform_constraint
+from . import component_local  # Ctrl+middle-drag with the Rotate / Scale tool (#430)
 from . import live
 from . import live_translate
 from . import point_keys  # S on selected points keys their positions
 from . import lattice_pick  # lattice points picked where a deformer draws them
 from . import camera_overscan  # Maya camera Overscan (#313)
 from . import film_fit  # Maya camera Fit Resolution Gate (#345)
+from . import shape_attrs  # Maya camera / light / locator shape attributes kept by the kit (#481)
 from . import pick_order  # the order the selected objects were picked in (Match Transformations)
 from . import universal_manip  # Universal Manipulator drags (#318)
+from . import transfer_attributes  # Mesh > Transfer Attributes (#554)
 
 classes = (*display.classes, *group.classes, *hold.classes, *taphold.classes,
            *pivot_pick.classes,
            *pivot_rotate.classes,
-           *pivot_translate.classes, *smart_extrude.classes, *smart_bevel.classes, *component_scale.classes, *xform_constraint.classes, *live.classes, *live_translate.classes,
+           *pivot_translate.classes, *smart_extrude.classes, *smart_bevel.classes, *component_scale.classes, *xform_constraint.classes, *component_local.classes, *live.classes, *live_translate.classes,
            *pickwalk.classes, *view.classes, *freeze.classes, *parenting.classes,
            *duplicate.classes, *history.classes, *create.classes, *visibility.classes,
            *component.classes, *manip.classes, *material.classes,
            *marquee.classes, *lattice_pick.classes, *preselect.classes, *select_priority.classes, *menu_extras.classes,
-           *tool_keys.classes, *symmetry.classes, *pivot.classes, *snap_align.classes, *time_keys.classes,
+           *tool_keys.classes, *symmetry.classes, *symmetry_select.classes, *pivot.classes, *snap_align.classes, *time_keys.classes,
            *joints.classes, *skin.classes, *driven_key.classes, *rig_tools.classes, *mesh_maya.classes,
            *mesh_tools.classes, *extrude.classes, *uv_tools.classes, *uv_shells.classes, *uv_modify.classes, *anim_layers.classes, *uv_select_178.classes, *shading_maps.classes, *fx.classes, *project.classes, *graph_keys.classes, *graph_key_menu.classes, *deformer_weights.classes, *joint_labels.classes, *ik_fk.classes, *playblast.classes, *key_batch.classes, *cut_sew.classes, *multi_cut.classes,
            *outliner_drag.classes, *key_insert.classes, *view_keys3.classes, *global_keys4.classes,
@@ -51,8 +56,8 @@ classes = (*display.classes, *group.classes, *hold.classes, *taphold.classes,
            *key_batch3.classes, *bookmarks.classes, *curve_tools.classes, *curves_maya.classes,
            *poly_maya.classes, *rig_maya.classes, *loop_pick.classes,
            *select_convert.classes, *poly_draw.classes, *quad_draw.classes,
-           *edge_loops.classes, *connect_tool.classes, *move_component.classes,
-           *extrude_curve.classes)
+           *edge_loops.classes, *connect_tool.classes, *move_component.classes, *duplicate_face.classes, *window_toggle.classes,
+           *extrude_curve.classes, *transfer_attributes.classes)
 
 from . import deformers  # noqa: E402  Maya Deform menu deformers + Paint Weights (#34)
 
@@ -68,6 +73,10 @@ classes += curve_draw.classes
 from . import dag  # noqa: E402  Maya DAG rules for parents (hide / delete / export / isolate)
 
 classes += dag.classes
+
+from . import isolate_parts  # noqa: E402  Isolate Select with components (only their faces)
+
+classes += isolate_parts.classes
 
 from . import by_type  # noqa: E402  Select All by Type for the kit's IK handles / clusters / particles
 
@@ -128,6 +137,7 @@ classes += graph_curves_203.classes
 from . import anim_layers_204  # noqa: E402  animation layers 4
 classes += anim_layers_204.classes
 from . import pins_205  # noqa: E402  UV / Proximity Pin, intermediate objects, wrap influences
+from . import bend_deformer  # noqa: E402  a lattice / surface bend follows its handle (#379)
 from . import skin_follow  # noqa: E402  a skin moves with its skeleton object; older files get it on load
 classes += pins_205.classes
 from . import deformers_205b  # noqa: E402  Morph / Jiggle deformers
@@ -181,14 +191,21 @@ from . import joint_display  # noqa: E402  #165: Radius row, Local Rotation Axes
 classes += joint_display.classes
 from . import skin_method  # noqa: E402  #167: Weight Blended / DQ skinning method
 from . import uv_shell_select  # noqa: E402  #172: Maya UV Shell selection in the 3D View / UV Editor
+from . import sel_constraint  # noqa: E402  #435: Selection Constraint > Angle
 classes += uv_shell_select.classes
 from . import uv_loop_pick  # noqa: E402  UV Editor double-click: UV edge loop / ring, UV shell
 classes += uv_loop_pick.classes
 from . import manip_scale  # noqa: E402  #200: Maya Scale manipulator centre / axis drag
 classes += manip_scale.classes
+from . import edge_rotate  # noqa: E402  #429: Ctrl+Shift Rotate drag kept on the edges
+classes += edge_rotate.classes
+from . import edge_marquee  # noqa: E402  #438: an edge marquee picks every edge it touches
+classes += edge_marquee.classes
 classes += universal_manip.classes
 from . import dome_light  # noqa: E402  #201: Create > Lights > Dome Light = the World environment
 classes += dome_light.classes
+from . import image_plane  # noqa: E402  #398: the panel toolbar's Image Plane button
+classes += image_plane.classes
 from . import graph_move  # noqa: E402  #192: Graph Editor Shift axis lock + time snap to whole frames
 classes += graph_move.classes
 from . import graph_frame  # noqa: E402  Graph Editor F / A frame Maya's rectangle
@@ -197,6 +214,10 @@ from . import graph_scale_box  # noqa: E402  Graph Editor Scale Keys manipulator
 classes += graph_scale_box.classes
 from . import graph_handle_drag  # noqa: E402  Graph Editor tangent handles like Maya (#296)
 classes += graph_handle_drag.classes
+from . import graph_region  # noqa: E402  Graph Editor Region Keys tool, Select > Prefer Selected Curves
+classes += graph_region.classes
+from . import graph_hover  # noqa: E402  Graph Editor Select > Pre-Select Highlight
+classes += graph_hover.classes
 from . import pan_zoom  # noqa: E402  Maya 2D Pan/Zoom: the \ key and the 2D Pan/Zoom Tool's drags
 classes += pan_zoom.classes
 from . import poly_display  # noqa: E402  Display > Polygons Normals Size / Reset Display
@@ -215,6 +236,18 @@ classes += render_cameras.classes
 
 from . import uv_toolkit_ops  # noqa: E402  UV Toolkit Align / Straighten UVs / Unfold Along / Randomize
 classes += uv_toolkit_ops.classes
+from . import uv_transform  # noqa: E402  UV Toolkit Pivot / Move / Rotate / Scale / Snap (#494)
+classes += uv_transform.classes
+from . import uv_optimize  # noqa: E402  UV Editor > Modify > Optimize (#498)
+classes += uv_optimize.classes
+from . import uv_brush  # noqa: E402  UV Editor > Tools > Unfold / Optimize / Cut / Sew / Pin / Smear / Smudge brushes (#500)
+classes += uv_brush.classes
+from . import uv_lattice  # noqa: E402  UV Editor > Tools > Lattice (#500)
+classes += uv_lattice.classes
+from . import uv_stitch  # noqa: E402  UV Editor > Cut/Sew > Stitch Together (#503)
+classes += uv_stitch.classes
+from . import uv_flip  # noqa: E402  UV Editor > Modify > Flip with its options (#506)
+classes += uv_flip.classes
 
 from . import type_manip  # noqa: E402  Type Manipulator: per-character move / rotate / scale (#258)
 classes += type_manip.classes
@@ -226,6 +259,15 @@ from . import graph_bookmarks  # noqa: E402  Graph Editor List > Bookmarks
 classes += graph_bookmarks.classes
 from . import fill_bridge  # noqa: E402  Mesh > Fill Hole / Edit Mesh > Bridge with Maya's selection rules (#337)
 classes += fill_bridge.classes
+from . import distance_tool  # noqa: E402  Create > Measure Tools > Distance Tool (#370)
+classes += distance_tool.classes
+from . import attr_clipboard  # noqa: E402  Mesh > Clipboard Actions, Edit > Transfer Attribute Values
+classes += attr_clipboard.classes
+from . import lod  # noqa: E402  Edit > LOD (Level of Detail)
+classes += lod.classes
+from . import nurbs_select, turntable  # noqa: E402  Select > NURBS CVs / Surface Border, Visualize > Turntable (#108)
+classes += nurbs_select.classes + turntable.classes
+from . import ik_fk_control  # noqa: E402  Skeleton > Enable IK/FK Control / Enable IK Handle Snap
 
 _register_classes, _unregister_classes = bpy.utils.register_classes_factory(classes)
 
@@ -235,6 +277,7 @@ def register():
     pick_order.register_handlers()
     key_batch3.register_handlers()
     extrude.register_handlers()
+    wedge_hinge.register_bindings()
     taphold.register_bindings()
     graph_keys.register_bindings()
     graph_key_menu.register_bindings()
@@ -262,6 +305,7 @@ def register():
     graph_retime.register_handlers()
     graph_buffers.register_handlers()
     graph_weights.register_handlers()
+    graph_hover.register_handlers()
     graph_scale_box.register_handlers()
     point_keys.register_handlers()
     type_manip.register_handlers()
@@ -279,6 +323,8 @@ def unregister():
     graph_retime.unregister_handlers()
     repeat_maya.unregister_handlers()
     select_2d.unregister_timers()
+    graph_region.unregister_timers()
+    graph_hover.unregister_handlers()
     graph_scale_box.unregister_handlers()
     graph_handle_drag.unregister_timers()
     graph_move.unregister_timers()
@@ -308,6 +354,7 @@ def unregister():
     deformer_weights.unregister_bindings()
     graph_key_menu.unregister_bindings()
     graph_keys.unregister_bindings()
+    wedge_hinge.unregister_bindings()
     taphold.unregister_bindings()
     extrude.unregister_handlers()
     key_batch3.unregister_handlers()
@@ -333,16 +380,18 @@ def register_data():
     motion_path_228.register_props()
     flow_path_228.register_props()
     render_cameras.register_props()
+    image_plane.register_props()
     joint_edit.register()
     joint_display.register_props()
     poly_display.register_props()
     skin_method.register_props()
     ik_rp.register_handlers()
+    ik_fk_control.register()
     snap_align.register_props()
     material.register_props()
-    lights.register_props()
     camera_overscan.register_props()
     film_fit.register_props()
+    shape_attrs.register_props()
     universal_manip.register_props()
     anim_layers.register_props()
     driven_key.register_props()
@@ -352,11 +401,16 @@ def register_data():
     smart_extrude.register_props()
     uv_tools.register_props()
     uv_toolkit_ops.register_props()
+    uv_brush.register_extra()
+    uv_lattice.register_extra()
+    sel_constraint.register_props()
+    uv_transform.register_extra()
     uv_shell_select.register_props()
     pivot_menu.register_props()
     sets.register_props()
     material.register_handlers()
     dag.register_handlers()
+    isolate_parts.register()
     modify_maya.register_props()
     anim_snapshot.register_handlers()
     character_sets.register_props()
@@ -366,6 +420,7 @@ def register_data():
     constrain_199.register_handlers()
     graph_curves_203.register_handlers()
     pins_205.register_handlers()
+    bend_deformer.register_handlers()
     skin_follow.register_handlers()
     deformers_205b.register_handlers()
     deformers_205a.register_handlers()
@@ -374,12 +429,16 @@ def register_data():
     playback_maya.register_props()
     playback_maya.register_handlers()
     graph_sculpt.register_props()
+    bookmarks.register_props()         # Time Slider bookmark end / colour on timeline markers
 
 def unregister_data():
+    bookmarks.unregister_props()
+    image_plane.unregister_props()
     graph_sculpt.unregister()
     playback_maya.unregister()
     sweep_mesh.unregister()
     ik_rp.unregister_handlers()
+    ik_fk_control.unregister()
     joint_edit.unregister()
     joint_display.unregister_props()
     poly_display.unregister_props()
@@ -388,6 +447,7 @@ def unregister_data():
     deformers_205a.unregister_handlers()
     deformers_205b.unregister_handlers()
     skin_follow.unregister_handlers()
+    bend_deformer.unregister_handlers()
     pins_205.unregister_handlers()
     graph_curves_203.unregister_handlers()
     constrain_199.unregister_handlers()
@@ -409,17 +469,22 @@ def unregister_data():
     anim_snapshot.unregister_handlers()
     graph_move.unregister_props()
     modify_maya.unregister_props()
+    isolate_parts.unregister()
     dag.unregister_handlers()
     material.unregister_handlers()
     sets.unregister_props()
     pivot_menu.unregister_props()
     anim_layers.unregister_props()
-    lights.unregister_props()
     universal_manip.unregister_props()
+    shape_attrs.unregister_props()
     film_fit.unregister_props()
     camera_overscan.unregister_props()
     material.unregister_props()
+    sel_constraint.unregister_props()
     uv_shell_select.unregister_props()
+    uv_lattice.unregister_extra()
+    uv_brush.unregister_extra()
+    uv_transform.unregister_extra()
     uv_toolkit_ops.unregister_props()
     uv_tools.unregister_props()
     smart_extrude.unregister_props()
@@ -429,4 +494,7 @@ def unregister_data():
     driven_key.unregister_props()
     snap_align.unregister_props()
     render_cameras.unregister_props()
-    _unregister_classes()
+    # UI panels can already have been removed during the mode switch.
+    for cls in reversed(classes):
+        if 'bl_rna' in vars(cls):
+            bpy.utils.unregister_class(cls)

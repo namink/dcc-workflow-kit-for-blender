@@ -14,7 +14,7 @@ Blender: a parent's ``hide_viewport`` / ``hide_set`` never hides its children an
   (``hide_set``) marked ``MARK``; its own ``hide_viewport`` (Maya's Visibility channel) stays as it was. Objects the
   kit did not hide that way are never touched (a layer's or Blender's own ``hide_set`` stays). A display layer's
   Template / Reference reaches every object below a member the same way (Maya: isTemplated / the drawing override
-  are inherited): such objects are marked ``layer_editor.INHERITED`` and drawn / locked like a member, the one
+  are inherited): such objects are marked ``display_layers.INHERITED`` and drawn / locked like a member, the one
   nearest the root winning.
   Run right after kit visibility edits, and from a depsgraph handler (only writes on change, so it settles). The
   handler walks the scene again only when an update can change what it reads (``_what_changed``): a click that
@@ -27,9 +27,10 @@ import bpy
 from bpy.app.handlers import persistent
 
 from .. import depsgraph_filter
+from .. import update_summary
 
 MARK = "allset_hidden_by_parent"
-# a type filter of the panel Show menu hides only that node, never its children (ui/panel_menus.SHOW_HIDDEN)
+# a type filter of the panel Show menu hides only that node, never its children (ui/panel_state.SHOW_HIDDEN)
 SHOW_FILTER = "allset_hidden_by_show"
 
 
@@ -127,7 +128,7 @@ class _Walk:
 def inherited_display(ob, scene, members=None):
     """TEMPLATE / REFERENCE that ``ob`` takes from a node above it: an ancestor object in such a display layer, or the
     joint it hangs from (``layer_joints.kind_under``); the one nearest the root wins. ``members`` = {object name:
-    layer} (``layer_editor.layer_of`` when None)."""
+    layer} (``display_layers.layer_of`` when None)."""
     from ..ui import layer_editor, layer_joints
     kind = None
     child, p = ob, ob.parent
@@ -248,9 +249,10 @@ def _joint_rev():
     return rev[0] if rev else None
 
 
-def _what_changed(scene, view_layer, depsgraph):
+def _what_changed(scene, view_layer, depsgraph, me=None):
     """``_FULL``: walk the scene again; ``_MARKED``: only the objects the last walk hid (Blender's eye / H may have
-    shown one); None: nothing a sync reads changed. Reads only the update's entries."""
+    shown one); None: nothing a sync reads changed. Reads only the update's entries (those handler ``me``
+    shares, ``update_summary``)."""
     if depsgraph is None or scene is None or view_layer is None:
         return _FULL
     seen = _SEEN.get((scene.as_pointer(), view_layer.as_pointer()))
@@ -260,7 +262,7 @@ def _what_changed(scene, view_layer, depsgraph):
     if rev is None or rev != _joint_rev():
         return _FULL
     scene_entry = False
-    for u in depsgraph.updates:
+    for u in (depsgraph.updates if me is None else update_summary.updates(depsgraph, me)):
         id_ = u.id
         if isinstance(id_, bpy.types.Object):
             ob = id_.original
@@ -295,6 +297,7 @@ def _keep_marked_hidden(scene, view_layer):
             continue
         try:
             if not ob.hide_get(view_layer=view_layer):
+                update_summary.wrote()
                 ob.hide_set(True, view_layer=view_layer)
                 changed += 1
         except RuntimeError:          # not in this view layer
@@ -309,16 +312,17 @@ _busy = []
 def _on_depsgraph(scene, _depsgraph=None):
     # #191: visibility only changes with a hide, a parent change or a new / removed node — never with a
     # move or a mesh edit; a sync walks every object's ancestors, so it runs only when the update can change them
-    if _busy or depsgraph_filter.only_motion(_depsgraph):
+    if _busy or depsgraph_filter.only_motion(_depsgraph, _on_depsgraph):
         return
     _busy.append(True)
     try:
         view_layer = bpy.context.view_layer
         try:
-            what = _what_changed(scene, view_layer, _depsgraph)
+            what = _what_changed(scene, view_layer, _depsgraph, _on_depsgraph)
         except (AttributeError, ReferenceError, RuntimeError, TypeError):
             what = _FULL
         if what == _FULL:
+            update_summary.wrote()
             sync(scene)
         elif what == _MARKED:
             _keep_marked_hidden(scene, view_layer)
@@ -351,6 +355,8 @@ def delete_hierarchy(context, objects):
     from . import constrain_199, startup_cameras
     # Maya refuses to delete its startup cameras ("Non-deletable node 'persp' cannot be deleted.")
     obs = [ob for ob in hierarchy(objects) if not startup_cameras.is_startup(ob)]
+    from . import distance_tool
+    obs += distance_tool.dimensions_of(obs)  # a deleted locator takes its distance dimensions with it, like Maya
     # Maya's normal / tangent constraint node is a child of the constrained object: its kit helper empty goes too
     # (#109; the helper has no parent — constrain_199.update clears it — so hierarchy() misses it)
     helpers = [h for h in constrain_199.helpers_owned_by(obs) if h not in obs]
@@ -456,7 +462,8 @@ class ALLSET_OT_delete(bpy.types.Operator):
 
 
 class ALLSET_OT_isolate(bpy.types.Operator):
-    """Isolate Select: show only the selected objects and everything below them (Maya Ctrl+1); again = back"""
+    """Isolate Select: show only the selected objects and everything below them, or only the faces of the selected
+    components (Maya Ctrl+1); again = back"""
     bl_idname = "allset.isolate"
     bl_label = "Isolate Select"
     bl_options = {'REGISTER'}
@@ -466,11 +473,17 @@ class ALLSET_OT_isolate(bpy.types.Operator):
         return context.space_data is not None and context.space_data.type == 'VIEW_3D'
 
     def execute(self, context):
+        from . import isolate_parts
         space = context.space_data
         if space.local_view is not None:
+            isolate_parts.stop([n for n in isolate_parts.active()
+                                if n in bpy.data.objects and isolate_parts.in_view(bpy.data.objects[n], space)])
             return bpy.ops.view3d.localview(frame_selected=False)
         with selected_hierarchy(context):
-            return bpy.ops.view3d.localview(frame_selected=False)
+            result = bpy.ops.view3d.localview(frame_selected=False)
+        if 'FINISHED' in result and context.mode == 'EDIT_MESH' and space.local_view is not None:
+            isolate_parts.start(context, space)     # components selected: only their faces (Maya)
+        return result
 
 
 class ALLSET_OT_outliner_delete(bpy.types.Operator):

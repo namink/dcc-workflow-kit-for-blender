@@ -18,7 +18,7 @@ writes the Blender colour from it:
   ``custom.normal`` 'COLOR_GAMMA'), so Maya's sRGB values are converted. Blender draws an object's wire in
   ``Object.color`` only where the 3D View's ``shading.wireframe_color_type`` is 'OBJECT' (a view setting, not a
   preference): the kit switches it from 'THEME' to 'OBJECT' in the 3D Views of Maya workspaces only
-  (``switch.is_maya_workspace``, not the Tool Box column) and marks those screens (``SCREEN_KEY``) so it can switch
+  (``switch_layout.is_maya_workspace``, not the Tool Box column) and marks those screens (``SCREEN_KEY``) so it can switch
   them back when no kit colour is left.
 - joint / bone control: ``PoseBone.color`` palette 'CUSTOM', normal = the colour (sRGB, COLOR_GAMMA); select / active
   = the kit's selection colours (other selected white, lead #43ffa3 = ui/selection_wire.py) because Maya draws a
@@ -129,11 +129,12 @@ def apply(node):
             col.palette = 'DEFAULT'
             del node[SET_KEY]
         return
+    alpha = node.color[3]       # an image plane's Alpha Gain (Opacity) stays
     if c is not None:
-        node.color = _linear(c)
+        node.color = (*_linear(c)[:3], alpha)
         node[SET_KEY] = 1
     elif node.get(SET_KEY):
-        node.color = WHITE
+        node.color = (*WHITE[:3], alpha)
         del node[SET_KEY]
 
 

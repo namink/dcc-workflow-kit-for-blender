@@ -2,7 +2,7 @@
 """Maya 2026 Skeleton > Orient Joint (Issue #161): ``cmds.joint(edit=True, oj=..., sao=..., aos=...)`` frames
 from joint positions.
 
-Rules (Maya 2026 behaviour, error 0):
+Rules (Maya 2026 behaviour):
 - ``oj`` "none" (Orient to World): every frame = the world axes.
 - with ``sao``: aim a = toward the first child (a zero-length child: the joint is left as it is); the
   reference w = the world-up axis, or with ``aos`` the bend normal n = (P − P_parent) × (P_child − P) (top joint:

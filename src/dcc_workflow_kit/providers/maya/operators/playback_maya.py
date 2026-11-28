@@ -21,6 +21,7 @@ import bpy
 from bpy.app.handlers import persistent
 
 from .. import compat
+from .. import update_summary
 
 LOOP_ITEMS = (
     ('CONTINUOUS', "Continuous", "Playback starts again at the other end of the range"),
@@ -413,6 +414,7 @@ def _on_frame_stepped(scene, depsgraph=None):
 def _on_depsgraph(scene, depsgraph):
     # keys set or edited: Blender shows the curves' own values again, step them
     if active(scene) and depsgraph.id_type_updated('ACTION'):
+        update_summary.wrote()
         _guarded(apply_stepped, scene)
 
 

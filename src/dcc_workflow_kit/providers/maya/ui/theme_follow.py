@@ -24,10 +24,11 @@ def theme_color(editor, field):
         return None
 
 
-def follow(color, editor, field):
+def follow(color, editor, field, cur=False):
     """``color`` (RGB or RGBA) moved by the theme's difference from the factory theme for ``editor`` / ``field``
-    ("back" for fills, "text" for text and thin marks)."""
-    cur = theme_color(editor, field)
+    ("back" for fills, "text" for text and thin marks). ``cur``: the theme colour already read (``theme_color``)."""
+    if cur is False:
+        cur = theme_color(editor, field)
     if cur is None:
         return tuple(color)
     base = FACTORY[field]

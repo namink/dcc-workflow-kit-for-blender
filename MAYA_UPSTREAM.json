@@ -1,6 +1,6 @@
 {
   "repository": "https://github.com/5hyuns/maya-workflow-kit-for-blender",
-  "tag": "v0.16.0",
-  "release": "https://github.com/5hyuns/maya-workflow-kit-for-blender/releases/tag/v0.16.0",
-  "archive_sha256": "bb438c1f343d6c81e03ef7f13ff7b17f10897ab8abc71417a826175168a0c3c4"
+  "tag": "v0.26.0",
+  "release": "https://github.com/5hyuns/maya-workflow-kit-for-blender/releases/tag/v0.26.0",
+  "archive_sha256": "33c362a7a1fc78a4caa3b87746546071de0596d2258a2d459e4b7e934306a01c"
 }

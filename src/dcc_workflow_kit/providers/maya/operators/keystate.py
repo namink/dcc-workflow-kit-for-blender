@@ -19,6 +19,7 @@ _VK.update({
     "PAGE_UP": 0x21, "PAGE_DOWN": 0x22,
     "LEFT_ARROW": 0x25, "UP_ARROW": 0x26, "RIGHT_ARROW": 0x27, "DOWN_ARROW": 0x28,
     "SPACE": 0x20, "TAB": 0x09, "ACCENT_GRAVE": 0xC0, "BACK_SLASH": 0xDC,
+    "GRLESS": 0xE2,     # the "<" key of German / Nordic keyboards (a hold key may be bound to it)
     "LEFTMOUSE": 0x01, "RIGHTMOUSE": 0x02, "MIDDLEMOUSE": 0x04,
     "LEFT_SHIFT": 0xA0, "RIGHT_SHIFT": 0xA1, "LEFT_CTRL": 0xA2, "RIGHT_CTRL": 0xA3,
     "LEFT_ALT": 0xA4, "RIGHT_ALT": 0xA5,

@@ -1,218 +1,21 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Paint Skin Weights workspace: native brush tools and configurable weight operations."""
+"""Paint Skin Weights workspace: native brush tools and configurable weight operations.
+
+Code: weight_paint_settings (action settings, workspace settings, brush helpers), weight_paint_flood (Maya Flood);
+this module keeps the Paint Skin Weights operators and register."""
 from contextlib import contextmanager
 
 import bpy
-from bpy.props import (BoolProperty, EnumProperty, FloatProperty, FloatVectorProperty, IntProperty, PointerProperty,
-                       StringProperty)
+from bpy.props import EnumProperty, FloatProperty, IntProperty, PointerProperty, StringProperty
 
 from .. import compat
 from . import skin
 from .. import i18n
-
-# Each native operation keeps its own settings, including all scalar operator options.
-ACTIONS = {
-    'SET': ('Set Weight', 'paint.weight_set'),
-    'NORMALIZE_ALL': ('Normalize All', 'object.vertex_group_normalize_all'),
-    'NORMALIZE': ('Normalize Influence', 'object.vertex_group_normalize'),
-    'MIRROR': ('Mirror Weights', 'object.vertex_group_mirror'),
-    'INVERT': ('Invert Weights', 'object.vertex_group_invert'),
-    'CLEAN': ('Prune Small Weights', 'object.vertex_group_clean'),
-    'QUANTIZE': ('Quantize Weights', 'object.vertex_group_quantize'),
-    'LEVELS': ('Weight Levels', 'object.vertex_group_levels'),
-    'SMOOTH': ('Smooth Weights', 'object.vertex_group_smooth'),
-    'LIMIT': ('Limit Influences', 'object.vertex_group_limit_total'),
-    'TRANSFER': ('Transfer Weights', 'object.data_transfer'),
-    'AUTO': ('Automatic Weights', 'paint.weight_from_bones'),
-    'ENVELOPE': ('Bone Envelope Weights', 'paint.weight_from_bones'),
-}
-SCOPE = [('ACTIVE', 'Active influence', 'Only the active vertex group'),
-         ('BONE_SELECT', 'Selected joints', 'Groups belonging to selected pose bones'),
-         ('BONE_DEFORM', 'Deform joints', 'All deforming bone groups'),
-         ('ALL', 'All groups', 'All vertex groups, including non-joint groups')]
-TRANSFER_FIELDS = {'vert_mapping', 'use_create', 'use_object_transform', 'use_auto_transform',
-                   'use_max_distance', 'max_distance', 'ray_radius', 'layers_select_src',
-                   'layers_select_dst', 'mix_mode', 'mix_factor'}
-
-
-def native(name):
-    module, op = name.split('.')
-    return getattr(getattr(bpy.ops, module), op)
-
-
-def _annotation(prop, action):
-    kw = {'name': prop.name, 'description': prop.description}
-    if prop.identifier == 'group_select_mode':
-        return EnumProperty(**kw, items=SCOPE[1:] if action in {'NORMALIZE_ALL', 'LIMIT'} else SCOPE,
-                            default='BONE_DEFORM' if action in {'NORMALIZE_ALL', 'LIMIT'} else 'ACTIVE')
-    if prop.type == 'BOOLEAN':
-        return BoolProperty(**kw, default=prop.default)
-    if prop.type in {'INT', 'FLOAT'} and not prop.is_array:
-        kw.update(default=prop.default, min=prop.hard_min, max=prop.hard_max)
-        return (IntProperty if prop.type == 'INT' else FloatProperty)(**kw)
-    if prop.type == 'ENUM':
-        items = [(e.identifier, e.name, e.description) for e in prop.enum_items if e.identifier]
-        if items and not prop.is_enum_flag:
-            return EnumProperty(**kw, items=items, default=prop.default)
-    return None
-
-
-_SETTING_CLASSES = []
-_FIELDS = {}
-for _key, (_label, _op) in ACTIONS.items():
-    _ann = {}
-    for _p in native(_op).get_rna_type().properties:
-        if _p.identifier == 'rna_type' or (_key == 'TRANSFER' and _p.identifier not in TRANSFER_FIELDS):
-            continue
-        _a = _annotation(_p, _key)
-        if _a is not None:
-            _ann[_p.identifier] = _a
-    if _key == 'TRANSFER':
-        _ann['source'] = PointerProperty(name='Source mesh', type=bpy.types.Object,
-                                        poll=lambda self, ob: ob.type == 'MESH')
-    _FIELDS[_key] = tuple(_ann)
-    _SETTING_CLASSES.append(type('ALLSET_PG_weight_' + _key.lower(), (bpy.types.PropertyGroup,),
-                                {'__annotations__': _ann, '__module__': __name__}))
-
-
-def _normalize_get(self):
-    return bpy.context.tool_settings.use_auto_normalize
-
-
-def _normalize_set(self, value):
-    bpy.context.tool_settings.use_auto_normalize = value
-    mesh = bpy.context.active_object
-    if mesh is not None and mesh.type == 'MESH':
-        mesh[skin.NORMALIZE_PROP] = 'INTERACTIVE' if value else 'NONE'
-
-
-def _normalize_mode_get(self):
-    mesh = bpy.context.active_object
-    ids = [k for k, _l, _d in skin.NORMALIZE]
-    if mesh is not None and mesh.type == 'MESH' and mesh.get(skin.NORMALIZE_PROP) in ids:
-        if mesh[skin.NORMALIZE_PROP] != 'INTERACTIVE' or bpy.context.tool_settings.use_auto_normalize:
-            return ids.index(mesh[skin.NORMALIZE_PROP])
-    return ids.index('INTERACTIVE' if bpy.context.tool_settings.use_auto_normalize else 'NONE')
-
-
-def _normalize_mode_set(self, value):
-    """Maya Normalize Weights Off / Interactive / Post: Interactive = Blender Auto Normalize; Post = weights left as
-    painted and normalised by the deformation (Blender's Armature modifier divides by the weight sum)."""
-    key = skin.NORMALIZE[value][0]
-    bpy.context.tool_settings.use_auto_normalize = key == 'INTERACTIVE'
-    mesh = bpy.context.active_object
-    if mesh is not None and mesh.type == 'MESH':
-        mesh[skin.NORMALIZE_PROP] = key
-
-
-def _numbers_update(self, context):
-    for area in context.screen.areas if context.screen else ():
-        if area.type == 'VIEW_3D':
-            area.tag_redraw()
-
-
-class ALLSET_PG_weight_workspace(bpy.types.PropertyGroup):
-    search: StringProperty(name='Find influence', options={'TEXTEDIT_UPDATE'})
-    # Maya 2026 Sort: Alphabetically (natural order) / By Hierarchy (default) / Flat
-    sort: EnumProperty(name='Sort', items=[('NAME', 'Alphabetically', 'Natural name order (joint2 before joint10)'),
-                                         ('HIERARCHY', 'By Hierarchy', 'Joint hierarchy order'),
-                                         ('INDEX', 'Flat', 'Influence order, no hierarchy')], default='HIERARCHY')
-    paint_tool: StringProperty(default='', options={'HIDDEN'})
-    show_all: BoolProperty(name='Include non-joint groups', default=False)
-    locked_only: BoolProperty(name='Locked influences only', default=False)
-    auto_normalize: BoolProperty(name='Auto normalize',
-                                 description='Keep deform weights normalized while painting; remembered for this skin',
-                                 get=_normalize_get, set=_normalize_set)
-    # Tool Settings frames in Maya 2024+ order (Skin Clusters / Influences / Brush / Visualization / Stroke /
-    # Stylus Pressure / Display), then the Blender-only extras (ui/paint_weights.SECTIONS)
-    # frame defaults: Skin Clusters collapsed, Influences / Brush /
-    # Visualization open, Stroke / Stylus Pressure / Display collapsed
-    show_skin_clusters: BoolProperty(default=False)
-    show_influences: BoolProperty(default=True)
-    show_brush: BoolProperty(default=True)
-    show_visualization: BoolProperty(default=True)
-    show_stroke: BoolProperty(default=False)
-    show_pressure: BoolProperty(default=False)
-    show_display: BoolProperty(default=False)
-    show_commands: BoolProperty(default=False)
-    show_mask: BoolProperty(default=False)
-    status: StringProperty(default='')
-    # Maya 2026 fields the kit keeps itself (ctx_defaults)
-    skin_cluster: IntProperty(name='Skin Cluster', default=0, min=0,
-                              description='The skin cluster (Armature modifier) whose influences the list shows')
-    normalize_mode: EnumProperty(name='Normalize Weights', items=skin.NORMALIZE, get=_normalize_mode_get,
-                                 set=_normalize_mode_set)
-    weight_type: EnumProperty(name='Weight Type', items=[('SKIN', 'Skin Weight', 'Paint the skin weights'),
-                                                        ('DQ', 'DQ Blend Weight', 'Blender has no per-vertex dual '
-                                                         'quaternion blend weight')], default='SKIN')
-    min_value: FloatProperty(name='Min', default=0.0, min=0.0, max=1.0, description='Lowest weight Flood writes')
-    max_value: FloatProperty(name='Max', default=1.0, min=0.0, max=1.0, description='Highest weight Flood writes')
-    show_numbers: BoolProperty(name='Show Numbers', default=False, update=_numbers_update,
-                               description="Draw the painted influence's weight at every vertex")
-    number_places: IntProperty(name='Decimal Places', default=2, min=1, max=4)
-    number_color: FloatVectorProperty(name='Number Color', subtype='COLOR', size=3, min=0.0, max=1.0,
-                                      default=(1.0, 1.0, 0.0))
-    number_color_ramp: BoolProperty(name='Color Ramp', default=False,
-                                    description='Colour the numbers by weight (0 = Min color, 1 = Max color)')
-    number_min_color: FloatVectorProperty(name='Weight 0', subtype='COLOR', size=3, min=0.0, max=1.0,
-                                          default=(1.0, 1.0, 1.0))
-    number_max_color: FloatVectorProperty(name='Weight 1', subtype='COLOR', size=3, min=0.0, max=1.0,
-                                          default=(0.0, 0.0, 0.0))
-
-
-# One settings group per Paint Weights action (above). Python 3.14 has no ``__annotations__`` name in a class body to
-# update (PEP 649; Issue #176: "name '__annotations__' is not defined" on CachyOS right after install), so they are
-# merged in after the class body, before registration.
-ALLSET_PG_weight_workspace.__annotations__ = {
-    **compat.own_annotations(ALLSET_PG_weight_workspace),
-    **{key.lower(): PointerProperty(type=cls) for key, cls in zip(ACTIONS, _SETTING_CLASSES)}}
-
-
-def state(context):
-    return context.window_manager.allset_weight_workspace
-
-
-def active(context):
-    ob = context.active_object
-    return context.mode == 'PAINT_WEIGHT' and ob is not None and ob.type == 'MESH'
-
-
-@contextmanager
-def viewport(context):
-    from ..ui.status_line import main_view3d
-    area, region = main_view3d(context.screen)
-    if area is None or region is None:
-        raise RuntimeError('Open a 3D View to paint skin weights')
-    with context.temp_override(window=context.window, area=area, region=region):
-        yield bpy.context
-
-
-def brush_kind(brush):
-    return getattr(brush, 'weight_brush_type', getattr(brush, 'weight_tool', 'DRAW')) if brush else ''
-
-
-def brush_tool(context, kind):
-    from bl_ui.space_toolsystem_toolbar import VIEW3D_PT_tools_active as tools
-    ids = [t.idname for entry in tools.tools_from_context(context)
-           for t in (entry if type(entry) is tuple else (entry,)) if t is not None]
-    suffix = {'BLUR': 'blur', 'AVERAGE': 'average', 'SMEAR': 'smear'}.get(kind)
-    return next((name for name in ids if suffix and name.lower() == 'builtin_brush.' + suffix), 'builtin.brush')
-
-
-def activate_brush(context, kind='DRAW', blend=None):
-    with viewport(context) as ctx:
-        bpy.ops.wm.tool_set_by_id(name=brush_tool(ctx, kind))
-        brush = ctx.tool_settings.weight_paint.brush
-        if brush is None or brush_kind(brush) != kind:
-            asset = {'DRAW': 'Paint', 'BLUR': 'Blur', 'AVERAGE': 'Average', 'SMEAR': 'Smear'}[kind]
-            bpy.ops.brush.asset_activate(asset_library_type='ESSENTIALS',
-                relative_asset_identifier='brushes/essentials_brushes-mesh_weight.blend/Brush/' + asset)
-            brush = ctx.tool_settings.weight_paint.brush
-        if brush is None or brush_kind(brush) != kind:
-            raise RuntimeError('Choose a compatible weight brush from Brush Assets')
-        if blend is not None and not skin._brush_set(brush, 'blend', blend):
-            raise RuntimeError('This brush is read-only; make an editable copy from Brush Assets')
-        return brush
+from .weight_paint_settings import (ACTIONS, SCOPE, TRANSFER_FIELDS, native, _SETTING_CLASSES, _FIELDS,
+                                    ALLSET_PG_weight_workspace, state, active, viewport, brush_kind, brush_tool,
+                                    activate_brush)  # noqa: F401
+from .weight_paint_flood import (OPERATIONS, maya_target, redistribute, flood_vertices, flood_settings,
+                                 flood)  # noqa: F401
 
 
 class ALLSET_OT_weight_tool(bpy.types.Operator):
@@ -274,8 +77,7 @@ class ALLSET_OT_weight_value(bpy.types.Operator):
     def execute(self, context):
         ups = compat.unified_paint_settings(context.tool_settings)
         brush = context.tool_settings.weight_paint.brush
-        owner = ups if ups.use_unified_weight or brush is None else brush
-        owner.weight = self.value
+        compat.unified_value_owner(ups, brush, 'weight').weight = self.value
         return {'FINISHED'}
 
 
@@ -443,156 +245,6 @@ def vertex_targets(mesh, indices):
         data.update()
 
 
-# --- Flood (Maya 2026 Paint Skin Weights Flood) ---------
-# Maya applies the operation to the influence being painted, multiplied by Opacity o:
-#   Replace w' = w + o(v - w)   Add w' = min(1, w + o v)   Scale w' = w (1 - o (1 - v))
-#   Smooth  w' = w + o(avg - w), avg = the mean of the vertex and its edge neighbours (Value ignored)
-# and gives the change to the other unlocked influences in their old ratio; locked influences keep their weight; only
-# selected vertices change when any vertex is selected (Maya).
-
-OPERATIONS = (('BRUSH', 'Brush', 'The current brush and its blend'), ('REPLACE', 'Replace', ''),
-              ('ADD', 'Add', ''), ('SCALE', 'Scale', ''), ('SMOOTH', 'Smooth', ''))
-_BLEND_OPERATION = {'MIX': 'REPLACE', 'ADD': 'ADD', 'MUL': 'SCALE'}
-
-
-def maya_target(op, w, value, opacity, avg=None):
-    """New weight of the painted influence for one vertex (before clamping / redistribution)."""
-    if op == 'REPLACE':
-        return w + opacity * (value - w)
-    if op == 'ADD':
-        return w + opacity * value
-    if op == 'SCALE':
-        return w * (1.0 - opacity * (1.0 - value))
-    if op == 'SMOOTH':
-        return w + opacity * (avg - w)
-    if op == 'SUB':
-        return w - opacity * value
-    if op == 'LIGHTEN':
-        return w + opacity * (max(w, value) - w)
-    if op == 'DARKEN':
-        return w + opacity * (min(w, value) - w)
-    raise ValueError(op)
-
-
-def redistribute(weights, target, new, locked, influences):
-    """Maya Interactive normalization of one vertex: ``weights`` {group: w}; returns the new {group: w}.
-
-    The painted influence gets ``new`` clamped to what the locked ones leave; the unlocked other influences share the
-    rest in their old ratio (Replace 0.3 keeps j1:j3, Value 0 gives j2's weight to j1 / j3, joint1 locked + Add 1 only
-    takes joint3's share)."""
-    out = dict(weights)
-    locked_sum = sum(w for g, w in weights.items() if g != target and g in locked and g in influences)
-    others = {g: w for g, w in weights.items() if g != target and g not in locked and g in influences and w > 0}
-    room = max(0.0, 1.0 - locked_sum)
-    new = min(max(new, 0.0), room)
-    total = sum(others.values())
-    if total <= 0.0:
-        # nothing unlocked takes the rest: a normalized vertex can't lose weight, an unweighted one simply gets the
-        # value (a kit choice)
-        new = max(new, min(room, weights.get(target, 0.0)))
-    else:
-        rest = room - new
-        for g, w in others.items():
-            out[g] = rest * w / total
-    out[target] = new
-    return out
-
-
-def flood_vertices(mesh):
-    """Vertices a Flood changes: the face mask's faces, else the selected vertices when any vertex is selected (Maya
-    floods only selected components, vertex mask on or off), else every visible vertex."""
-    data = mesh.data
-    visible = [v.index for v in data.vertices if not v.hide]
-    if data.use_paint_mask:
-        faces = {i for f in data.polygons if f.select and not f.hide for i in f.vertices}
-        return [i for i in visible if i in faces]
-    selected = [i for i in visible if data.vertices[i].select]
-    return selected if selected else visible
-
-
-def _neighbours(data):
-    nb = [[] for _ in data.vertices]
-    for e in data.edges:
-        a, b = e.vertices
-        nb[a].append(b)
-        nb[b].append(a)
-    return nb
-
-
-def flood_settings(context, operation='BRUSH'):
-    """(operation, value, opacity) from the operator or the current brush."""
-    ts = context.tool_settings
-    brush = ts.weight_paint.brush
-    ups = compat.unified_paint_settings(ts)
-    strength = (ups if ups.use_unified_strength or brush is None else brush).strength
-    value = (ups if ups.use_unified_weight or brush is None else brush).weight
-    if operation != 'BRUSH':
-        return operation, value, strength
-    kind = brush_kind(brush) or 'DRAW'
-    if kind == 'SMEAR':
-        raise ValueError('Smear needs a directional stroke; choose another operation to flood')
-    if kind == 'BLUR':
-        return 'SMOOTH', value, strength
-    if kind == 'AVERAGE':
-        return 'AVERAGE', value, strength
-    blend = brush.blend if brush is not None else 'MIX'
-    op = _BLEND_OPERATION.get(blend, blend)
-    if op not in {'REPLACE', 'ADD', 'SCALE', 'SUB', 'LIGHTEN', 'DARKEN'}:
-        raise ValueError('Flood supports Replace, Add, Scale, Smooth, Subtract, Lighten, Darken and Average')
-    return op, value, strength
-
-
-def flood(context, operation='BRUSH'):
-    """Maya Flood: the paint operation x Opacity into the painted influence, Maya's redistribution and locks."""
-    mesh = context.active_object
-    group = mesh.vertex_groups.active
-    if group is None or group.lock_weight:
-        raise ValueError('Choose an unlocked influence before flooding')
-    op, value, opacity = flood_settings(context, operation)
-    data = mesh.data
-    targets = flood_vertices(mesh)
-    if context.tool_settings.weight_paint.use_group_restrict:
-        targets = [i for i in targets if any(e.group == group.index for e in data.vertices[i].groups)]
-    if not targets or opacity <= 0:
-        return {'FINISHED'}
-    t = group.index
-    rows = {i: {e.group: e.weight for e in data.vertices[i].groups} for i in targets}
-    nb, own = None, None
-    if op == 'SMOOTH':
-        nb = _neighbours(data)
-        own = {}
-        for i in {j for i in targets for j in (i, *nb[i])}:
-            own[i] = next((e.weight for e in data.vertices[i].groups if e.group == t), 0.0)
-    elif op == 'AVERAGE':
-        op, value = 'REPLACE', sum(r.get(t, 0.0) for r in rows.values()) / len(rows)
-    influences = {g.index for g in skin.influences(mesh)}
-    normalize = context.tool_settings.use_auto_normalize and t in influences
-    locked = {g.index for g in mesh.vertex_groups if g.lock_weight}
-    groups = mesh.vertex_groups
-    st = state(context)
-    lo_hi = (min(st.min_value, st.max_value), max(st.min_value, st.max_value))
-    for i, row in rows.items():
-        w = row.get(t, 0.0)
-        avg = (own[i] + sum(own[j] for j in nb[i])) / (1 + len(nb[i])) if op == 'SMOOTH' else None
-        new = maya_target(op, w, value, opacity, avg)
-        new = min(lo_hi[1], max(lo_hi[0], new))         # Maya Min / Max value
-        if normalize:
-            result = redistribute(row, t, new, locked, influences)
-        else:
-            result = {**row, t: min(1.0, max(0.0, new))}
-        for g, nw in result.items():
-            if nw == row.get(g):
-                continue
-            if nw <= 0.0:
-                if g in row:
-                    groups[g].remove([i])
-            else:
-                groups[g].add([i], nw, 'REPLACE')
-    data.update()
-    state(context).status = 'Flood complete'
-    return {'FINISHED'}
-
-
 # --- Influences list RMB (Maya 2026) -------------------
 
 NO_INFLUENCE = 'Please select an influence first'      # Maya's warning text
@@ -715,6 +367,7 @@ class ALLSET_OT_weight_profile(bpy.types.Operator):
 PAINT_MODES = ('PAINT', 'SELECT', 'PAINT_SELECT')
 MODE_LABELS = {'PAINT': 'Paint', 'SELECT': 'Select', 'PAINT_SELECT': 'Paint Select'}
 _MODE_TOOLS = {'SELECT': 'builtin.select_box', 'PAINT_SELECT': 'builtin.select_circle'}
+SELECT_SHAPES = {'BOX': 'builtin.select_box', 'LASSO': 'builtin.select_lasso'}
 
 
 def paint_mode(context):
@@ -743,12 +396,18 @@ class ALLSET_OT_skin_paint_mode(bpy.types.Operator):
                        options={'SKIP_SAVE'})
     step: IntProperty(default=0, options={'SKIP_SAVE', 'HIDDEN'},
                       description='1 = next mode (Ctrl+.), -1 = previous mode (Ctrl+,), 0 = the mode above')
+    shape: EnumProperty(items=[('KEEP', 'Keep', 'The shape Select mode used last'),
+                               ('BOX', 'Box', 'Select vertices inside a dragged box'),
+                               ('LASSO', 'Lasso', 'Select vertices inside a drawn lasso')],
+                        default='KEEP', options={'SKIP_SAVE', 'HIDDEN'})
 
     @classmethod
     @i18n.translated
     def description(cls, context, properties):
         if properties.step:
             return 'Next Skin Paint Mode' if properties.step > 0 else 'Previous Skin Paint Mode'
+        if properties.mode == 'SELECT' and properties.shape == 'LASSO':
+            return 'Select vertices by drawing a lasso around them; Flood then fills only the selection'
         return {'PAINT': 'Paint weights with the brush',
                 'SELECT': 'Select vertices (drag a box); Flood then fills only the selection',
                 'PAINT_SELECT': 'Select vertices by brushing over them'}[properties.mode]
@@ -762,6 +421,8 @@ class ALLSET_OT_skin_paint_mode(bpy.types.Operator):
         mode = next_mode(current, self.step) if self.step else self.mode
         mesh = context.active_object
         s = state(context)
+        if mode == 'SELECT' and self.shape != 'KEEP':
+            s.select_shape = self.shape
         try:
             if mode == 'PAINT':
                 skin.set_view_tool(context, s.paint_tool or 'builtin.brush')
@@ -774,7 +435,8 @@ class ALLSET_OT_skin_paint_mode(bpy.types.Operator):
                 from ..ui import toolbox
                 toolbox.KEEP_PAINT[0] = True
                 try:
-                    skin.set_view_tool(context, _MODE_TOOLS[mode])
+                    skin.set_view_tool(context, SELECT_SHAPES.get(s.select_shape, _MODE_TOOLS[mode])
+                                       if mode == 'SELECT' else _MODE_TOOLS[mode])
                 finally:
                     toolbox.KEEP_PAINT[0] = False
         except RuntimeError as ex:

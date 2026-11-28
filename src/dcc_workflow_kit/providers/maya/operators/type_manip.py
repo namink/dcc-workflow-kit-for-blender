@@ -17,6 +17,8 @@ character. A click on another character of the text picks that one (``allset.typ
 import bpy
 from bpy.props import IntProperty, StringProperty
 
+from .. import update_summary
+
 TREE_PREFIX = ".Allset Type"
 MOD_NAME = "Type Manipulator"
 XFORMS = "allset_char_xforms"      # on the TextCurve: {"<index>": [tx, ty, tz, rx, ry, rz, sx, sy, sz]}
@@ -559,8 +561,10 @@ def _on_depsgraph(scene, depsgraph):
             sig = _signature(ob)
             if _signatures.get(ob.as_pointer()) != sig:
                 _signatures[ob.as_pointer()] = sig
+                update_summary.wrote()
                 sync(ob)
         elif ob.get(HANDLE):
+            update_summary.wrote()
             write_back(ob)
             if not _selected(ob) and not _selected(type_of(ob)) and not _stopping:
                 _stopping.append(ob.name)

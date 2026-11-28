@@ -200,7 +200,8 @@ def deformers_of(mesh):
     for m in mesh.modifiers:
         if m.type == 'ARMATURE' or dfm.is_base(m) or dfm.node_type(m) is None:
             continue
-        if getattr(m, "vertex_group", "") and m.vertex_group in mesh.vertex_groups:
+        group = dfm.weight_group(m)
+        if group and group in mesh.vertex_groups:
             out.append((m.name, m, 'GROUP'))
     return out
 
@@ -217,7 +218,7 @@ def influence_groups(mesh, deformer):
     _name, md, kind = deformer
     if kind == 'SKIN':
         return {vg.name: vg for vg in _skin().influences(mesh)}
-    return {BASE_LAYER: mesh.vertex_groups[md.vertex_group]}
+    return {BASE_LAYER: mesh.vertex_groups[_deformers_mod().weight_group(md)]}
 
 
 def collect(mesh, deformer):

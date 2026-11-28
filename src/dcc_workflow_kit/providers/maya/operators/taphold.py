@@ -195,10 +195,11 @@ class SoftSelectBinding(TapHoldBinding):
         """Header text + the radius circle and Maya's 'Falloff Radius' value in the view (ui/soft_overlay.py)."""
         from . import units
         from ..ui import soft_overlay
-        text = None if size is None else f"Falloff Radius: {size / units.maya_unit(context.scene):.3f}"
         area = context.area
+        uv = area is not None and area.type == 'IMAGE_EDITOR'      # the UV Editor: a radius in UV space
+        text = None if size is None else f"Falloff Radius: {size if uv else size / units.maya_unit(context.scene):.3f}"
         if area is not None:
-            area.header_text_set(None if text is None else text + " (Maya units)")
+            area.header_text_set(None if text is None else text + ("" if uv else " (Maya units)"))
         soft_overlay.radius_drag(context, event, text)
 
 

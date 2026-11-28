@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Maya 2022 Preferences window, page by page (Issue #121) — pure data, no bpy.
+"""Maya Preferences window, page by page (Issue #121) — pure data, no bpy.
 
-Category tree, page titles and control labels follow Maya 2022's
+Category tree, page titles and control labels follow Maya's
 Preferences window. The kit never writes
 Blender's preferences, so a page row is one of:
 
@@ -10,8 +10,10 @@ Blender's preferences, so a page row is one of:
   ("blender", label, section, path, note)    a Blender preference: shown read-only (``preferences.<path>``) with the
                                              Recommended setup note and a button that opens that Preferences section
   ("missing", label, note)                   a Maya control with no kit / Blender counterpart (greyed + the reason)
+  ("op", idname, label)                      a check box that runs a kit toggle operator (``maya_prefs.OP_STATES``
+                                             tells whether it is on)
 
-``MAYA_FACTORY`` = the default value of each scene row, like Maya (Edit > Restore Default Settings).
+``MAYA_START_VALUES`` = the default value of each scene row, like Maya (Edit > Restore Default Settings).
 """
 
 # (key, label, depth, page title, sections) — sections = [(section title, [rows])]; order = Maya's list.
@@ -45,7 +47,7 @@ PAGES = (
             ("missing", "Time Slider / Range Slider", "Part of the Maya layout's timeline"),
             ("pref", "show_command_line", "Command Line"),
             ("pref", "show_help_line", "Help Line"),
-            ("pref", "maya_toolbox", "Tool Box"),
+            ("op", "allset.toolbox_toggle", "Tool Box"),
         ]),
         ("Panel Configurations", [
             ("pref", "maya_layout_on_open", "When opening: Restore saved layouts from file"),
@@ -86,6 +88,9 @@ PAGES = (
         ("Manipulator Sizes", [
             ("blender", "Global scale", 'VIEWPORT', "view.gizmo_size",
              "Recommended setup: Viewport > Gizmo Size; = / - change the kit manipulator for the session"),
+        ]),
+        ("Move Manipulator", [
+            ("pref", "manip_ctrl_snap", "Ctrl+Drag on a Move Axis Snaps"),
         ]),
     ]),
     ("NURBS", "NURBS", 1, "NURBS: NURBS Display Preferences", [
@@ -219,6 +224,7 @@ PAGES = (
         ("Playback", [
             ("scene", "sync_mode", "Playback speed"),
             ("scene", "allset_playback_loop", "Looping"),
+            ("pref", "playback_update_view", "Update view"),
         ]),
     ]),
     ("UNDO", "Undo", 1, "Undo: Undo Queue Settings", [
@@ -267,7 +273,7 @@ BY_KEY = {p[0]: p for p in PAGES}
 
 # Default values of the scene rows (Settings / Time Slider pages; units = the
 # Maya Workflow Kit template's display units) — Edit > Restore Default Settings.
-MAYA_FACTORY = {
+MAYA_START_VALUES = {
     "unit_settings.length_unit": 'CENTIMETERS',
     "unit_settings.system_rotation": 'DEGREES',
     "allset_auto_key": False,

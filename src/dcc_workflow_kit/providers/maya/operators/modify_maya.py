@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Maya Modify menu commands: Convert > Smooth Mesh Preview to Polygons, Transformation Tools > Default
 Object Manipulator / Show Manipulator Tool, Align Tool, Snap Align Objects > Position Along Curve, Convert >
-Geometry to Bounding Box and the Evaluate Nodes check items.
+Geometry to Bounding Box, Convert > Displacement to Polygons and the Evaluate Nodes check items.
 
-Maya 2022 rules. Option window of Geometry to
+Maya rules. Option window of Geometry to
 Bounding Box: operators/option_windows_modify.py.
 """
 
@@ -96,6 +96,58 @@ class ALLSET_OT_smooth_to_polygons(bpy.types.Operator):
         if not done:
             return {'CANCELLED'}
         results.result(self, " ".join(ob.name for ob in done))
+        return {'FINISHED'}
+
+
+# --- Convert > Displacement to Polygons ----------------------------------------------------------
+
+NO_SURFACE = "Select a polygon mesh to convert."      # Maya also errors when nothing is selected
+NO_DISPLACE = "{} has no Displace modifier: its copy has the mesh as it shows (material displacement isn't baked)."
+
+
+def displacement_to_polygons(context, obs):
+    """Maya Displacement to Polygons: a new ``<name>_displacement<N>`` mesh object per mesh in ``obs`` holding its
+    displaced geometry (the evaluated modifier stack); the source is left as it is. Returns the new objects."""
+    from . import naming
+    deps = context.evaluated_depsgraph_get()
+    out = []
+    for ob in obs:
+        me = bpy.data.meshes.new_from_object(ob.evaluated_get(deps), preserve_all_data_layers=True, depsgraph=deps)
+        new = bpy.data.objects.new(ob.name, me)
+        ob.users_collection[0].objects.link(new)
+        new.matrix_world = ob.matrix_world.copy()
+        naming.apply_maya_name(new, f"{ob.name}_displacement")
+        out.append(new)
+    return out
+
+
+@undo_steps.no_redo_panel
+class ALLSET_OT_displacement_to_polygons(bpy.types.Operator):
+    """Bake the Displace modifiers of the selected meshes into new polygon objects; the originals stay
+    (Maya Modify > Convert > Displacement to Polygons)"""
+    bl_idname = "allset.displacement_to_polygons"
+    bl_label = "Displacement to Polygons"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return context.mode == 'OBJECT'
+
+    def execute(self, context):
+        meshes = [ob for ob in context.selected_objects if ob.type == 'MESH']
+        if not meshes:
+            self.report({'ERROR'}, NO_SURFACE)
+            return {'CANCELLED'}
+        for ob in meshes:       # like Maya: a mesh without displacement is converted too, with a warning
+            if not any(m.type == 'DISPLACE' for m in ob.modifiers):
+                self.report({'WARNING'}, NO_DISPLACE.format(ob.name))
+        out = displacement_to_polygons(context, meshes)
+        for ob in context.selected_objects:
+            ob.select_set(False)
+        for ob in out:
+            ob.select_set(True)
+        context.view_layer.objects.active = out[-1]
+        results.result(self, " ".join(ob.name for ob in out))
         return {'FINISHED'}
 
 
@@ -357,10 +409,9 @@ def _box_mesh(name, lo, hi):
 def _bbox_material(colour):
     from . import material, naming
     taken = {m.name for m in bpy.data.materials}
-    mat = material.new_material('LAMBERT')
+    mat = material.new_material()
     mat.name = f"BBoxLambert{naming.next_number('BBoxLambert', taken)}"
-    material.color_socket(mat).default_value = (*colour, 1.0)     # Maya Color; diffuse 0.8 stays
-    material._sync_base(mat)
+    material.color_socket(mat).default_value = (*colour, 1.0)
     material.sync_display(mat)
     return mat
 
@@ -679,7 +730,7 @@ class ALLSET_OT_reorder_rotation(bpy.types.Operator):
         return {'FINISHED'}
 
 
-classes = (ALLSET_OT_smooth_to_polygons, ALLSET_OT_default_manip, ALLSET_OT_show_manipulator,
+classes = (ALLSET_OT_smooth_to_polygons, ALLSET_OT_displacement_to_polygons, ALLSET_OT_default_manip, ALLSET_OT_show_manipulator,
            ALLSET_OT_align_to_lead, ALLSET_OT_align_tool, ALLSET_OT_position_along_curve, ALLSET_OT_geometry_to_bbox,
            ALLSET_PG_evaluate_nodes, ALLSET_OT_evaluate_all, ALLSET_OT_reorder_rotation)
 

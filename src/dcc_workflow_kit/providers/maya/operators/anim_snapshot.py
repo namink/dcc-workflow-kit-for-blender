@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Maya Visualize > Create Animation Snapshot / Update Snapshot.
 
-Maya rules (Maya 2022):
+Maya rules:
 - Visualize > Create Animation Snapshot with the default options: Time range Start/End 1 – 10, Increment 1,
   Update "Fast (update only when keyframes change)".
 - Result: a top-level group ``snapshot<N>Group`` with one child per sampled frame, ``transform<N>_<k>`` /
@@ -26,6 +26,8 @@ import bpy
 from bpy.props import BoolProperty, EnumProperty, FloatProperty
 from bpy.app.handlers import persistent
 
+from .. import live_refs
+from .. import update_summary
 from .. import results
 from .. import undo_steps
 
@@ -272,7 +274,7 @@ def _on_depsgraph(scene, depsgraph):
         return
     actions = set()
     touched = set()
-    for update in depsgraph.updates:
+    for update in update_summary.updates(depsgraph, _on_depsgraph):
         idb = update.id
         if isinstance(idb, bpy.types.Action):
             actions.add(idb.original.session_uid)
@@ -297,7 +299,7 @@ def _on_depsgraph(scene, depsgraph):
 def _transforming():
     wm = bpy.context.window_manager
     for win in wm.windows if wm else ():
-        for op in win.modal_operators:
+        for op in live_refs.running_modals(win):
             if op.bl_idname.startswith("TRANSFORM_OT") or op.bl_idname.startswith("transform."):
                 return True
     return False

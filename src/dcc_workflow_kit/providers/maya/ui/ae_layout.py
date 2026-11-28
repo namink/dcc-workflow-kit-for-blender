@@ -12,10 +12,10 @@ Row forms:
   ("prop", owner, attr, label)   owner: "ob" | "data" | "view" (3D View space); joints (pose bones):
                                  "ob" = the pose bone, "bone" = its Bone, "arm" = the Armature data,
                                  "armob" = the armature object
-  ("draw", name)                 custom drawer in ui/attribute_editor.py
+  ("draw", name)                 custom drawer in ui/ae_rows.py
   ("socket", input name, label)  Principled BSDF input (material tabs), with the Maya map button
-  ("maya", material prop, label, input name)  a Maya number converted to that Principled input (Material property
-                                 with get/set), with the input's map button
+  ("maya", material prop, label, input name)  a value stored through a Material property (get/set) that edits that
+                                 input, with the input's map button
   ("missing", label, note)       Maya attribute Blender doesn't have: a greyed row with the note
 
 ``TEMPLATE`` names the Maya Attribute Editor template a section list follows
@@ -47,7 +47,7 @@ _DRAWING_OVERRIDES = (
     ("prop", "ob", "allset_override_color", "Color"),
 )
 
-# --- transform (Maya 2022 Attribute Editor transform tab) ------------------------------------
+# --- transform (Maya Attribute Editor transform tab) ------------------------------------
 TRANSFORM = [
     S("Transform Attributes", True,                                          # collapse=0
       ("draw", "transform_channels"),
@@ -77,7 +77,7 @@ TRANSFORM = [
       ]),
 ]
 
-# --- mesh shape (Maya 2022 Attribute Editor mesh shape tab) ---------------------------------
+# --- mesh shape (Maya Attribute Editor mesh shape tab) ---------------------------------
 MESH = [
     S("Mesh Component Display", False,
       ("prop", "ob", "show_wire", "Wireframe on Shaded"),
@@ -99,15 +99,15 @@ MESH = [
       ("prop", "ob", "display_type", "Display Type")),
 ]
 
-# --- camera (Maya 2022 Attribute Editor camera tab) -----------------------------------------
+# --- camera (Maya Attribute Editor camera tab) -----------------------------------------
 CAMERA = [
     S("Camera Attributes", True,
       ("prop", "data", "lens", "Focal Length"),
       ("prop", "data", "clip_start", "Near Clip Plane"),
       ("prop", "data", "clip_end", "Far Clip Plane")),
     S("Film Back", True,
-      ("prop", "data", "sensor_width", "Horizontal Film Aperture"),
-      ("prop", "data", "sensor_height", "Vertical Film Aperture"),
+      ("prop", "data", "allset_film_aperture_h", "Horizontal Film Aperture"),    # inches (operators/film_fit.py)
+      ("prop", "data", "allset_film_aperture_v", "Vertical Film Aperture"),
       ("prop", "data", "allset_film_fit", "Fit Resolution Gate"),     # Maya Fill / Horizontal / Vertical / Overscan
       ("prop", "data", "shift_x", "Film Offset X"),
       ("prop", "data", "shift_y", "Film Offset Y")),
@@ -128,26 +128,47 @@ CAMERA = [
       ("prop", "data", "ortho_scale", "Orthographic Width")),
 ]
 
-# --- lights (Maya 2022 Attribute Editor point / directional light tabs) ----------------------
-_LIGHT_MAIN = (("prop", "data", "type", "Type"),
-               ("prop", "data", "color", "Color"),
-               ("prop", "data", "allset_intensity", "Intensity"),      # Maya intensity (operators/lights.py)
-               ("prop", "data", "diffuse_factor", "Emit Diffuse"),
-               ("prop", "data", "specular_factor", "Emit Specular"))
-# Maya Decay Rate: No Decay / Linear / Quadratic / Cubic, rendered by
-# Cycles with a Light Falloff node; EEVEE / the viewport keep distance squared (operators/lights.py).
-_DECAY = ("draw", "light_decay")
+# --- lights (Maya Attribute Editor point / directional light tabs) ----------------------
+def _light_main(power):
+    """Type, Color, then Blender's Power (a sun: Strength) where Maya has Intensity, Emit Diffuse / Specular."""
+    return (("prop", "data", "type", "Type"),
+            ("prop", "data", "color", "Color"),
+            ("prop", "data", "energy", power),
+            ("prop", "data", "diffuse_factor", "Emit Diffuse"),
+            ("prop", "data", "specular_factor", "Emit Specular"))
+
+
+_LIGHT_MAIN = _light_main("Power")
+# Maya's Decay Rate: Blender lights fall off with the square of the distance
+_DECAY = ("missing", "Decay Rate", "Blender lights fall off with distance squared; in Cycles a Light Falloff node "
+                                   "in the light's node tree (Shader Editor) changes it")
+
+
+def _render_engine(*rows):
+    """The render engine's own light attributes, in a section of their own like Maya's renderer section of a light
+    (Exposure, Normalize, Spread, Max Bounces): Blender's light settings that have no Maya attribute above."""
+    return S("Cycles", False,
+             ("prop", "data", "exposure", "Exposure"),
+             ("prop", "data", "normalize", "Normalize"), *rows,
+             ("prop", "data", "cycles.max_bounces", "Max Bounces"),
+             ("prop", "data", "cycles.use_multiple_importance_sampling", "Multiple Importance"),
+             ("prop", "data", "cycles.is_caustics_light", "Shadow Caustics"))
+
+
+_SOFT_FALLOFF = ("prop", "data", "use_soft_falloff", "Soft Falloff")
 POINT_LIGHT = [
     S("Point Light Attributes", True, *_LIGHT_MAIN, _DECAY),
     S("Shadows", False, ("prop", "data", "use_shadow", "Use Shadows"), subs=[
         S("Raytrace Shadow Attributes", True, ("prop", "data", "shadow_soft_size", "Light Radius")),
     ]),
+    _render_engine(_SOFT_FALLOFF),
 ]
 DIRECTIONAL_LIGHT = [
-    S("Directional Light Attributes", True, *_LIGHT_MAIN),
+    S("Directional Light Attributes", True, *_light_main("Strength")),
     S("Shadows", False, ("prop", "data", "use_shadow", "Use Shadows"), subs=[
         S("Raytrace Shadow Attributes", True, ("prop", "data", "angle", "Light Angle")),
     ]),
+    _render_engine(),
 ]
 # Spot and area lights: Maya's layout is the point light's.
 SPOT_LIGHT = [
@@ -156,41 +177,42 @@ SPOT_LIGHT = [
       ("prop", "data", "spot_blend", "Penumbra"), _DECAY),
     S("Shadows", False, ("prop", "data", "use_shadow", "Use Shadows"),
       ("prop", "data", "shadow_soft_size", "Light Radius")),
+    _render_engine(_SOFT_FALLOFF),
 ]
 AREA_LIGHT = [
     S("Area Light Attributes", True, *_LIGHT_MAIN,
       ("prop", "data", "shape", "Shape"),
       ("prop", "data", "size", "Size"), _DECAY),
     S("Shadows", False, ("prop", "data", "use_shadow", "Use Shadows")),
+    _render_engine(("prop", "data", "spread", "Spread"), ("prop", "data", "cycles.is_portal", "Portal")),
 ]
 
-# --- material: standardSurface (Maya 2022 Attribute Editor) on Principled BSDF --------------
-STANDARD_SURFACE = [
-    S("Base", True, ("socket", "Weight", "Weight"), ("socket", "Base Color", "Color"),
-      ("socket", "Diffuse Roughness", "Diffuse Roughness"), ("socket", "Metallic", "Metalness")),
-    S("Specular", True, ("socket", "Specular IOR Level", "Weight"),
-      ("socket", "Specular Tint", "Color"), ("socket", "Roughness", "Roughness"),
-      ("socket", "IOR", "IOR"), ("socket", "Anisotropic", "Anisotropy"),
-      ("socket", "Anisotropic Rotation", "Rotation")),
-    S("Transmission", False, ("socket", "Transmission Weight", "Weight")),
+# --- material: Blender's Principled BSDF, its inputs by Blender's names in the order of Blender's material panel --
+# (Maya Attribute Editor tab layout: open / closed sections, map buttons, Break Connection). Diffuse shows only on a
+# material made by an older kit version (its "Maya Diffuse" node, operators/material.py).
+PRINCIPLED = [
+    S("Base", True, ("socket", "Base Color", "Base Color"), ("socket", "Metallic", "Metallic"),
+      ("socket", "Roughness", "Roughness"), ("socket", "IOR", "IOR"), ("socket", "Alpha", "Alpha"),
+      ("socket", "Thin Wall", "Thin Wall"), ("socket", "Normal", "Normal"),("maya", "allset_diffuse", "Diffuse", "Diffuse")),
+    S("Diffuse", False, ("socket", "Diffuse Roughness", "Roughness")),
     S("Subsurface", False, ("socket", "Subsurface Weight", "Weight"),
       ("socket", "Subsurface Radius", "Radius"), ("socket", "Subsurface Scale", "Scale"),
       ("socket", "Subsurface Anisotropy", "Anisotropy")),
-    S("Coat", False, ("socket", "Coat Weight", "Weight"), ("socket", "Coat Tint", "Color"),
-      ("socket", "Coat Roughness", "Roughness"), ("socket", "Coat IOR", "IOR")),
-    S("Sheen", False, ("socket", "Sheen Weight", "Weight"), ("socket", "Sheen Tint", "Color"),
-      ("socket", "Sheen Roughness", "Roughness")),
-    S("Emission", False, ("socket", "Emission Strength", "Weight"),
-      ("socket", "Emission Color", "Color")),
-    S("Thin Film", False, ("socket", "Thin Film Thickness", "Thickness"),
-      ("socket", "Thin Film IOR", "IOR")),
-    S("Geometry", False, ("socket", "Alpha", "Opacity"), ("socket", "Normal", "Normal"),
-      ("missing", "Thin Walled", "Blender's Principled BSDF has no thin-walled mode")),
+    S("Specular", False, ("socket", "Specular IOR Level", "IOR Level"),
+      ("socket", "Specular Tint", "Tint"), ("socket", "Anisotropic", "Anisotropic"),
+      ("socket", "Anisotropic Rotation", "Anisotropic Rotation"), ("socket", "Tangent", "Tangent")),
+    S("Transmission", False, ("socket", "Transmission Weight", "Weight")),
+    S("Coat", False, ("socket", "Coat Weight", "Weight"), ("socket", "Coat Roughness", "Roughness"),
+      ("socket", "Coat IOR", "IOR"), ("socket", "Coat Tint", "Tint"), ("socket", "Coat Normal", "Normal")),
+    S("Sheen", False, ("socket", "Sheen Weight", "Weight"), ("socket", "Sheen Roughness", "Roughness"),
+      ("socket", "Sheen Tint", "Tint")),
+    S("Emission", False, ("socket", "Emission Color", "Color"), ("socket", "Emission Strength", "Strength")),
+    S("Thin Film", False, ("socket", "Thin Film Thickness", "Thickness"), ("socket", "Thin Film IOR", "IOR")),
 ]
 
-# standardSurface / aiStandardSurface attribute -> Principled BSDF 4.5 input
-# (names from the public Autodesk Standard Surface spec; Arnold's aiStandardSurface uses the same names).
-# None = no Principled input. Map button tooltips name the Maya attribute (attribute_editor).
+# standardSurface / aiStandardSurface attribute -> Principled BSDF input: the names the command line's getAttr /
+# setAttr take for a material (names from the public Standard Surface spec; aiStandardSurface uses the same names).
+# None = no Principled input.
 STANDARD_SURFACE_ATTRS = (
     ("base", "Weight"), ("baseColor", "Base Color"), ("diffuseRoughness", "Diffuse Roughness"),
     ("metalness", "Metallic"), ("specular", "Specular IOR Level"), ("specularColor", "Specular Tint"),
@@ -207,64 +229,8 @@ STANDARD_SURFACE_ATTRS = (
     ("opacity", "Alpha"), ("normalCamera", "Normal"), ("thinWalled", None),
 )
 MAYA_ATTR = {socket: attr for attr, socket in STANDARD_SURFACE_ATTRS if socket}
-# --- lambert (Maya 2022 Attribute Editor) -----------------------
-# Principled stand-ins: transparency -> Alpha (opacity), incandescence -> Emission, bump ->
-# Normal, diffuse -> the "Maya Diffuse" node factor (Base Color = Color x Diffuse, operators/material.py;
-# Color = that node's B input), translucence -> Subsurface; refractions -> Transmission.
-_LAMBERT_COMMON = S("Common Material Attributes", True,
-                    ("socket", "Base Color", "Color"), ("socket", "Alpha", "Opacity"),
-                    ("socket", "Emission Color", "Incandescence"), ("socket", "Normal", "Bump Mapping"),
-                    ("maya", "allset_diffuse", "Diffuse", "Diffuse"),
-                    ("socket", "Subsurface Weight", "Translucence"))
-_RAYTRACE = S("Raytrace Options", False, ("socket", "Transmission Weight", "Refractions"),
-              ("socket", "IOR", "Refractive Index"))
-LAMBERT = [_LAMBERT_COMMON, _RAYTRACE]
-# blinn / phong = lambert common + Specular Shading, open (Maya 2022 Attribute Editor
-# blinn / phong tabs; not in Maya's templates).
-# Eccentricity / Cosine Power are Maya numbers converted to the Principled Roughness (operators/material.py, #71).
-BLINN = [_LAMBERT_COMMON,
-         S("Specular Shading", True, ("maya", "allset_eccentricity", "Eccentricity", "Roughness"),
-           ("socket", "Specular IOR Level", "Specular Roll Off"),
-           ("socket", "Specular Tint", "Specular Color")),
-         _RAYTRACE]
-PHONG = [_LAMBERT_COMMON,
-         S("Specular Shading", True, ("maya", "allset_cosine_power", "Cosine Power", "Roughness"),
-           ("socket", "Specular Tint", "Specular Color")),
-         _RAYTRACE]
-# surfaceShader (Maya 2022 Attribute Editor): out color = emission.
-SURFACE_SHADER = [
-    S("Surface Shader Attributes", True, ("socket", "Emission Color", "Out Color"),
-      ("socket", "Alpha", "Out Opacity")),
-]
-# Further kinds (Maya AE section names; Principled stand-ins + the extra nodes of operators/material._build)
-PHONG_E = [_LAMBERT_COMMON,
-           S("Specular Shading", True, ("socket", "Roughness", "Roughness"),
-             ("socket", "Specular IOR Level", "Highlight Size"), ("socket", "Specular Tint", "Whiteness")),
-           _RAYTRACE]
-ANISOTROPIC = [_LAMBERT_COMMON,
-               S("Specular Shading", True, ("socket", "Anisotropic Rotation", "Angle"),
-                 ("socket", "Anisotropic", "Spread X / Y"), ("socket", "Roughness", "Roughness"),
-                 ("socket", "Specular Tint", "Specular Color")),
-               _RAYTRACE]
-RAMP_SHADER = [
-    S("Color", True, ("missing", "Color", "the Color Ramp node in the graph (input: facing ratio)"),
-      ("maya", "allset_diffuse", "Diffuse", "Diffuse")),       # rampShader diffuse 0.8
-    S("Specular Shading", True, ("socket", "Roughness", "Specularity")),
-    S("Incandescence", False, ("socket", "Emission Color", "Incandescence")),
-]
-LAYERED_SHADER = [
-    S("Layered Shader Attributes", True,
-      ("missing", "Layers", "a Mix Shader in the graph: input 1 = top layer, Fac = the top layer's transparency")),
-    _LAMBERT_COMMON,
-]
-USE_BACKGROUND = [
-    S("Use Background Attributes", True,
-      ("missing", "Specular Color / Reflectivity / Shadow Mask",
-       "Blender Holdout: the surface shows the background (Cycles: Object > Visibility > Shadow Catcher catches "
-       "shadows)")),
-]
 # Material without nodes: Blender viewport values (no Maya template).
-# --- joint = pose bone (Maya 2022 Attribute Editor) ----
+# --- joint = pose bone (Maya Attribute Editor) ----
 # Joint Labelling (side / type) and Preferred Angle have no Blender counterpart.
 JOINT = [
     S("Transform Attributes", True,                                          # collapse=0
@@ -327,8 +293,20 @@ TYPE = [
                                "text to a mesh (Modify > Convert) and animate that.")),
 ]
 
+# --- image plane (a Blender image empty; the kit's View > Image Plane, Create > Free Image Plane) ------------------
+IMAGE_PLANE = [
+    S("Image Plane Attributes", True,
+      ("prop", "ob", "allset_image_plane_display", "Display Mode"),
+      ("prop", "data", "filepath", "Image Name"),
+      ("prop", "ob", "allset_alpha_gain", "Alpha Gain")),          # #436: see-through reference images
+]
+
+# Tab type of a material with a Principled BSDF (new materials and those of older kit versions alike)
+PRINCIPLED_TYPE = "Principled BSDF"
+
 # (sections, Maya template name or None)
 BY_KIND = {
+    "IMAGE_PLANE": (IMAGE_PLANE, None),
     "FONT": (TYPE, None),
     "transform": (TRANSFORM, "transform"),
     "joint": (JOINT, "joint"),
@@ -338,24 +316,14 @@ BY_KIND = {
     "SUN": (DIRECTIONAL_LIGHT, "directionalLight"),
     "SPOT": (SPOT_LIGHT, None),
     "AREA": (AREA_LIGHT, None),
-    "standardSurface": (STANDARD_SURFACE, "standardSurface"),
-    "aiStandardSurface": (STANDARD_SURFACE, None),      # Arnold's, same attribute names
-    "lambert": (LAMBERT, "lambert"),
-    "blinn": (BLINN, None),
-    "phong": (PHONG, None),
-    "surfaceShader": (SURFACE_SHADER, None),
-    "phongE": (PHONG_E, None),
-    "anisotropic": (ANISOTROPIC, None),
-    "rampShader": (RAMP_SHADER, None),
-    "layeredShader": (LAYERED_SHADER, None),
-    "useBackground": (USE_BACKGROUND, None),
+    PRINCIPLED_TYPE: (PRINCIPLED, None),
     "material": (PLAIN_MATERIAL, None),
 }
 
 # Maya node type shown in the tab header ("transform: [pCube1]").
 NODE_TYPE = {"MESH": "mesh", "CURVE": "nurbsCurve", "SURFACE": "nurbsSurface", "CAMERA": "camera",
              "LIGHT": "light", "LATTICE": "lattice", "ARMATURE": "joint", "FONT": "type",
-             "META": "metaball", "EMPTY": "locator"}
+             "META": "metaball", "EMPTY": "locator", "IMAGE_PLANE": "imagePlane"}
 LIGHT_TYPE = {"POINT": "pointLight", "SUN": "directionalLight", "SPOT": "spotLight",
               "AREA": "areaLight"}
 

@@ -17,11 +17,11 @@ Maya's marking-menu triggers and menus; Blender pies: 8 slots, press-drag-releas
 """
 
 import bpy
-from bpy.props import EnumProperty, StringProperty
+from bpy.props import EnumProperty, IntProperty, StringProperty
 
 from ..operators import taphold
 from ..ui import menu_map, menu_sets
-from . import draw, menu_editor, modal, rmb_items, rmb_nodes, user_menus
+from . import draw, icons, menu_editor, modal, rmb_items, rmb_nodes, user_menus
 from . import menus as mm
 
 # Blender fills a pie in this order (UILayout.menu_pie).
@@ -53,7 +53,16 @@ def _entry_spec(action):
     return menu_map.normalize(action)
 
 
+def live_label(label, action):
+    """``label`` as it reads now: the UV brush menu's Last Tool names the tool it goes back to."""
+    if action == mm.UV_BRUSH_LAST:
+        from ..operators import uv_brush
+        return uv_brush.last_tool_label(bpy.context)
+    return label
+
+
 def draw_entry(layout, label, action, path):
+    label = live_label(label, action)
     if label == mm.OBJECT_TITLE:   # the RMB list's first row is the object's name
         ob = bpy.context.active_object
         label = f"{getattr(bpy.context.window_manager, 'allset_mm_target', '') or (ob.name if ob else 'Object')}..."
@@ -261,24 +270,48 @@ def resolve(trigger, context, picked=None):
     """("pie" | "menu", Menu idname) for a trigger in this context, or None."""
     mode = context.mode
     ob = picked or context.active_object
+    space = getattr(context, "space_data", None)
+    if trigger == "TOOL_OPTIONS" and space is not None and space.type == 'IMAGE_EDITOR':
+        # the UV Editor's own tools have their own option menus (UV Editor in edit mode only)
+        if mode != 'EDIT_MESH' or space.mode != 'UV':
+            return None
+        try:
+            tool = context.workspace.tools.from_space_image_mode('UV', create=False)
+        except (AttributeError, TypeError):
+            tool = None
+        tid = tool.idname if tool else ""
+        name = mm.UV_SELECT_OPTIONS if tid.startswith("builtin.select") else mm.UV_TOOL_OPTIONS.get(tid)
+        return ("pie", idname(name)) if name else None
     if trigger == "TOOL_OPTIONS":
         tool = context.workspace.tools.from_space_view3d_mode(mode, create=False)
         tid = tool.idname if tool else ""
         name = mm.SELECT_OPTIONS if tid.startswith("builtin.select") else mm.TOOL_OPTIONS.get(tid)
         return ("pie", idname(name)) if name else None
-    space = getattr(context, "space_data", None)
+    if space is not None and space.type == 'NODE_EDITOR':
+        # a material's Shader Editor (the Hypershade Graph too): Maya's graph RMB menus by the node under the mouse;
+        # other node trees keep Blender's context menu
+        from ..ui import hypershade_hands
+        if trigger != "RMB" or hypershade_hands.shader_space(context) is None:
+            return None
+        return ("pie", idname(hypershade_hands.menu_kind(hypershade_hands.picked(context))))
     if space is not None and space.type == 'IMAGE_EDITOR':
         # UV Editor: Maya 2026's UV Editor RMB marking menu; Shift+RMB = its UV editing menu for the component
-        # (UVs, edges and vertices share the UV one)
+        # (UVs, edges and vertices share the UV one); Ctrl+RMB = its selection conversion menu; Ctrl+Shift+RMB (above) =
+        # the option menu of its active tool
         if mode != 'EDIT_MESH' or space.mode != 'UV':
             return None
         if trigger == "RMB":
+            from ..operators import uv_brush
+            if uv_brush.active_mode(context) is not None:       # a UV brush tool: Maya's brush menu
+                return ("pie", idname("UV_BRUSH"))
             return ("pie", idname("UV_EDITOR_RMB"))
         if trigger == "SHIFT_RMB":
             from ..ui import uv_toolkit
             comp = uv_toolkit.current_component(context)
             name = {'SHELL': "SHIFT_UV_SHELL", 'FACE': "SHIFT_UV_FACE", 'UV_FACE': "SHIFT_UV_FACE"}.get(comp, "SHIFT_UV")
             return ("pie", idname(name))
+        if trigger == "CTRL_RMB":       # its selection conversion menu
+            return ("pie", idname("UV_CONVERT"))
         return None
     if trigger == "CTRL_RMB":
         # Maya's Ctrl+RMB convert menu picks by the lead's shape type, not the mode: a mesh lead gets CTRL_CONVERT in
@@ -308,9 +341,17 @@ def resolve(trigger, context, picked=None):
         return ("pie", idname("RMB_CURVE"))
     if mode == 'EDIT_LATTICE':
         return ("pie", idname("RMB_LATTICE"))
+    if mode == 'POSE':
+        # joints: the joint menu over a joint or while a joint is selected, else Maya's empty-space menu
+        joint = getattr(context.window_manager, "allset_mm_joint", "")
+        if joint or (ob is not None and ob.type == 'ARMATURE' and any(pb.select for pb in ob.pose.bones)):
+            return ("pie", idname("RMB_JOINT"))
+        return ("pie", idname("RMB_EMPTY"))
     if mode == 'OBJECT':
         if ob is None:
             return ("pie", idname("RMB_EMPTY"))
+        if ob.type == 'ARMATURE':
+            return ("pie", idname("RMB_JOINT"))
         if ob.type == 'MESH':
             return ("pie", idname("RMB_MESH"))
         if ob.type in {'CURVE', 'SURFACE'}:
@@ -321,20 +362,55 @@ def resolve(trigger, context, picked=None):
     return None
 
 
+def pick_joint(context, event):
+    """(armature, joint name) under the mouse in the 3D View, picked like a click selects a joint, or None."""
+    region, rv3d = context.region, context.region_data
+    if region is None or rv3d is None or region.type != 'WINDOW':
+        return None
+    from ..operators import select_priority
+    mouse = (event.mouse_region_x, event.mouse_region_y)
+    radius = select_priority.RADIUS_PX * (context.preferences.system.ui_scale or 1.0)
+    space = getattr(context, "space_data", None)
+    for ob in context.visible_objects:
+        if ob.type != 'ARMATURE' or ob.hide_select or not _shown_in(ob, space):
+            continue
+        name = select_priority.pick_joint(context, ob, mouse, radius)
+        if name is not None:
+            return ob, name
+    return None
+
+
+PICK_HIDDEN_MAX = 32      # objects this view hides that one RMB ray may pass through
+
+
+def _shown_in(ob, space):
+    """``ob`` is drawn in 3D View ``space``: Isolate Select (local view) and the view's object type filter count."""
+    if isinstance(space, bpy.types.SpaceView3D):
+        return ob.visible_get(viewport=space)
+    return ob.visible_get()
+
+
 def pick_object(context, event):
-    """Object under the mouse in the 3D View (ray cast), or None."""
+    """Object under the mouse in the 3D View (ray cast), or None. Like Maya, only what the view shows is picked: an
+    object Isolate Select hides is passed through to the one behind it."""
     from bpy_extras import view3d_utils
     region, rv3d = context.region, context.region_data
     if region is None or rv3d is None or region.type != 'WINDOW':
         return None
     coord = (event.mouse_region_x, event.mouse_region_y)
     origin = view3d_utils.region_2d_to_origin_3d(region, rv3d, coord)
-    direction = view3d_utils.region_2d_to_vector_3d(region, rv3d, coord)
-    hit, _loc, _nor, _idx, ob, _mat = context.scene.ray_cast(
-        context.evaluated_depsgraph_get(), origin, direction)
-    if not hit or ob is None:
-        return None
-    return bpy.data.objects.get(ob.name)
+    direction = view3d_utils.region_2d_to_vector_3d(region, rv3d, coord).normalized()
+    depsgraph = context.evaluated_depsgraph_get()
+    space = getattr(context, "space_data", None)
+    for _ in range(PICK_HIDDEN_MAX):
+        hit, loc, _nor, _idx, ob, _mat = context.scene.ray_cast(depsgraph, origin, direction)
+        if not hit or ob is None:
+            return None
+        ob = bpy.data.objects.get(ob.name)
+        if ob is not None and _shown_in(ob, space):
+            return ob
+        origin = loc + direction * (1e-5 * max(1.0, loc.length))     # just past the hidden surface
+    return None
 
 
 def sculpt_stencil(context):
@@ -361,10 +437,20 @@ class ALLSET_OT_marking_menu(bpy.types.Operator):
     def invoke(self, context, event):
         if context.mode == 'SCULPT' and sculpt_stencil(context):
             return {'PASS_THROUGH'}     # Blender's stencil drag (brush.stencil_control) keeps RMB there
-        picked = None
-        if self.trigger in {"RMB", "CTRL_RMB"} and context.mode == 'OBJECT':
-            picked = pick_object(context, event)
+        picked, joint = None, ""
+        space = getattr(context, "space_data", None)
+        if space is not None and space.type == 'NODE_EDITOR':
+            from ..ui import hypershade_hands      # the graph node under the mouse (Maya's node menus)
+            node = hypershade_hands.pick(context, event)
+            context.window_manager.allset_mm_node = node.name if node is not None else ""
+        elif self.trigger in {"RMB", "CTRL_RMB"} and context.mode in {'OBJECT', 'POSE'}:
+            hit = pick_joint(context, event)       # Maya: a joint under the mouse gets the joint menu
+            if hit is not None:
+                picked, joint = hit
+            elif context.mode == 'OBJECT':
+                picked = pick_object(context, event)
         context.window_manager.allset_mm_target = picked.name if picked else ""
+        context.window_manager.allset_mm_joint = joint
         found = resolve(self.trigger, context, picked)
         if found is None:
             return {'PASS_THROUGH'}
@@ -456,10 +542,11 @@ class ALLSET_OT_mm_shelf_button(bpy.types.Operator):
 
     shelf: StringProperty(options={'SKIP_SAVE'})
     button: StringProperty(options={'SKIP_SAVE'})
+    nth: IntProperty(default=1, min=1, options={'SKIP_SAVE'})   # the nth button of that label on the shelf
 
     def execute(self, context):
         from ..ui import shelf
-        index = shelf.button_index(self.shelf, self.button)
+        index = shelf.button_index(self.shelf, self.button, self.nth)
         if index is None:
             self.report({'WARNING'}, f"{self.button}: no longer on the {user_menus.shelf_text(self.shelf)} shelf")
             return {'CANCELLED'}
@@ -497,6 +584,9 @@ class ToolOptionsBinding(taphold.TapHoldBinding):
         # Maya: a tool key ends the Channel Box middle-drag on the picked channels (they stay highlighted)
         from ..ui import channel_box
         channel_box.disarm_slider()
+        # Maya: a tool key ends Skin > Move Skinned Joints, also the Move tool's key while it is active
+        from ..operators import joint_selection
+        joint_selection.tool_picked(bpy.context, self.tool, again=True)
         try:
             bpy.ops.wm.tool_set_by_id(name=self.tool, space_type='VIEW_3D')
         except RuntimeError:  # e.g. the tool doesn't exist in this mode
@@ -605,9 +695,14 @@ def register():
     bpy.types.WindowManager.allset_mm_target = StringProperty(
         name="Marking Menu Target", description="Object under the mouse when the RMB menu opened",
         options={'SKIP_SAVE'})
+    bpy.types.WindowManager.allset_mm_joint = StringProperty(
+        name="Marking Menu Joint", description="Joint under the mouse when the RMB menu opened",
+        options={'SKIP_SAVE'})
     for cls in (*TOOL_BINDINGS, *SELECT_BINDINGS):
         taphold.register_binding(cls())
     draw.register()
+    icons.register()
+    modal.register_clock()
     user_menus.load()
     apply_user_menus()
     menu_editor.register()
@@ -616,9 +711,12 @@ def register():
 def unregister():
     menu_editor.unregister()
     _clear_user_menus()
+    modal.unregister_clock()
+    icons.unregister()
     draw.unregister()
     for cls in (*TOOL_BINDINGS, *SELECT_BINDINGS):
         taphold.unregister_binding(cls.name)
     del bpy.types.WindowManager.allset_mm_target
+    del bpy.types.WindowManager.allset_mm_joint
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)

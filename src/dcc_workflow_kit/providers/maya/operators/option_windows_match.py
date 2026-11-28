@@ -2,7 +2,7 @@
 """Maya option windows of Modify > Match Transformations: Match All Transforms / Translation / Rotation / Scaling /
 Pivots ❒.
 
-Same spec as operators/option_windows.py (``F`` fields, ``Window`` = one ``allset.opt_<key>`` operator;
+Same spec as operators/option_windows_spec.py (``F`` fields, ``Window`` = one ``allset.opt_<key>`` operator;
 option_windows._extend appends ``WINDOWS``). Titles, labels, buttons and default values match Maya's windows:
 
 - Match All Transforms: Transforms Translate / Rotate / Scale (all on) and Match bounding box size (off, only with

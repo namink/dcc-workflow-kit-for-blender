@@ -2,7 +2,7 @@
 """Global key batch 4: Ctrl+X cut / Ctrl+V paste, Alt+\\ playback range = animation range,
 Alt+1 / 2 / 4 show toggles, Ctrl+` / Shift+~ / Ctrl+Shift+~ smooth proxy. Alt+X walk is Blender's view3d.walk.
 
-Maya 2022 behaviour:
+Maya behaviour:
 - PasteSelected = Edit > Paste: import the clipboard file with every node renamed
   ``pasted__<name>``, grouped under a new ``group``.
 - CutSelected = Edit > Cut: export the selection (with its hierarchy) to the clipboard file, then delete it.
@@ -183,10 +183,26 @@ SHOW_KINDS = (
 )
 SPACE_FILTER = {'CURVES': "show_object_viewport_curve", 'POLYGONS': "show_object_viewport_mesh"}
 IMAGE_FLAGS = ("show_empty_image_perspective", "show_empty_image_orthographic")
+SHOW_IMAGE_PLANES = "allset_show_image_planes"     # the scene's Show > Image Planes on / off
 
 
 def image_planes(scene):
     return [o for o in scene.objects if o.type == 'EMPTY' and o.empty_display_type == 'IMAGE']
+
+
+def _shown_planes(scene, exclude=None):
+    """The image planes Show > Image Planes draws: not those hidden with Display Mode None (``image_plane``)."""
+    from .image_plane import NONE_MARK
+    return [o for o in image_planes(scene) if o != exclude and not o.get(NONE_MARK)]
+
+
+def image_planes_drawn(scene, exclude=None):
+    """Show > Image Planes is on. Kept on the scene by ``toggle_show``, so a plane's Display Mode never turns it on;
+    a scene without it: on unless its drawable image planes are all undrawn."""
+    if SHOW_IMAGE_PLANES in scene:
+        return bool(scene[SHOW_IMAGE_PLANES])
+    planes = _shown_planes(scene, exclude)
+    return not planes or any(getattr(o, f) for o in planes for f in IMAGE_FLAGS)
 
 
 def toggle_show(space, scene, kind):
@@ -200,8 +216,9 @@ def toggle_show(space, scene, kind):
             from ..ui import curve_controls
             curve_controls.sync(space, scene)
         return new
-    planes = image_planes(scene)
-    new = not any(getattr(o, f) for o in planes for f in IMAGE_FLAGS)
+    new = not image_planes_drawn(scene)
+    scene[SHOW_IMAGE_PLANES] = new
+    planes = _shown_planes(scene)          # a Display Mode None plane stays undrawn
     for o in planes:
         for f in IMAGE_FLAGS:
             setattr(o, f, new)

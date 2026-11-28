@@ -150,7 +150,7 @@ def _keys_menu(ed, graph):
     if graph:
         m[f"{ed}/Keys/Insert Key Tool"] = "allset.insert_key_tool"
     # Maya 2026 Keys > Remove Key > Redundant Keys ("removes keys with similar values") = Blender's Clean Keyframes;
-    # the other Remove Key items delete keys by time (operators/graph_key_menu.remove_keys)
+    # the other Remove Key items delete keys by time (operators/graph_key_edits.remove_keys)
     m[f"{ed}/Keys/Remove Key/Redundant Keys"] = "graph.clean" if graph else "action.clean"
     if graph:     # Maya List > Bookmarks (operators/graph_bookmarks)
         m[f"{ed}/List/Bookmarks"] = ("menu", "ALLSET_MT_graph_bookmarks")
@@ -179,7 +179,7 @@ SHOW_ATTRIBUTES = {"Translate": "Location", "Rotate": "Rotation", "Scale": "Scal
                    "Keyable": ""}
 
 
-# #110: the kit's Show / List check items (WindowManager flags, ui/editor_chrome.FLAGS)
+# #110: the kit's Show / List check items (WindowManager flags, ui/graph_list.FLAGS)
 SHOW_ATTRIBUTE_FLAGS = {"Hidden": "hidden", "Driven by Anim Curve": "anim_curve",
                         "Driven by Expression": "expression", "Driven by Driven Key": "driven_key",
                         "User Defined": "user_defined"}
@@ -188,7 +188,7 @@ _WM = "window_manager"
 
 def _list_show_menus(ed):
     m = {
-        # Auto Load = Blender's Only Show Selected unless the kit keeps the list (ui/editor_chrome.py)
+        # Auto Load = Blender's Only Show Selected unless the kit keeps the list (ui/graph_list.py)
         f"{ed}/List/Auto Load Selected Objects": _prop(f"{_WM}.allset_auto_load"),
         f"{ed}/List/Load Selected Objects": ("allset.graph_list", {"action": "LOAD"}),
         f"{ed}/List/Add Selected Objects": ("allset.graph_list", {"action": "ADD"}),
@@ -204,7 +204,7 @@ def _list_show_menus(ed):
     }
     m.update({f"{ed}/Show/Objects/{label}": _prop(f"{_DS}.{attr}") for label, attr in SHOW_OBJECTS.items()})
     # the Graph Editor's kit outliner filters its rows; Blender's Dope Sheet channel list can't drop single
-    # channels, so there they keep the objects with such an attribute (ui/editor_chrome.row_objects)
+    # channels, so there they keep the objects with such an attribute (ui/graph_list.row_objects)
     m.update({f"{ed}/Show/Attributes/{label}": _prop(f"{_WM}.allset_attr_{flag}")
               for label, flag in SHOW_ATTRIBUTE_FLAGS.items()})
     # Maya 2026: Show Animated Shapes is an All / One / None expand choice (Maya 2022: one check item); All =
@@ -291,6 +291,13 @@ MAP = {
     f"{GE}/Select/In Tangent": _prop("addon_prefs.graph_select_in"),
     f"{GE}/Select/Out Tangent": _prop("addon_prefs.graph_select_out"),
     f"{GE}/Select/Snap time to selection": _prop("addon_prefs.snap_time_to_selection"),
+    # the curve under the mouse drawn brighter; clicks / marquees prefer the curves with selected keys
+    # (operators/graph_hover.py, operators/graph_region.py)
+    f"{GE}/Select/Pre-Select Highlight": _prop("addon_prefs.graph_preselect"),
+    f"{GE}/Select/Prefer Selected Curves": _prop("addon_prefs.graph_prefer_selected"),
+    # Maya's Region Keys tool: the marquee's region is a box whose sides scale the keys inside (operators/graph_region)
+    f"{GE}/Edit/Transformation Tools/Region Keys Tool": ("prop", "window_manager.allset_graph_key_tool",
+                                                         {"value": 'REGION'}),
     # #105: Graph Editor depth 2 (Dope Sheet twins below)
     **_depth2(GE),
     f"{GE}/View/Show Buffer Curves": _prop("addon_prefs.graph_show_buffers"),
@@ -315,6 +322,8 @@ MAP = {
     **_keys_menu(DS, False),
     **_list_show_menus(DS),
     f"{DS}/Edit/Select Unsnapped": "allset.select_unsnapped",
+    # Maya's Dope Sheet Offset Keys = the Graph Editor's Offset Curves command on the Dope Sheet's keys
+    f"{DS}/Channels/Offset Keys": "allset.offset_curves",
     **_help_menu(DS, "editors/dope_sheet/index.html"),
 
     # --- UV Editor (textureWindow menus); kit UV commands ---
@@ -329,9 +338,9 @@ MAP = {
     f"{UV}/Create/Contour Stretch": "allset.uv_contour",
     f"{UV}/Create/Camera-based": ("v3d", "uv.project_from_view", {}),
     f"{UV}/Create/Normal-based": "allset.uv_planar",
-    f"{UV}/Create/Cylindrical": ("v3d", "uv.cylinder_project", {}),
-    f"{UV}/Create/Planar": "allset.uv_planar",
-    f"{UV}/Create/Spherical": ("v3d", "uv.sphere_project", {}),
+    f"{UV}/Create/Cylindrical": "allset.uv_cylindrical",
+    f"{UV}/Create/Planar": ("allset.uv_planar", {"axis": 'X'}),
+    f"{UV}/Create/Spherical": "allset.uv_spherical",
     f"{UV}/Select/All": ("uv.select_all", {"action": 'SELECT'}),
     f"{UV}/Select/Clear": ("uv.select_all", {"action": 'DESELECT'}),
     f"{UV}/Select/Inverse": ("uv.select_all", {"action": 'INVERT'}),
@@ -342,9 +351,10 @@ MAP = {
     f"{UV}/Select/Shortest Edge Path Tool": "uv.shortest_path_select",
     f"{UV}/Select/Grow": "uv.select_more",
     f"{UV}/Select/Shrink": "uv.select_less",
-    **{f"{UV}/Select/Convert Selection/{label}": ("allset.uv_component", {"mode": mode})
-       for label, mode in (("To Vertices", "VERTEX"), ("To Edges", "EDGE"), ("To Faces", "FACE"), ("To UVs", "UV"),
-                           ("To UV Shell", "SHELL"))},
+    # To Vertices / Edges / Faces / UVs convert the selection and switch the component type (like the Ctrl+RMB menu)
+    **{f"{UV}/Select/Convert Selection/{label}": ("allset.uv_convert", {"to": to})
+       for label, to in (("To Vertices", "VERTEX"), ("To Edges", "EDGE"), ("To Faces", "FACE"), ("To UVs", "UV"))},
+    f"{UV}/Select/Convert Selection/To UV Shell": ("allset.uv_component", {"mode": "SHELL"}),
     # the main Select menu's conversions (operators/select_convert.py; with UV Sync Selection off they read
     # the selected UVs as their vertices)
     **{f"{UV}/Select/{label}": ("allset.select_convert", {"kind": kind})
@@ -361,13 +371,13 @@ MAP = {
     f"{UV}/Cut/Sew/Merge": "allset.uv_merge",     # Maya polyMergeUV
     f"{UV}/Cut/Sew/Move and Sew": "allset.uv_move_sew",
     f"{UV}/Cut/Sew/Create UV Shell": "allset.uv_create_shell",
-    f"{UV}/Cut/Sew/Stitch Together": "uv.stitch",
-    f"{UV}/Modify/Align": ("uv.align", {"axis": 'ALIGN_AUTO'}),
-    f"{UV}/Modify/Flip": ("transform.mirror", {"constraint_axis": (True, False, False)}),
+    f"{UV}/Cut/Sew/Stitch Together": "allset.uv_stitch_together",
+    f"{UV}/Modify/Align": ("allset.uv_align_to", {"axis": 'U', "where": 'MIN'}),     # Align Options default
+    f"{UV}/Modify/Flip": "allset.uv_flip",      # Flip UVs Options defaults: Horizontal, Pivot, Cut UV Perimeter
     f"{UV}/Modify/Linear Align": ("uv.align", {"axis": 'ALIGN_S'}),
-    f"{UV}/Modify/Match UVs": "uv.remove_doubles",
+    f"{UV}/Modify/Match UVs": ("uv.remove_doubles", {"threshold": 0.01}),     # Match UVs Options default
     f"{UV}/Modify/Rotate": ("transform.rotate", {"value": -math.pi / 2}),
-    f"{UV}/Modify/Unitize": "uv.reset",
+    f"{UV}/Modify/Unitize": "allset.uv_unitize",
     f"{UV}/Modify/Gather Shells": "uv.pack_islands",
     f"{UV}/Modify/Layout": "allset.uv_layout",
     f"{UV}/Modify/Orient Shells": "allset.uv_orient_shells",
@@ -389,8 +399,8 @@ MAP = {
     f"{UV}/View/Isolate Select/View Selected": "allset.uv_isolate",
     f"{UV}/Image/Display": ("allset.uv_display", {"mode": 'IMAGE'}),
     f"{UV}/Modify/Randomize Shells": "allset.uv_randomize",     # operators/uv_toolkit_ops.py
-    f"{UV}/Modify/Optimize": "uv.minimize_stretch",
-    f"{UV}/Modify/Straighten Shell": "uv.follow_active_quads",
+    f"{UV}/Modify/Optimize": "allset.uv_optimize",
+    f"{UV}/Modify/Straighten Shell": "allset.uv_straighten_shell",       # operators/uv_toolkit_ops.py (#393)
     f"{UV}/Modify/Straighten UVs": "allset.uv_straighten_uvs",
     f"{UV}/Modify/Unfold": "allset.uv_unfold",
     # Maya-style UV commands (operators/uv_modify.py)
@@ -420,9 +430,19 @@ MAP = {
     f"{UV}/Tools/Scale": _uv_tool("builtin.scale"),
     f"{UV}/Tools/Tweak": _uv_tool("builtin.select"),
     f"{UV}/Tools/Smooth": _uv_tool("sculpt.uv_sculpt_relax"),
-    f"{UV}/Tools/Optimize": _uv_tool("sculpt.uv_sculpt_relax"),
-    f"{UV}/Tools/Grab": _uv_tool("sculpt.uv_sculpt_grab"),
-    f"{UV}/Tools/Pinch": _uv_tool("sculpt.uv_sculpt_pinch"),
+    # the kit's UV brush tools (ui/uv_brush_tools.py), like Maya's UV Editor brushes
+    f"{UV}/Tools/Optimize": _uv_tool("allset.uv_brush_optimize"),
+    f"{UV}/Tools/Unfold": _uv_tool("allset.uv_brush_unfold"),
+    f"{UV}/Tools/Cut": _uv_tool("allset.uv_brush_cut"),
+    f"{UV}/Tools/Sew": _uv_tool("allset.uv_brush_sew"),
+    f"{UV}/Tools/Pin": _uv_tool("allset.uv_brush_pin"),
+    f"{UV}/Tools/Smear": _uv_tool("allset.uv_brush_smear"),
+    f"{UV}/Tools/Smudge": _uv_tool("allset.uv_brush_smudge"),
+    f"{UV}/Tools/Lattice": _uv_tool("allset.uv_lattice"),
+    f"{UV}/Tools/Grab": _uv_tool("allset.uv_brush_grab"),
+    f"{UV}/Tools/Pinch": _uv_tool("allset.uv_brush_pinch"),
+    f"{UV}/Tools/Symmetrize": _uv_tool("allset.uv_brush_symmetrize"),
+    f"{UV}/Modify/Symmetrize": _uv_tool("allset.uv_brush_symmetrize"),     # works on the picked line
     f"{UV}/View/UV Distortion": _prop(f"{_SP}.uv_editor.show_stretch"),
     f"{UV}/View/Grid": _prop(f"{_SP}.overlay.show_grid_background"),
     f"{UV}/View/Toolbar": _prop(f"{_SP}.show_region_toolbar"),
@@ -433,6 +453,8 @@ MAP = {
     f"{UV}/Image/Alpha": _prop(f"{_SP}.display_channels", 'ALPHA'),
     f"{UV}/Image/Pixel Snap": _prop(f"{_SP}.uv_editor.pixel_round_mode", 'CORNER'),
     f"{UV}/Image/UV Snapshot...": "uv.export_layout",
+    f"{UV}/Image/Measure Pixel Distance": "allset.uv_measure_pixel_distance",
+    f"{UV}/Image/Dim": "allset.uv_image_dim",       # ui/uv_image_dim.py; option box = Image Dim Options
     f"{UV}/Textures/Checker Map": "allset.checker_toggle",
     f"{UV}/UV Sets/UV Set Editor": ("allset.open_editor", {"ui_type": 'PROPERTIES', "tab": 'DATA'}),
     f"{UV}/UV Sets/Copy UVs to UV Set/Copy into New UV Set": "mesh.uv_texture_add",
@@ -455,9 +477,6 @@ MAP = {
 
 # --- Hypershade, Script Editor -------------------------------------------------------------------
 HS, SE = "Hypershade", "Script Editor"
-_HS_MATERIALS = {"Anisotropic": 'ANISOTROPIC', "Blinn": 'BLINN', "Lambert": 'LAMBERT', "Layered Shader": 'LAYERED',
-                 "Phong": 'PHONG', "Phong E": 'PHONG_E', "Ramp Shader": 'RAMP', "Standard Surface": 'STANDARD_SURFACE',
-                 "Surface Shader": 'SURFACE', "Use Background": 'USE_BACKGROUND'}
 _HS_LIGHTS = {"Directional Light": 'DIRECTIONAL_LIGHT', "Point Light": 'POINT_LIGHT', "Spot Light": 'SPOT_LIGHT',
               "Area Light": 'AREA_LIGHT'}
 
@@ -576,7 +595,7 @@ MAP.update({
     **{f"{HS}/View/{label}": _prop("window_manager.allset_hs_sort", key)
        for label, key in (("By Name", 'NAME'), ("By Type", 'TYPE'), ("By Time", 'TIME'))},
     f"{HS}/View/Reverse Order": _prop("window_manager.allset_hs_reverse"),
-    **{f"{HS}/Create/Materials/{label}": ("allset.hs_create", {"kind": kind}) for label, kind in _HS_MATERIALS.items()},
+    f"{HS}/Create/Materials/New Material": "allset.hs_create",      # Blender's one material (menu_map.HIDE)
     **{f"{HS}/Create/Lights/{label}": ("allset.create", {"kind": kind}) for label, kind in _HS_LIGHTS.items()},
     **{f"{HS}/Create/{label}": ("allset.hs_create_extra", {"kind": kind}) for label, kind in HS_EXTRA.items()},
     f"{HS}/Create/Camera": ("allset.create", {"kind": 'CAMERA'}),
@@ -678,6 +697,7 @@ MAP.update({
     f"{SH}/Create/Add Target": "allset.shape_add_target",
     f"{SH}/Create/Add Selection as Target": "allset.shape_add_selection",
     f"{SH}/Shapes/Duplicate Target": "allset.shape_duplicate",
+    f"{SH}/Shapes/Rebuild Target": "allset.shape_rebuild",
     f"{SH}/Shapes/Flip Target": "allset.shape_flip",
     f"{SH}/Shapes/Mirror Target": ("allset.shape_mirror", {"direction": "POSITIVE"}),
     f"{SH}/Shapes/Key": "allset.shape_key",
@@ -760,6 +780,6 @@ for _ed in (GE,):
     MAP[f"{_ed}/Edit/Select Curve Nodes"] = "allset.select_curve_nodes"
 
 # Maya greys these while their state forbids them (List > Load / Add Selected Objects while Auto Load is on):
-# menu_sets.draw_item draws them with Blender's poll instead of the always-enabled
+# menu_item_draw.draw_item draws them with Blender's poll instead of the always-enabled
 # allset.menu_item route
 GREY_ON_POLL = {f"{ed}/List/{label}" for ed in (GE, DS) for label in ("Load Selected Objects", "Add Selected Objects")}

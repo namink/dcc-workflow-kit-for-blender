@@ -10,7 +10,7 @@ drag 12 s and Cut UV Edges 36 s (Windows reports "Not responding" after 5 s). Th
   in edit mode (then it is the cage; same element order as the BMesh), else one BMesh pass;
 - selection / hidden flags: always from the BMesh (the evaluated mesh's selection may lag).
 
-``uv_points`` = uv_shells.uv_points (same vertex, coordinates within uv_tools.EPS, first-fit in loop-index order),
+``uv_points`` = uv_shells.uv_points (same vertex, coordinates within uv_islands.EPS, first-fit in loop-index order),
 ``maya_shells`` = uv_hud.maya_shells (faces sharing any UV), ``border_loops`` = uv_display.border_segments (an edge
 side is a border unless another shown face has the same UVs at both of its ends). tests/test_step254_uv_speed.py
 checks each against the Python version.
@@ -20,29 +20,55 @@ from itertools import chain
 
 import numpy as np
 
-from .. import compat
+from .. import compat, live_refs
 from .uv_tools import EPS
 
 
 class Arrays:
     """One edit mesh: faces F, loops L (face order), verts V."""
     __slots__ = ("loop_start", "loop_total", "corner_vert", "corner_edge", "corner_face", "corner_next", "uv",
-                 "face_hide", "face_sel", "vert_sel", "edge_seam", "_uv_sel")
+                 "face_hide", "face_sel", "vert_sel", "edge_seam", "_uv_sel", "_uv_loops", "_uv_sel_epoch")
 
-    def uv_sel(self, bm, uv, shown):
-        """Per-loop UV selection (UV Sync off), read from the BMesh for the loops of ``shown`` faces only."""
-        if self._uv_sel is None:
-            out = np.zeros(len(self.corner_vert), bool)
+    def uv_sel(self, bm, uv, shown, epoch=None):
+        """Per-loop UV selection (UV Sync off), read from the BMesh for the loops of ``shown`` faces only.
+        A UV selection change with UV Sync off sends no depsgraph update, so these arrays outlive it: with ``epoch``
+        (``selection_epoch()``) the flags are read again when the selection may have changed since the last read
+        (from the loops kept at the first read, no face walk)."""
+        if self._uv_sel is not None and (epoch is None or epoch == self._uv_sel_epoch):
+            return self._uv_sel
+        kept = self._uv_loops
+        if kept is not None and kept[0] is bm and np.array_equal(kept[1], shown) and (not kept[3] or kept[3][0].is_valid):
+            _bm, _shown, idx, loops = kept
+        else:
             faces = np.nonzero(shown)[0]
+            loops = []
             if len(faces):
                 bm.faces.ensure_lookup_table()
                 fs = bm.faces
-                picked = np.fromiter(chain.from_iterable(
-                    (compat.uv_vert_selected(l, uv) for l in fs[i].loops) for i in faces.tolist()),
-                    bool, int(self.loop_total[faces].sum()))
-                out[_face_loops(self, faces)] = picked
-            self._uv_sel = out
-        return self._uv_sel
+                loops = [l for i in faces.tolist() for l in fs[i].loops]
+            idx = _face_loops(self, faces)
+            self._uv_loops = (bm, shown, idx, loops)
+        out = np.zeros(len(self.corner_vert), bool)
+        if loops:
+            out[idx] = np.fromiter(map(compat.uv_vert_selected_reader(), loops), bool, len(loops))
+        STATS["uv_sel_reads"] += 1
+        self._uv_sel, self._uv_sel_epoch = out, epoch
+        return out
+
+
+# The UV selection's "may have changed" signal: Blender sends a select notifier for every UV selection change, and
+# the UV Editor answers it by refreshing its gizmo groups (ui/uv_manipulator.ALLSET_GGT_uv_select_watch counts it
+# here). Readers keyed by this number read the flags again only then, not on every redraw (view moves, hovers).
+_epoch = [0]
+STATS = {"uv_sel_reads": 0}
+
+
+def selection_changed():
+    _epoch[0] += 1
+
+
+def selection_epoch():
+    return _epoch[0]
 
 
 def _face_loops(a, faces):
@@ -61,6 +87,8 @@ def _finish(a, n_loops):
     nxt[ends] = a.loop_start
     a.corner_next = nxt
     a._uv_sel = None
+    a._uv_loops = None
+    a._uv_sel_epoch = None
     return a
 
 
@@ -126,7 +154,7 @@ EDIT_MODALS = ("TRANSFORM_OT", "UV_OT", "SCULPT_OT", "MESH_OT")
 def editing_now(wm):
     """A transform / UV / mesh modal operator runs in some window (the edit mesh is being changed)."""
     try:
-        return any(op.bl_idname.startswith(EDIT_MODALS) for w in wm.windows for op in w.modal_operators)
+        return any(op.bl_idname.startswith(EDIT_MODALS) for w in wm.windows for op in live_refs.running_modals(w))
     except (AttributeError, ReferenceError):
         return True
 
@@ -225,9 +253,9 @@ def components(n, a, b):
             lab = nxt
 
 
-def statistics(a, bm, uv, synced, stack_eps):
+def statistics(a, bm, uv, synced, stack_eps, epoch=None):
     """uv_hud.mesh_statistics on arrays: (shells, selected shells, overlapping UVs, selected, reversed UVs, selected,
-    selected UV coordinates)."""
+    selected UV coordinates); ``epoch``: as for ``Arrays.uv_sel``."""
     shown = shown_faces(a, synced)
     faces = np.nonzero(shown)[0]
     if not len(faces):
@@ -240,7 +268,7 @@ def statistics(a, bm, uv, synced, stack_eps):
     lab = components(len(a.loop_start), lface, a.corner_face[first][pid])
     shell_of_face = lab
     shells = np.unique(shell_of_face[faces])
-    picked = a.vert_sel[a.corner_vert[loops]] if synced else a.uv_sel(bm, uv, shown)[loops]
+    picked = a.vert_sel[a.corner_vert[loops]] if synced else a.uv_sel(bm, uv, shown, epoch=epoch)[loops]
     psel = np.zeros(npts, bool)
     np.logical_or.at(psel, pid, picked)
     shells_sel = np.unique(shell_of_face[lface[psel[pid]]])
@@ -275,7 +303,7 @@ def _same(p, q):
 
 
 def _joined(a, i, k):
-    """Loop i's edge side continues into loop k's face with the same UVs at both ends (uv_tools._uv_at rule)."""
+    """Loop i's edge side continues into loop k's face with the same UVs at both ends (uv_islands._uv_at rule)."""
     nx = a.corner_next
     flip = a.corner_vert[k] == a.corner_vert[nx[i]]
     ka = np.where(flip, nx[k], k)

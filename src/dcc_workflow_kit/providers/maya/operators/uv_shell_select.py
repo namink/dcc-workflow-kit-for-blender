@@ -6,7 +6,7 @@ Maya 2026:
   Components > UV Shell and Alt+F12 (`SelectMeshUVShell`): component mode, selection cleared, in-view message. Here: the
   WindowManager flag ``allset_uv_shell_mask`` + face select mode + UV Sync Selection on (one selection for the 3D View
   and the UV Editor, like Maya's one selection list). Any other component mode clears the flag
-  (``uv_tools.leave_uv_mode`` / ``set_component``).
+  (``uv_components.leave_uv_mode`` / ``set_component``).
 - A click selects **faces**: every face of the UV shell of the face under the cursor (3D: the face the pick returns at
   that pixel, so on an edge between two shells one shell wins; UV Editor: the UV face containing the point).
   Plain = replace, Shift = toggle the shell (by the clicked face's state), Ctrl = remove, Ctrl+Shift = add; a
@@ -25,7 +25,7 @@ import numpy as np
 from bpy.props import BoolProperty
 
 from . import uv_arrays
-from .. import compat
+from .. import compat, live_refs
 
 FLAG = "allset_uv_shell_mask"
 BOX_OPS = ("VIEW3D_OT_select_box", "VIEW3D_OT_select_lasso", "UV_OT_select_box", "UV_OT_select_lasso",
@@ -199,6 +199,9 @@ class ALLSET_OT_uv_shell_pick(bpy.types.Operator):
         region = context.region
         space = context.space_data
         if not active(context) or region is None or region.type != 'WINDOW' or space is None:
+            from . import sel_constraint     # Selection Constraint > Angle grows Blender's pick afterwards (#435)
+            if region is not None and region.type == 'WINDOW':
+                sel_constraint.watch(context, event)
             return {'PASS_THROUGH'}
         xy = (event.mouse_region_x, event.mouse_region_y)
         if space.type == 'VIEW_3D':
@@ -249,7 +252,8 @@ def grow_box(context, before, shift, ctrl):
 
 def _box_running():
     try:
-        return any(op.bl_idname in BOX_OPS for w in bpy.context.window_manager.windows for op in w.modal_operators)
+        return any(op.bl_idname in BOX_OPS for w in bpy.context.window_manager.windows
+                   for op in live_refs.running_modals(w))
     except (AttributeError, ReferenceError):
         return False
 
@@ -277,6 +281,9 @@ class ALLSET_OT_uv_shell_box(bpy.types.Operator):
     bl_options = {'INTERNAL'}
 
     def invoke(self, context, event):
+        if not active(context):
+            from . import sel_constraint     # Selection Constraint > Angle grows Blender's marquee afterwards (#435)
+            sel_constraint.watch(context, event)
         if active(context):
             _box["state"] = {"before": _face_sets(context), "shift": event.shift, "ctrl": event.ctrl, "ticks": 0}
             if not bpy.app.timers.is_registered(_box_tick):
@@ -289,8 +296,9 @@ class ALLSET_OT_uv_shell_box(bpy.types.Operator):
 def enter(context):
     """Maya SelectMeshUVShell: component mode, UV Shell mask, selection cleared, message."""
     ts = context.scene.tool_settings
-    ts.use_uv_select_sync = True
+    from .uv_components import sync_on
     ts.mesh_select_mode = (False, False, True)
+    sync_on(ts)
     for ob in edit_meshes(context):
         bm = bmesh.from_edit_mesh(ob.data)
         write_selection(ob, bm, set())

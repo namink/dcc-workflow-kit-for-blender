@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """#101: Maya option windows of the Display menu: Display > Grid ❒ = Maya's Grid Options.
 
-Same spec as operators/option_windows.py (``F`` fields, ``Window`` = one ``allset.opt_<key>`` operator;
+Same spec as operators/option_windows_spec.py (``F`` fields, ``Window`` = one ``allset.opt_<key>`` operator;
 option_windows._extend appends ``WINDOWS``). Labels, kinds and buttons follow Maya's Grid Options;
 defaults: grid size 12, spacing 5, divisions 5,
 grid / axis / highlight colour = index 2 = 0.25 grey.
@@ -81,8 +81,8 @@ WINDOWS = [
         F("first_selection", "First Selection:", "enum", "Independent", items=("Independent", "Dependent"))],
         _run_toggle, paths=("Display/Toggle Show/Hide",)),
     Window(KEY, "Grid Options", "Apply and Close", None, FIELDS, _run_grid, paths=("Display/Grid",),
-           missing=("Perspective grid numbers: Hide / On Axes / Along Edge (factory Hide)",
-                    "Orthographic grid numbers: Hide / On Axes / Along Edge (factory Hide)"),
+           missing=("Perspective grid numbers: Hide / On Axes / Along Edge (default Hide)",
+                    "Orthographic grid numbers: Hide / On Axes / Along Edge (default Hide)"),
            click_saved=False),
 ]
 

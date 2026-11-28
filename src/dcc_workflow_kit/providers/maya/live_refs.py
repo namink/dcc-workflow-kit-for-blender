@@ -33,6 +33,15 @@ def window(ptr):
     return None
 
 
+def running_modals(win):
+    """The operators running modal in ``win``, without the empty (None) entry a modal that has just ended leaves
+    until Blender removes its handler; [] when ``win`` is None or gone."""
+    try:
+        return [op for op in win.modal_operators if op is not None]
+    except (AttributeError, ReferenceError):
+        return []
+
+
 def find_area(ptr, win=None):
     """(window, area) of the area whose pointer is ``ptr`` in ``win`` (a Window, a window pointer, or None = any
     open window); (None, None) when it is gone."""

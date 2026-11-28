@@ -328,7 +328,7 @@ def _running(entry):
     """Blender's box / lasso modal of this drag is still running; keeps the box drawn so far in ``entry``."""
     window = live_refs.window(entry["window"])
     try:
-        ops = [op for op in window.modal_operators if op.bl_idname in SELECT_OPS] if window is not None else []
+        ops = [op for op in live_refs.running_modals(window) if op.bl_idname in SELECT_OPS]
         for op in ops:
             if op.bl_idname == "VIEW3D_OT_select_box":
                 p = op.properties

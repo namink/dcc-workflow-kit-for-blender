@@ -25,6 +25,7 @@ from bpy.props import EnumProperty
 
 from .. import undo_steps
 from .. import i18n
+from . import joint_visibility
 
 TOGGLE_KEY = "toggle_show_hide"   # option window key (operators/option_windows_display.py)
 KEPT = "allset_kept"              # hidden by h while selected: h / Shift+H bring it back
@@ -37,7 +38,69 @@ ACTIONS = (
     ('SHOW_SELECTED', "Show Selected Objects", "Maya Shift+H"),
     ('SHOW_LAST', "Show Last Hidden", "Maya Ctrl+Shift+H"),
     ('SHOW_ALL', "Show All", "Maya Display > Show > All: every object whose visibility is off"),
+    ('HIDE_ALL', "Hide All", "Maya Display > Hide > All: every object"),
+    ('HIDE_TYPE', "Hide by Type", "Maya Display > Hide > <type>: every object of the type"),
+    ('SHOW_TYPE', "Show by Type", "Maya Display > Show > <type>: every hidden object of the type"),
 )
+
+# Maya Display > Hide / Show > <type> (HideNURBSSurfaces, ShowJoints, ...): the kit's node of each Maya type.
+GEOMETRY_TYPES = {'MESH', 'CURVE', 'SURFACE', 'META', 'FONT', 'CURVES', 'POINTCLOUD', 'VOLUME'}
+
+
+def _deforming(ob):
+    from .history import is_deformer
+    return ob.type in GEOMETRY_TYPES and any(is_deformer(md) for md in getattr(ob, "modifiers", ()))
+
+
+def _nonlinear_handles(scene):
+    from .history import NONLINEARS
+    used = {getattr(md, "origin", None) or getattr(md, "start_position_object", None) or getattr(md, "object", None)
+            for o in scene.objects for md in getattr(o, "modifiers", ()) if md.type in NONLINEARS}
+    from . import bend_deformer, nonlinear_nodes
+    used |= {bend_deformer.handle_of(md) or nonlinear_nodes.handle_of(md) for o in scene.objects
+             for md in getattr(o, "modifiers", ())
+             if bend_deformer.is_bend(md) or nonlinear_nodes.is_nonlinear(md)}  # a mesh's nonlinear: nodes
+    return [ob for ob in scene.objects if ob in used]
+
+
+def _of_type(*types):
+    return lambda scene: [ob for ob in scene.objects if ob.type in types]
+
+
+def _selector(kind):
+    from .by_type import SELECTORS, ik_handles, cluster_handles
+    return {
+        'GEOMETRY': _of_type(*GEOMETRY_TYPES),
+        'NURBS_SURFACES': _of_type('SURFACE'),
+        'NURBS_CURVES': _of_type('CURVE'),
+        'POLYGONS': _of_type('MESH'),
+        'DEFORMING': lambda scene: [ob for ob in scene.objects if _deforming(ob)],
+        'KINEMATICS': lambda scene: _of_type('ARMATURE')(scene) + ik_handles(scene),
+        'JOINTS': _of_type('ARMATURE'),
+        'IK_HANDLES': ik_handles,
+        'DEFORMERS': lambda scene: (_of_type('LATTICE')(scene) + cluster_handles(scene)
+                                    + _nonlinear_handles(scene)),
+        'LATTICES': _of_type('LATTICE'),
+        'CLUSTERS': cluster_handles,
+        'NONLINEARS': _nonlinear_handles,
+        'LIGHTS': _of_type('LIGHT'),
+        'CAMERAS': _of_type('CAMERA'),
+        'NCLOTHS': SELECTORS['NCLOTHS'],
+        'NPARTICLES': SELECTORS['NPARTICLES'],
+        'NRIGIDS': SELECTORS['NRIGIDS'],
+    }[kind]
+
+
+KINDS = tuple((k, k.replace("_", " ").title(), "") for k in (
+    'NONE', 'GEOMETRY', 'NURBS_SURFACES', 'NURBS_CURVES', 'POLYGONS', 'DEFORMING', 'KINEMATICS', 'JOINTS',
+    'IK_HANDLES', 'DEFORMERS', 'LATTICES', 'CLUSTERS', 'NONLINEARS', 'LIGHTS', 'CAMERAS', 'NCLOTHS', 'NPARTICLES',
+    'NRIGIDS'))
+
+
+def of_kind(context, kind):
+    """The view layer's objects of a Maya Hide / Show type (scene order, each once)."""
+    in_layer = {ob.session_uid for ob in context.view_layer.objects}
+    return [ob for ob in dict.fromkeys(_selector(kind)(context.scene)) if ob.session_uid in in_layer]
 
 
 def _clear(objects, key):
@@ -49,6 +112,7 @@ def _clear(objects, key):
 def _hide(objects, all_objects):
     """Hide ``objects``; they become the "last hidden" set."""
     _clear(all_objects, LAST)
+    joint_visibility.clear_last_of(o for o in all_objects if o.type == 'ARMATURE')
     for ob in objects:
         ob.hide_viewport = True
         try:
@@ -125,7 +189,7 @@ def _show(objects, view_layer, select=True):
 
 
 def toggle_dependent():
-    """The saved First Selection of Maya's Toggle Visibility Options: True = Dependent (factory Independent)."""
+    """The saved First Selection of Maya's Toggle Visibility Options: True = Dependent (default Independent)."""
     from . import option_windows
     v = option_windows.saved(TOGGLE_KEY) or {}
     return v.get("first_selection") == "Dependent"
@@ -169,8 +233,11 @@ def toggle(context, dependent=False):
     return len(members)
 
 
-def apply(context, action, dependent=None):
-    """Run ``action`` on the view layer; returns the number of objects changed."""
+def apply(context, action, dependent=None, kind='NONE'):
+    """Run ``action`` on the view layer (``kind``: the type of HIDE_TYPE / SHOW_TYPE); returns the number of
+    objects changed."""
+    if context.mode in joint_visibility.JOINT_MODES:
+        return _apply_joints(context, action, kind)
     vl = context.view_layer
     objs = list(vl.objects)
     selected = [ob for ob in objs if ob.visible_get() and ob.select_get()]
@@ -194,10 +261,62 @@ def apply(context, action, dependent=None):
     if action == 'SHOW_SELECTED':
         act = vl.objects.active
         return _show([ob for ob in hidden if KEPT in ob or ob == act], vl)
+    if action == 'SHOW_LAST':        # the last hide may have been joints (Pose / Edit mode)
+        return _show([ob for ob in hidden if LAST in ob], vl) + joint_visibility.show_last(context, in_mode=False)
+    if action == 'SHOW_ALL':         # hidden joints too
+        return _show(hidden, vl, select=False) + joint_visibility.show_all(context)
+    if action == 'HIDE_ALL':
+        return _hide([ob for ob in objs if not ob.hide_viewport], objs)
+    if action == 'HIDE_TYPE':
+        return _hide([ob for ob in of_kind(context, kind) if not ob.hide_viewport], objs)
+    if action == 'SHOW_TYPE':
+        n = _show([ob for ob in of_kind(context, kind) if ob.hide_viewport], vl, select=False)
+        return n + (joint_visibility.show_all(context) if kind in joint_visibility.JOINT_KINDS else 0)
+    raise ValueError(action)
+
+
+def _apply_joints(context, action, kind):
+    """``apply`` in Pose / Edit mode of a skeleton: the actions work on joints (a hidden joint hides the joints
+    below it); objects other than the skeletons being edited follow the Object Mode rules where Maya's command
+    covers them too (Hide Unselected, Hide All, Show All, by type)."""
+    vl = context.view_layer
+    objs = list(vl.objects)
+    editing = {o.session_uid for o in joint_visibility.armatures_in_mode(context)}
+    others = [ob for ob in objs if ob.session_uid not in editing]
+    hidden = [ob for ob in others if ob.hide_viewport]
     if action == 'SHOW_LAST':
-        return _show([ob for ob in hidden if LAST in ob], vl)
+        return _show([ob for ob in hidden if LAST in ob], vl) + joint_visibility.show_last(context, in_mode=False)
     if action == 'SHOW_ALL':
-        return _show(hidden, vl, select=False)
+        return _show(hidden, vl, select=False) + joint_visibility.show_all(context)
+    if action == 'SHOW_TYPE':
+        n = _show([ob for ob in of_kind(context, kind) if ob.hide_viewport and ob.session_uid not in editing], vl,
+                  select=False)
+        return n + (joint_visibility.show_all(context) if kind in joint_visibility.JOINT_KINDS else 0)
+    if action in {'HIDE', 'TOGGLE'}:
+        if joint_visibility.selection_count(context):
+            _clear(objs, LAST)           # the joints are the new "last hidden"
+        return joint_visibility.hide(context, action)
+    if action == 'SHOW_SELECTED':
+        return joint_visibility.hide(context, action)
+    if action == 'HIDE_UNSELECTED':
+        from .dag import hierarchy
+        selected = [ob for ob in objs if ob.visible_get() and ob.select_get()]
+        keep = {o.session_uid for o in hierarchy(selected)} | editing
+        for ob in selected:
+            p = ob.parent
+            while p is not None:
+                keep.add(p.session_uid)
+                p = p.parent
+        n = _hide([ob for ob in others if ob.visible_get() and not ob.select_get() and ob.session_uid not in keep],
+                  objs)
+        return n + joint_visibility.hide(context, action)
+    if action == 'HIDE_ALL':
+        n = _hide([ob for ob in others if not ob.hide_viewport], objs)
+        return n + joint_visibility.hide(context, action)
+    if action == 'HIDE_TYPE':
+        n = _hide([ob for ob in of_kind(context, kind) if not ob.hide_viewport and ob.session_uid not in editing],
+                  objs)
+        return n + (joint_visibility.hide(context, action) if kind in joint_visibility.JOINT_KINDS else 0)
     raise ValueError(action)
 
 
@@ -209,6 +328,7 @@ class ALLSET_OT_visibility(bpy.types.Operator):
     bl_options = {'REGISTER', 'UNDO'}
 
     action: EnumProperty(name="Action", items=ACTIONS, default='TOGGLE')
+    kind: EnumProperty(name="Type", items=KINDS, default='NONE', options={'SKIP_SAVE'})
     # Toggle: Maya's First Selection; SAVED = the Toggle Visibility Options window's value
     behaviour: EnumProperty(name="First Selection", options={'SKIP_SAVE', 'HIDDEN'}, default='SAVED', items=(
         ('SAVED', "Saved", ""), ('INDEPENDENT', "Independent", ""), ('DEPENDENT', "Dependent", "")))
@@ -220,13 +340,17 @@ class ALLSET_OT_visibility(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        return context.view_layer is not None and context.mode == 'OBJECT'
+        return context.view_layer is not None and (context.mode == 'OBJECT' or
+                                                   context.mode in joint_visibility.JOINT_MODES)
 
     def execute(self, context):
         vl = context.view_layer
-        had_selection = any(ob.visible_get() and ob.select_get() for ob in vl.objects)
+        if context.mode in joint_visibility.JOINT_MODES:
+            had_selection = joint_visibility.selection_count(context) > 0
+        else:
+            had_selection = any(ob.visible_get() and ob.select_get() for ob in vl.objects)
         changed = apply(context, self.action,
-                        None if self.behaviour == 'SAVED' else self.behaviour == 'DEPENDENT')
+                        None if self.behaviour == 'SAVED' else self.behaviour == 'DEPENDENT', self.kind)
         from . import dag
         dag.sync(context.scene, vl)          # a hidden parent hides its children (Maya)
         text = message(self.action, had_selection, changed)
@@ -254,4 +378,37 @@ def message(action, had_selection, changed):
     return None
 
 
-classes = (ALLSET_OT_visibility,)
+def reveal_components(meshes):
+    """Unhide every vertex, edge and face of ``meshes`` (mesh data, object mode); returns how many had hidden ones."""
+    n = 0
+    for me in meshes:
+        changed = False
+        for elems in (me.vertices, me.edges, me.polygons):
+            flags = [False] * len(elems)
+            elems.foreach_get("hide", flags)
+            if any(flags):
+                elems.foreach_set("hide", [False] * len(elems))
+                changed = True
+        if changed:
+            me.update()
+            n += 1
+    return n
+
+
+class ALLSET_OT_show_all_components(bpy.types.Operator):
+    """Show every hidden vertex, edge and face of every mesh in the scene, selected or not (Maya Display > Show >
+    All Components, also from object mode)"""
+    bl_idname = "allset.show_all_components"
+    bl_label = "All Components"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        editing = {ob.data for ob in context.objects_in_mode_unique_data} if context.mode == 'EDIT_MESH' else set()
+        if editing:
+            bpy.ops.mesh.reveal(select=False)         # the meshes in Edit Mode keep their data in the edit mesh
+        others = {ob.data for ob in context.view_layer.objects if ob.type == 'MESH'} - editing
+        reveal_components(m for m in others if not m.library)
+        return {'FINISHED'}
+
+
+classes = (ALLSET_OT_visibility, ALLSET_OT_show_all_components)

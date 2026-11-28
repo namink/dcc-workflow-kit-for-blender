@@ -1,25 +1,77 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Blender version differences in one place.
 
-The kit's main target is Blender 5.2; it supports 5.0.0 - 5.2.x (0.6.2 is the
-last version for Blender 4.5, and the 4.5 paths are gone). Every check of "which Blender is this" lives here;
-feature code calls these helpers and stays the same on every version.
+Supported: Blender 5.2 LTS (the main target) and 5.3, each checked by every test; 5.0.x / 5.1.x still install
+(0.6.2 is the last version for Blender 4.5, and the 4.5 paths are gone). Every check of "which Blender is this"
+lives here; feature code calls these helpers and stays the same on every version.
 """
 
+import re
 from operator import attrgetter
 
 import bpy
 
 VERSION = tuple(bpy.app.version[:2])
 TARGET = (5, 2)                         # main target (Blender 5.2 LTS)
-STRICT_VERSIONS = ((5, 2),)             # keymap patches must all apply to these minors' IC data
+SUPPORTED = ((5, 2), (5, 3))            # the supported minors
+STRICT_VERSIONS = SUPPORTED             # keymap patches must all apply to these minors' IC data
 IS_TARGET = VERSION == TARGET
 IS_STRICT = VERSION in STRICT_VERSIONS
+# A Scene value typed into a button in mesh edit mode gets its own undo step from 5.3 on (5.2 skips that step)
+UI_UNDO_FOR_SCENE_IN_EDIT = VERSION >= (5, 3)
+
+
+# --- Help links ------------------------------------------------------------------------------------------------------
+# The kit's tables name the main target's Blender manual / API / release notes (".../5.2/..."); a link opens the pages
+# of the running Blender when it is a supported one (5.3 -> 5.3), else the main target's.
+DOCS_VERSION = "%d.%d" % (VERSION if VERSION in SUPPORTED else TARGET)
+_DOCS_LINK = re.compile(r"(docs\.blender\.org/(?:manual/[A-Za-z_]+|api)|developer\.blender\.org/docs/release_notes)"
+                        r"/\d+\.\d+/")
+
+
+def docs_url(url):
+    """``url`` with the version of a Blender manual / API / release notes link set to ``DOCS_VERSION``; any other
+    link as it is."""
+    return _DOCS_LINK.sub(lambda m: f"{m.group(1)}/{DOCS_VERSION}/", url)
 
 
 # Properties tab flags newer than 4.5: the Maya Workflow Kit template is still a 4.5-saved file
-# and opens in 5.x with them on, so they carry no meaning in a kit dock's role (ui/maya_dock.role).
-LATER_PROPERTIES_TABS = frozenset({"show_properties_strip", "show_properties_strip_modifier"})
+# and opens in 5.x with them on, so they carry no meaning in a kit dock's role (ui/maya_dock_roles.role).
+# Only the flags this Blender has: 5.3 added the Compositor tab.
+_LATER_TABS = ("show_properties_strip", "show_properties_strip_modifier", "show_properties_compositor")
+LATER_PROPERTIES_TABS = frozenset(n for n in _LATER_TABS if n in bpy.types.SpaceProperties.bl_rna.properties)
+
+
+# --- Outliner sort -----------------------------------------------------------------------------------------------
+# Blender 5.3 replaced the Outliner's use_sort_alpha bool with the sort_method enum (ALPHA / CUSTOM / NONE).
+
+def outliner_sort_alpha(space):
+    """The Outliner sorts its rows by name."""
+    return space.sort_method == 'ALPHA' if hasattr(space, "sort_method") else space.use_sort_alpha
+
+
+def set_outliner_sort_alpha(space, on):
+    """Sort by name, or keep the rows in their own order (off)."""
+    if hasattr(space, "sort_method"):
+        space.sort_method = 'ALPHA' if on else 'NONE'
+    else:
+        space.use_sort_alpha = on
+
+
+def draw_outliner_sort(layout, space):
+    """The sort row of a menu: 5.3's enum as a submenu row (``layout.prop`` would split the menu in two), else the
+    Sort Alphabetically check box."""
+    if hasattr(space, "sort_method"):
+        layout.prop_menu_enum(space, "sort_method")
+    else:
+        layout.prop(space, "use_sort_alpha", text="Sort Alphabetically")
+
+
+def primitive_add_args(add, kw):
+    """``kw`` for the add operator ``add``: Blender 5.3 renamed text_add's ``radius`` to ``size``."""
+    if "radius" in kw and "radius" not in add.get_rna_type().properties:
+        kw["size"] = kw.pop("radius")
+    return kw
 
 
 def own_annotations(cls):
@@ -149,6 +201,11 @@ def uv_vert_selected(loop, uv):
     return loop.uv_select_vert
 
 
+def uv_vert_selected_reader():
+    """``uv_vert_selected`` as one getter for ``map`` over many loops (no Python call per loop)."""
+    return attrgetter("uv_select_vert")
+
+
 def uv_edge_selected(loop, uv):
     return loop.uv_select_edge
 
@@ -188,6 +245,43 @@ def uv_sync_from_mesh(bm):
         bm.uv_select_sync_from_mesh()
 
 
+# --- Refilling an edit-mode BMesh ------------------------------------------------------------------
+# ``BMesh.clear()`` also empties the BMesh's own select mode, and ``from_mesh`` doesn't set it again. 5.3's
+# edit-mode click selection reads that mode (5.2 reads the tool settings): with it empty a click on a face, edge or
+# vertex picks nothing (and deselects) until the select mode is set again (#380); ``select_flush_mode`` flushes
+# nothing on every version. Every kit path that refills a BMesh goes through these.
+
+_SELECT_MODE_NAMES = ('VERT', 'EDGE', 'FACE')
+
+
+def bmesh_select_mode(bm):
+    """The select mode ``bm`` should keep: its own, else (an edit-mode BMesh already emptied) the scene's mesh select
+    mode."""
+    mode = set(bm.select_mode)
+    if not mode and bm.is_wrapped:
+        ts = getattr(getattr(bpy.context, "scene", None), "tool_settings", None)
+        if ts is not None:
+            mode = {name for name, on in zip(_SELECT_MODE_NAMES, ts.mesh_select_mode) if on}
+    return mode
+
+
+def clear_bmesh(bm):
+    """``bm.clear()`` keeping its select mode (see above)."""
+    mode = bmesh_select_mode(bm)
+    bm.clear()
+    if mode:
+        bm.select_mode = mode
+
+
+def refill_bmesh(bm, me):
+    """Replace the contents of ``bm`` (often the edit-mode BMesh) by mesh ``me``, keeping its select mode."""
+    clear_bmesh(bm)
+    mode = set(bm.select_mode)
+    bm.from_mesh(me)
+    if mode:
+        bm.select_mode = mode
+
+
 # --- Bone visibility ------------------------------------------------------------------------
 # 5.x: a bone is hidden in pose / object mode by ``PoseBone.hide``; ``Bone.hide`` only hides the edit bone
 # (api notes).
@@ -222,6 +316,20 @@ def read_region_row(fb, region, y):
         return fb.read_color(0, y, region.width, 1, 4, 0, 'UBYTE')
     except ValueError:
         return None
+
+
+def flat_buffer(buf):
+    """``buf`` (a ``gpu.types.Buffer``) as one dimension, so ``numpy.frombuffer`` takes it: 5.0 exports a buffer
+    of more than one dimension as not C-contiguous (BufferError). The bytes stay as they are; any other buffer
+    (no ``dimensions``) is returned unchanged."""
+    dims = getattr(buf, "dimensions", None)
+    if dims is None or isinstance(dims, int):
+        return buf
+    n = 1
+    for d in dims:
+        n *= d
+    buf.dimensions = n
+    return buf
 
 
 # --- Materials ------------------------------------------------------------------------------
@@ -277,6 +385,20 @@ def toolbar_back(theme):
 # Kit textures (shelf icons) hold scene-linear colours. From 5.0 the builtin 'IMAGE' shader draws the values as they
 # are and the converting shader is 'IMAGE_SCENE_LINEAR_TO_REC709_SRGB' (5.0 Python API notes, GPU).
 LINEAR_IMAGE_SHADER = 'IMAGE_SCENE_LINEAR_TO_REC709_SRGB'
+
+
+def closed_line_points(points):
+    """``points`` with the first one again at the end: drawn as a 'LINE_STRIP' they make the closed outline. 5.3
+    leaves out the side from the last point back to the first of a 'LINE_LOOP' batch; the strip draws the same lines
+    on every version."""
+    pts = list(points)
+    return pts + pts[:1]
+
+
+def closed_line_batch(shader, points):
+    """A batch for ``shader`` drawing the closed outline through ``points`` (see ``closed_line_points``)."""
+    from gpu_extras.batch import batch_for_shader
+    return batch_for_shader(shader, 'LINE_STRIP', {"pos": closed_line_points(points)})
 
 
 # --- Unified paint settings -----------------------------------------------------------------
@@ -351,6 +473,13 @@ def gn_input_set(md, key, value):
             item.value = value
         return
     md[key] = value
+
+
+def gn_input_path(key):
+    """The data path, on the modifier, of the value of input ``key`` (what a key on that input animates)."""
+    if GN_INPUT_STRUCT:
+        return f"properties.inputs.{key}.value"
+    return f'["{key}"]'
 
 
 def gn_input_attribute(md, key, attribute):
@@ -430,3 +559,149 @@ def mesh_from_pydata(mesh, vertices, edges, faces):
     Blender to compute)."""
     mesh.from_pydata(vertices, edges, faces)
     repair_selection_attributes(mesh)
+
+
+# === Blender 5.3: weight paint brushes, paint panels, theme header text ==========================================
+
+# --- "Use unified" switches ------------------------------------------------------------------------------------
+# Up to 5.2 the switches that make a paint mode's brushes share one size / strength / weight belong to the mode's
+# unified paint settings (``UnifiedPaintSettings.use_unified_*``). 5.3 moved them onto each brush
+# (``Brush.use_unified_*``, size on and strength / weight off in the essentials brushes); the unified settings keep
+# the shared values, and their old switches are deprecated and change nothing.
+BRUSH_UNIFIED_SWITCHES = "use_unified_size" in bpy.types.Brush.bl_rna.properties
+UNIFIED_NAMES = ("size", "strength", "weight")
+
+
+def unified_switch_owner(ups, brush):
+    """The struct whose ``use_unified_<name>`` switches decide what ``brush`` shares: the brush (5.3; None without a
+    brush), else the paint mode's unified settings ``ups``."""
+    return brush if BRUSH_UNIFIED_SWITCHES else ups
+
+
+def unified_on(ups, brush, name):
+    """Does ``brush`` use the shared ``name`` ('size', 'strength' or 'weight') of ``ups``?"""
+    owner = unified_switch_owner(ups, brush)
+    return owner is not None and bool(getattr(owner, "use_unified_" + name))
+
+
+def unified_value_owner(ups, brush, name):
+    """Where strokes of ``brush`` read ``name`` (and where the kit writes it): ``ups`` when shared or without a
+    brush, else the brush."""
+    return ups if brush is None or unified_on(ups, brush, name) else brush
+
+
+def set_unified(ups, brush, name, on):
+    """Share ``name`` across the paint mode's brushes (``on``) or not; False when Blender refused (no brush, or a
+    brush that can't be edited)."""
+    owner = unified_switch_owner(ups, brush)
+    if owner is None:
+        return False
+    try:
+        setattr(owner, "use_unified_" + name, on)
+        return True
+    except (AttributeError, TypeError, ValueError, RuntimeError):
+        return False
+
+
+def unified_switches(ups, brush):
+    """{name: shared} of ``brush`` for size / strength / weight, or None when there is no brush to read."""
+    if BRUSH_UNIFIED_SWITCHES and brush is None:
+        return None
+    return {name: unified_on(ups, brush, name) for name in UNIFIED_NAMES}
+
+
+def keep_unified_switches(ups, brush, switches):
+    """After the kit changed the brush: ``brush`` shares what the previous one shared (``unified_switches`` read
+    before the change). Up to 5.2 the switches belong to the paint mode and already stay."""
+    if not BRUSH_UNIFIED_SWITCHES or brush is None or not switches:
+        return
+    for name, on in switches.items():
+        if unified_on(ups, brush, name) != on:
+            set_unified(ups, brush, name, on)
+
+
+# --- Weight paint brush asset shelf ----------------------------------------------------------------------------
+# Up to 5.2 the weight paint brushes' asset shelf (``VIEW3D_AST_brush_weight_paint``) is hidden by default: a 3D View
+# shows it only once the user opens it. 5.3 gave it the default-visible option of the other paint modes' shelves: the
+# first time a view is in Weight Paint, Blender opens the shelf under it.
+WEIGHT_SHELF_TYPE = "VIEW3D_AST_brush_weight_paint"
+
+
+def weight_shelf_shown_first():
+    """The weight paint brush shelf type when Blender opens it the first time a view is in Weight Paint (5.3), else
+    None."""
+    cls = getattr(bpy.types, WEIGHT_SHELF_TYPE, None)
+    return cls if cls is not None and 'DEFAULT_VISIBLE' in getattr(cls, "bl_options", ()) else None
+
+
+# --- Essentials weight paint brushes -------------------------------------------------------------------------
+# 5.3 renamed the essentials draw brush "Paint" (blend Mix, strength 1) to "Set Weight" and gives new scenes, and
+# files that painted with "Paint", "Add Weight" (blend Add, strength 0.05, accumulating); 5.0 - 5.2 start with "Paint".
+WEIGHT_BRUSH_ASSETS = {'DRAW': "Set Weight" if VERSION >= (5, 3) else "Paint", 'BLUR': "Blur",
+                       'AVERAGE': "Average", 'SMEAR': "Smear"}
+_WEIGHT_START_BRUSH = "Add Weight" if VERSION >= (5, 3) else ""
+
+
+def weight_brush_asset(kind):
+    """The essentials weight paint brush asset (``brushes/...mesh_weight.blend/Brush/<name>``) of brush ``kind``."""
+    return "brushes/essentials_brushes-mesh_weight.blend/Brush/" + WEIGHT_BRUSH_ASSETS[kind]
+
+
+def is_adding_start_brush(brush):
+    """Is ``brush`` the essentials brush 5.3 starts weight painting with ("Add Weight"), still adding (blend Add)?
+    Always False up to 5.2, whose start brush mixes."""
+    return (bool(_WEIGHT_START_BRUSH) and brush is not None and brush.name == _WEIGHT_START_BRUSH
+            and brush.library is not None and getattr(brush, "blend", '') == 'ADD')
+
+
+# 5.3 also starts new scenes with Weight Paint's Multi-Paint (and Auto-Normalize) on; 5.0 - 5.2 with both off.
+MULTIPAINT_STARTS_ON = bool(bpy.types.ToolSettings.bl_rna.properties["use_multipaint"].default)
+
+
+# --- Paint panels the kit draws inside its own panels --------------------------------------------------------------
+def weight_falloff_panel():
+    """Blender's paint panel class that draws a weight brush's falloff curve and falloff shape: 5.3's Shape panel
+    (its Falloff panel no longer has the shape and is not shown for weight paint), else the Falloff panel."""
+    from bl_ui import properties_paint_common as paint_common
+    shape = getattr(paint_common, "ShapePanel", None)
+    supports = getattr(paint_common, "supports_shape_panel", None)
+    if shape is not None and (supports is None or supports('PAINT_WEIGHT')):
+        return shape
+    return paint_common.FalloffPanel
+
+
+# --- Timeline keying popover ------------------------------------------------------------------------------------
+def keying_popover():
+    """The Timeline popover with the keying set and new-keyframe settings: 5.3's "Keyframing" popover (those settings
+    plus Auto Keying, as sub-panels sized by it), else the "Keyframing Settings" panel of 5.0 - 5.2."""
+    return "TIME_PT_keyframing" if hasattr(bpy.types, "TIME_PT_keyframing") else "TIME_PT_keyframing_settings"
+
+
+# --- Theme header text -----------------------------------------------------------------------------------------
+def header_text_colours(space_theme):
+    """(text, highlighted text) RGB of an editor's header in the user's theme (read only): ``header_text`` /
+    ``header_text_hi`` up to 5.2; 5.3 dropped them and draws header text with the editor's ``text`` / ``text_hi``."""
+    if hasattr(space_theme, "header_text"):
+        return tuple(space_theme.header_text)[:3], tuple(space_theme.header_text_hi)[:3]
+    return tuple(space_theme.text)[:3], tuple(space_theme.text_hi)[:3]
+
+
+# Graph Editor value axis: Blender 5.3 draws length curves in the scene's length unit (Unit Scale included), so a
+# curve of 0.05 BU reads 5 in a centimetre scene; earlier versions draw lengths as stored. Rotations are in degrees on
+# both.
+GRAPH_LENGTH_UNITS = VERSION >= (5, 3)
+_LENGTH_SIZE = {"KILOMETERS": 1000.0, "METERS": 1.0, "CENTIMETERS": 0.01, "MILLIMETERS": 0.001,
+                "MICROMETERS": 1e-6, "MILES": 1609.344, "FEET": 0.3048, "INCHES": 0.0254, "THOU": 0.0000254}
+
+
+def graph_length_factor(unit_settings):
+    """Graph Editor display value per stored value of a length curve (1.0 where lengths are drawn as stored): the
+    scene's Unit Scale over its length unit; Adaptive = metres (metric) / feet (imperial); no unit system = 1."""
+    if not GRAPH_LENGTH_UNITS or unit_settings is None or unit_settings.system == 'NONE':
+        return 1.0
+    unit = unit_settings.length_unit
+    if unit == 'ADAPTIVE':
+        size = 1.0 if unit_settings.system == 'METRIC' else 0.3048
+    else:
+        size = _LENGTH_SIZE.get(unit, 1.0)
+    return (unit_settings.scale_length or 1.0) / size

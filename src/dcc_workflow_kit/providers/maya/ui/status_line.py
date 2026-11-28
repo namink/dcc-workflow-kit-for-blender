@@ -10,430 +10,27 @@ originals still run when the "Maya Menu Bar" preference is off. Maya has the
 Status Line on its own row under the menus; one TOPBAR row can't hold both
 (at 1600 px), so the Status Line is
 drawn first in the tool header of the largest 3D View.
+
+This module: the Status Line draw (groups and collapse handles, editor toggles), the top bar draw (``draw_left`` /
+``draw_right``, Workspace field) and registration. Button operators and 3D View lookups: ``status_line_buttons``;
+menu bar overflow: ``menu_bar_fit``. The names used elsewhere are importable from here too.
 """
 
 import bpy
 from bpy.props import EnumProperty, StringProperty
 
 from . import draw_safe, input_line, menu_sets, own_draw, status_icons
-from .. import i18n
-
-# --- 3D View helpers ----------------------------------------------------------------
-
-def main_view3d(screen=None):
-    """(area, WINDOW region) of the largest 3D View in ``screen`` (or the active screen)."""
-    screen = screen or bpy.context.screen
-    best = None
-    for area in (screen.areas if screen else ()):
-        if area.type == 'VIEW_3D' and (best is None or area.width * area.height > best.width * best.height):
-            best = area
-    if best is None:
-        return None, None
-    return best, next((r for r in best.regions if r.type == 'WINDOW'), None)
-
-
-def view3d_space(context):
-    """The 3D View a Maya Display item reads and sets: the one the menu is drawn in, else the largest of
-    the screen (the main menu bar is in the top bar), else the largest of the first window that has one (a kit
-    window such as Normals Size has none of its own). Maya keeps polygon display on the meshes; Blender keeps it on
-    each 3D View's overlays. None without a 3D View."""
-    space = getattr(context, "space_data", None)
-    if space is not None and space.type == 'VIEW_3D':
-        return space
-    area, _region = main_view3d(getattr(context, "screen", None))
-    wm = getattr(context, "window_manager", None)
-    for window in (wm.windows if wm is not None and area is None else ()):
-        area, _region = main_view3d(window.screen)
-        if area is not None:
-            break
-    return area.spaces.active if area is not None else None
-
-
-def all_view3d_spaces():
-    """Every 3D View space in every screen (Maya selection masks are global)."""
-    for screen in bpy.data.screens:
-        for area in screen.areas:
-            for space in area.spaces:
-                if space.type == 'VIEW_3D':
-                    yield space
-
-
-# --- selection masks -------------------------------------------
-
-# Maya object mask -> Blender SpaceView3D.show_object_select_<type>; None = no equivalent.
-OBJECT_MASKS = (
-    ("HANDLES", "Select by handle object type", 'RESTRICT_SELECT_OFF', None),
-    ("JOINTS", "Select by joint object type (armatures)", 'OUTLINER_OB_ARMATURE', ("armature",)),
-    ("CURVES", "Select by curve object type", 'OUTLINER_OB_CURVE', ("curve", "font", "curves")),
-    ("SURFACES", "Select by surface object type (meshes, NURBS)", 'OUTLINER_OB_MESH',
-     ("mesh", "surf", "meta", "pointcloud", "volume")),
-    ("DEFORMERS", "Select by deformation object type (lattices)", 'OUTLINER_OB_LATTICE', ("lattice",)),
-    ("DYNAMICS", "Select by dynamic object type", 'OUTLINER_OB_FORCE_FIELD', None),
-    ("RENDERING", "Select by rendering object type (cameras, lights)", 'OUTLINER_OB_LIGHT',
-     ("camera", "light")),
-    ("MISC", "Select by miscellaneous object type (locators, empties)", 'OUTLINER_OB_EMPTY',
-     ("empty", "speaker", "light_probe", "grease_pencil")),
-)
-_MASK_TYPES = {m[0]: m[3] for m in OBJECT_MASKS}
-
-
-def mask_on(space, group):
-    return all(getattr(space, f"show_object_select_{t}") for t in _MASK_TYPES[group])
-
-
-def set_mask(group, value):
-    for space in all_view3d_spaces():
-        for t in _MASK_TYPES[group]:
-            setattr(space, f"show_object_select_{t}", value)
-
-
-class ALLSET_OT_select_mask(bpy.types.Operator):
-    """Toggle whether this kind of object can be selected (all 3D Views)"""
-    bl_idname = "allset.select_mask"
-    bl_label = "Selection Mask"
-    bl_options = {'INTERNAL'}
-
-    group: EnumProperty(items=[(m[0], m[0].title(), m[1]) for m in OBJECT_MASKS if m[3]])
-
-    @classmethod
-    @i18n.translated
-    def description(cls, context, props):
-        return next(m[1] for m in OBJECT_MASKS if m[0] == props.group)
-
-    def execute(self, context):
-        area, _r = main_view3d(context.screen)
-        spaces = [area.spaces.active] if area else list(all_view3d_spaces())[:1]
-        if not spaces:
-            return {'CANCELLED'}
-        set_mask(self.group, not mask_on(spaces[0], self.group))
-        return {'FINISHED'}
-
-
-
-# Maya keeps its selection masks across File > New / Open (they are session state).
-# Blender keeps the object select filters in each file's screens and the mesh
-# select mode in its scene, so a load would replace them: remember them before the load and put them back after.
-MASK_FLAGS = tuple(sorted({t for m in OBJECT_MASKS if m[3] for t in m[3]}))
-_carried = {}
-
-
-def session_masks(context=None):
-    """The current masks: {type: selectable} of the main 3D View and the mesh select mode (or None)."""
-    context = context or bpy.context
-    area, _r = main_view3d(context.screen) if context.screen else (None, None)
-    space = area.spaces.active if area else next(iter(all_view3d_spaces()), None)
-    scene = context.scene
-    if space is None and scene is None:
-        return None
-    return {"objects": {t: getattr(space, f"show_object_select_{t}") for t in MASK_FLAGS} if space else None,
-            "mesh": tuple(scene.tool_settings.mesh_select_mode) if scene else None}
-
-
-def apply_masks(masks):
-    if not masks:
-        return
-    if masks["objects"]:
-        for space in all_view3d_spaces():
-            for t, value in masks["objects"].items():
-                setattr(space, f"show_object_select_{t}", value)
-    if masks["mesh"]:
-        for scene in bpy.data.scenes:
-            scene.tool_settings.mesh_select_mode = masks["mesh"]
-
-
-@bpy.app.handlers.persistent
-def _masks_before_load(*_args):
-    try:
-        _carried["masks"] = session_masks()
-    except (AttributeError, ReferenceError):
-        _carried.pop("masks", None)
-
-
-@bpy.app.handlers.persistent
-def _masks_after_load(*_args):
-    apply_masks(_carried.pop("masks", None))
-
-# --- selection mode -----------------------------------------------
-
-class ALLSET_OT_select_mode(bpy.types.Operator):
-    """Maya selection mode: Object (object mode) or Component (edit mode)"""
-    bl_idname = "allset.select_mode"
-    bl_label = "Selection Mode"
-    bl_options = {'UNDO'}
-
-    mode: EnumProperty(items=(("OBJECT", "Object", "Select by object type (object mode)"),
-                              ("COMPONENT", "Component", "Select by component type (edit mode)")))
-
-    @classmethod
-    @i18n.translated
-    def description(cls, context, props):
-        return {"OBJECT": "Select by object type (Object Mode)",
-                "COMPONENT": "Select by component type (Edit Mode)"}[props.mode]
-
-    @classmethod
-    def poll(cls, context):
-        return context.active_object is not None
-
-    def execute(self, context):
-        target = 'OBJECT' if self.mode == "OBJECT" else 'EDIT'
-        if context.active_object.mode != target:
-            from ..operators import maya_errors
-            if target == 'EDIT' and maya_errors.refuse_hidden(self, context.active_object):     # #187
-                return {'CANCELLED'}
-            bpy.ops.object.mode_set(mode=target)
-        return {'FINISHED'}
-
-
-# --- snapping (hold keys share these settings: operators/hold.py) ----
-
-SNAPS = (
-    ("GRID", "Snap to grids (hold X)", 'SNAP_GRID', {'GRID'}),
-    ("CURVE", "Snap to curves (hold C)", 'SNAP_EDGE', {'EDGE'}),
-    ("POINT", "Snap to points (hold V)", 'SNAP_VERTEX', {'VERTEX'}),
-    ("PROJECTED", "Snap to projected center", 'PIVOT_MEDIAN', None),
-    ("PLANE", "Snap to view planes", 'VIEW_PERSPECTIVE', None),
-    ("LIVE", "Snap to the surface under the cursor (Make Live)", 'SNAP_FACE', {'FACE_PROJECT'}),
-)
-_SNAP_ELEMENTS = {s[0]: s[3] for s in SNAPS}
-
-
-def snap_on(ts, name):
-    elements = _SNAP_ELEMENTS[name]
-    return elements is not None and ts.use_snap and elements <= set(ts.snap_elements)
-
-
-def toggle_snap(ts, name):
-    """Status Line snap button: add/remove its element; snapping off when none is left."""
-    current = set(ts.snap_elements) if ts.use_snap else set()
-    elements = _SNAP_ELEMENTS[name]
-    new = current - elements if snap_on(ts, name) else current | elements
-    if new:
-        ts.snap_elements = new
-        ts.use_snap = True
-        # Maya snaps the Move tool whenever a snap button is on: an Affect flag left off (Step Snap Off in
-        # older kit files, or a file saved that way) would make the button look on while nothing snaps (#139)
-        from ..operators import snap_align
-        snap_align.settle_affect(ts)
-    else:
-        ts.use_snap = False
-
-
-class ALLSET_OT_snap_toggle(bpy.types.Operator):
-    """Toggle a Maya snap mode"""
-    bl_idname = "allset.snap_toggle"
-    bl_label = "Snap Toggle"
-    # Maya's snap toggles are not undoable (snapMode pushes no undo step):
-    # no undo step here, and undo / redo keep the current snap state (``_keep_snap_pre`` / ``_keep_snap_post``)
-    bl_options = {'INTERNAL'}
-
-    snap: EnumProperty(items=[(s[0], s[0].title(), s[1]) for s in SNAPS if s[3]])
-
-    @classmethod
-    @i18n.translated
-    def description(cls, context, props):
-        return next(s[1] for s in SNAPS if s[0] == props.snap)
-
-    def execute(self, context):
-        toggle_snap(context.scene.tool_settings, self.snap)
-        return {'FINISHED'}
-
-
-# Blender's memfile undo restores the scene's tool settings with everything else, so an undo after a snap toggle
-# would switch the snap back (Issue #155). The state from before the undo / redo is put back from a 0 s
-# timer like the current frame (ui/time_slider.py ``restore_frame``).
-_KEEP_SNAP = {}
-
-
-@bpy.app.handlers.persistent
-def _keep_snap_pre(*_args):
-    scene = bpy.context.scene
-    if scene is not None:
-        ts = scene.tool_settings
-        _KEEP_SNAP["state"] = (scene.name, ts.use_snap, set(ts.snap_elements))
-
-
-@bpy.app.handlers.persistent
-def _keep_snap_post(*_args):
-    if "state" in _KEEP_SNAP and not bpy.app.timers.is_registered(restore_snap):
-        bpy.app.timers.register(restore_snap, first_interval=0.0)
-
-
-def restore_snap():
-    """Put the Status Line snap state from before the undo / redo back (None: timer done)."""
-    name, on, elements = _KEEP_SNAP.pop("state", (None, None, None))
-    scene = bpy.context.scene
-    if scene is None or scene.name != name:
-        return None
-    ts = scene.tool_settings
-    if elements and set(ts.snap_elements) != elements:
-        ts.snap_elements = elements
-    if ts.use_snap != on:
-        ts.use_snap = on
-    return None
-
-
-_SNAP_UNDO_HANDLERS = (("undo_pre", _keep_snap_pre), ("redo_pre", _keep_snap_pre),
-                       ("undo_post", _keep_snap_post), ("redo_post", _keep_snap_post))
-
-
-# --- symmetry (operators/symmetry.py) ------
-
-class ALLSET_MT_symmetry(bpy.types.Menu):
-    """Maya symmetry modes (Status Line ▾ list)"""
-    bl_idname = "ALLSET_MT_symmetry"
-    bl_label = "Symmetry"
-
-    def draw(self, context):
-        from ..operators import symmetry
-        current = symmetry.mode_of(symmetry.state(context.scene))
-        layout = self.layout
-        for mode, text in symmetry.MODES:
-            draw_safe.op(layout, "allset.symmetry", text=text,
-                         icon='RADIOBUT_ON' if mode == current else 'RADIOBUT_OFF').mode = mode
-
-
-def draw_symmetry(layout, context):
-    """▾ list with the mode text + a toggle that is blue (pressed) while symmetry is on.
-
-    Maya: LMB ▾ = list, MMB = toggle, the text box turns blue when on (Maya 2022
-    Status Line). A Blender menu button has no MMB action, so the toggle is its own button.
-    """
-    from ..operators import symmetry
-    sym = symmetry.state(context.scene)
-    row = layout.row(align=True)
-    draw_safe.op(row, "allset.symmetry", text="", icon='MOD_MIRROR', depress=sym.on).mode = "TOGGLE"
-    sub = row.row(align=True)
-    sub.ui_units_x = 6
-    sub.menu(ALLSET_MT_symmetry.bl_idname, text=symmetry.label(sym), icon='DOWNARROW_HLT')
-
-
-TRANSFORM_TOOLS = ("builtin.move", "builtin.rotate", "builtin.scale", "builtin.transform",
-                   "builtin.select", "builtin.select_box", "builtin.select_circle", "builtin.select_lasso")
-
-
-def draw_tool_symmetry(self, context):
-    """Maya Move/Rotate/Scale Tool Settings "Symmetry Settings" (edit mesh only)."""
-    if context.mode != 'EDIT_MESH':
-        return
-    tool = context.workspace.tools.from_space_view3d_mode(context.mode, create=False)
-    if tool is None or tool.idname not in TRANSFORM_TOOLS:
-        return
-    layout = self.layout
-    layout.separator()
-    layout.label(text="Symmetry Settings")
-    draw_symmetry(layout, context)
-
-
-# --- render -----------------------------------------------------------
-
-def _properties_area(screen):
-    """A Properties editor of ``screen`` that is not the Tool Settings dock."""
-    from . import maya_dock, tool_dock
-    return next((a for a in (screen.areas if screen else ())
-                 if a.type == 'PROPERTIES' and not tool_dock.is_dock(a) and maya_dock.role(a) is None), None)
-
-
-def show_properties(screen, context_name):
-    """Switch a Properties editor to a tab; False if the screen has none."""
-    area = _properties_area(screen)
-    if area is None:
-        return False
-    try:
-        area.spaces.active.context = context_name
-    except TypeError:  # tab not available (no active object etc.)
-        return False
-    return True
-
-
-class ALLSET_OT_render_settings(bpy.types.Operator):
-    """Open Blender's render settings (Properties > Render) in a new window, like Maya's Render Settings window"""
-    bl_idname = "allset.render_settings"
-    bl_label = "Render Settings"
-
-    def execute(self, context):
-        from ..operators import menu_extras
-        from . import window_places
-        window = context.window
-        area = max(window.screen.areas, key=lambda a: a.width * a.height, default=None) if window else None
-        if area is not None:
-            new = menu_extras.open_window(context, area, "render_settings")
-            if new is not None:
-                new.screen.areas[0].ui_type = 'PROPERTIES'
-                menu_extras.properties_tab_later(new, 'RENDER')
-                return {'FINISHED'}
-            if window_places.deferred():     # opens on a later tick
-                return {'FINISHED'}
-        # no new window (background): switch a Properties editor of the screen instead
-        return {'FINISHED'} if show_properties(context.screen, 'RENDER') else {'CANCELLED'}
-
-
-class ALLSET_OT_light_editor(bpy.types.Operator):
-    """Open an Outliner window that lists only the scene's lights (Blender has no Light Editor)"""
-    bl_idname = "allset.light_editor"
-    bl_label = "Light Editor"
-
-    def execute(self, context):
-        from ..operators import menu_extras
-        from . import window_places
-        window = context.window
-        area = max(window.screen.areas, key=lambda a: a.width * a.height, default=None) if window else None
-        if area is None:
-            return {'CANCELLED'}
-        new = menu_extras.open_window(context, area, "light_editor")
-        if new is None:
-            if not window_places.deferred():     # opens on a later tick
-                self.report({'ERROR'}, "Could not open a new window")
-            return {'CANCELLED'}
-        target = new.screen.areas[0]
-        target.ui_type = 'OUTLINER'
-        space = target.spaces.active
-        space.display_mode = 'VIEW_LAYER'
-        space.use_filter_object = True
-        for name in ("mesh", "armature", "empty", "camera", "others", "grease_pencil"):
-            if hasattr(space, "use_filter_object_" + name):
-                setattr(space, "use_filter_object_" + name, False)
-        space.use_filter_object_light = True
-        return {'FINISHED'}
-
-
-class ALLSET_OT_ipr_toggle(bpy.types.Operator):
-    """IPR: interactive render in its own window, looking where the main view looks; click again to close it"""
-    bl_idname = "allset.ipr_toggle"
-    bl_label = "IPR Render"
-
-    def execute(self, context):
-        from . import ipr_window, window_places
-        if ipr_window.is_open():
-            ipr_window.close()
-            return {'FINISHED'}
-        area, _r = main_view3d(context.screen)
-        if area is None:
-            return {'CANCELLED'}
-        if context.window is None or bpy.app.background:
-            ipr_toggle(area.spaces.active)       # no window to open: the viewport itself
-            return {'FINISHED'}
-        if ipr_window.open_window(context, area) is None:
-            if not window_places.deferred():     # opens on a later tick
-                self.report({'ERROR'}, "Could not open a new window")
-            return {'CANCELLED'}
-        return {'FINISHED'}
-
-
-def _ipr_on(space):
-    """The Status Line IPR button looks pressed while the IPR window is open (no window: the viewport's Rendered)."""
-    from . import ipr_window
-    if ipr_window.is_open():
-        return True
-    return bool(space) and bpy.app.background and space.shading.type == 'RENDERED'
-
-
-def ipr_toggle(space):
-    """IPR on = Rendered shading; off = the shading the view had before (Wireframe stays Wireframe, #24)."""
-    from . import panel_menus
-    if space.shading.type == 'RENDERED':
-        panel_menus.leave_rendered(space)
-    else:
-        panel_menus.enter_rendered(space)
+from .. import i18n, safe_reg
+# the split-out parts, also read through this module by other UI and the tests
+from .status_line_buttons import (ALLSET_MT_symmetry, ALLSET_OT_ipr_toggle, ALLSET_OT_light_editor,  # noqa: F401
+                                  ALLSET_OT_render_settings, ALLSET_OT_select_mask, ALLSET_OT_select_mode,
+                                  ALLSET_OT_snap_toggle, OBJECT_MASKS, SNAPS, _KEEP_SNAP, _SNAP_ELEMENTS,
+                                  _SNAP_UNDO_HANDLERS, _carried, _ipr_on, _masks_after_load, _masks_before_load,
+                                  _properties_area, all_view3d_spaces, apply_masks, draw_symmetry,
+                                  draw_tool_symmetry, ipr_toggle, main_view3d, mask_on, restore_snap, session_masks,
+                                  set_mask, snap_on, toggle_snap, view3d_space)
+from .menu_bar_fit import (ALLSET_MT_menu_more, MENU_MORE_UNITS, _menu_set_field, _menus_shown,  # noqa: F401
+                           draw_menu_bar_fit, menu_bar_widths, menu_fit, shown_menus)
 
 
 # --- editor toggles -----------------------------------------------
@@ -442,7 +39,7 @@ EDITORS = (
     # Maya order: Modeling Toolkit first
     ("MODELING_TOOLKIT", "Show or hide the Modeling Toolkit", 'EDITMODE_HLT'),
     ("ATTRIBUTE", "Show or hide the Attribute Editor", 'PROPERTIES'),
-    ("TOOL_SETTINGS", "Show or hide the Tool Settings of the active tool (dock left of the viewport)", 'TOOL_SETTINGS'),
+    ("TOOL_SETTINGS", "Show or hide the Tool Settings of the active tool", 'TOOL_SETTINGS'),
     ("CHANNEL_BOX", "Show or hide the Channel Box / Layer Editor", 'MENU_PANEL'),
 )
 # Status Line toggle -> Maya panel of the tab stack (ui/maya_dock.py)
@@ -450,10 +47,10 @@ DOCK_KINDS = {"MODELING_TOOLKIT": 'MODELING_TOOLKIT', "ATTRIBUTE": 'ATTRIBUTE_ED
 
 
 def editor_shown(screen, editor, docks=None):
-    """``docks``: ``maya_dock.visible_kinds()`` already read for this draw."""
-    if editor == "TOOL_SETTINGS":    # the dock left of the viewport (ui/tool_dock.py)
+    """``docks``: ``maya_dock_roles.visible_kinds()`` already read for this draw."""
+    if editor == "TOOL_SETTINGS":    # the floating window or the dock left of the viewport (ui/tool_dock.py)
         from . import tool_dock
-        return tool_dock.shown(screen)
+        return tool_dock.shown(screen) or tool_dock.shown_anywhere()
     if docks is not None:
         return DOCK_KINDS[editor] in docks
     from . import maya_dock
@@ -477,12 +74,12 @@ class ALLSET_OT_editor_toggle(bpy.types.Operator):
 
     def execute(self, context):
         if self.editor == "TOOL_SETTINGS":
-            # Maya ToggleToolSettings: the dock left of the viewport (ui/tool_dock.py)
+            # Maya ToggleToolSettings: a floating window, or the dock once docked (ui/tool_dock.py)
             from . import tool_dock
             tool_dock.toggle(context, show_only=self.show)
             return {'FINISHED'}
         # Maya Windows > UI Elements toggles: a panel tabbed behind another is raised,
-        # a shown one hidden (ui/maya_dock.py)
+        # a shown one hidden (ui/maya_dock_windows.py)
         from . import maya_dock
         maya_dock.toggle(context, DOCK_KINDS[self.editor], show_only=self.show)
         return {'FINISHED'}
@@ -504,7 +101,7 @@ GROUPS = (
     ("INPUT", "Input line: absolute / relative transform, rename, select by name"),
     ("EDITORS", "Editor toggles"),
 )
-# Groups Maya 2022 shows collapsed on a factory Status Line (only the bar
+# Groups Maya shows collapsed on a new Status Line (only the bar
 # and arrow between selection modes and snaps, after symmetry and after render).
 DEFAULT_COLLAPSED = ("MASKS", "HISTORY", "INPUT")
 _collapsed = set(DEFAULT_COLLAPSED)
@@ -580,8 +177,8 @@ def _field(layout, owner, prop, units):
 
 
 def draw_status_line(layout, context, compact=False):
-    """The Maya Status Line, left to right (Maya 2022:
-    menu set combo, then groups of bar + buttons + collapse arrow, sidebar toggles at the right end). ``compact``
+    """The Maya Status Line, left to right:
+    menu set combo, then groups of bar + buttons + collapse arrow, sidebar toggles at the right end. ``compact``
     (the 3D View tool header of other layouts, which overflows): the input line goes after the editor toggles
    ."""
     from .. import preferences
@@ -654,7 +251,7 @@ def draw_status_line(layout, context, compact=False):
         sub = row.row(align=True)
         sub.emboss = 'NONE'
         sub.menu(ALLSET_MT_symmetry.bl_idname, text="", icon='DOWNARROW_HLT')
-        # Maya's symmetry box is a drop-down (Maya 2022 Status Line): a click on the text opens the list, it is
+        # Maya's symmetry box is a drop-down (Maya Status Line): a click on the text opens the list, it is
         # never a text field (Issue #155: the read-only text property took a text cursor)
         box = row.row(align=True)
         box.ui_units_x = 5
@@ -672,7 +269,7 @@ def draw_status_line(layout, context, compact=False):
         _flat(row, "allset.render", "render")
         _flat(row, ALLSET_OT_ipr_toggle.bl_idname, "ipr", depress=_ipr_on(space))
         _flat(row, ALLSET_OT_render_settings.bl_idname, "render_settings")
-        _flat(row, "allset.hypershade", "hypershade")       # ui/hypershade.py
+        _flat(row, "allset.hypershade", "hypershade")       # ui/hypershade_ops.py
         _grey(row, "render_setup", "Status Line/Render Setup")
         _flat(row, ALLSET_OT_light_editor.bl_idname, "light_editor")
         _grey(row, "pause", "Status Line/Pause Viewport 2.0")
@@ -740,129 +337,6 @@ def redraw_top_bars():
             del _top_bars[key]
 
 
-# --- menu bar overflow (#77) -------------------------------------------------------------------------
-# Maya hides the menus that don't fit behind a » button at the menu bar's right end; the
-# kit's bar ran under the Workspace field instead ("Deform U", GUI shot at UI scale 1.5). Same pattern as the panel
-# toolbar's » (#52, ui/panel_toolbar.py): Blender's header layout can't report where it put an item, so the
-# widths follow its layout rules (toolbar_fit.unit; a ``ui_units_x = k`` sub-row is floor(k U) wide).
-MENU_LEAD_UNITS = 0.4    # the header region's left padding
-LOGO_UNITS = 1.6         # the Blender logo pulldown (icon only)
-MENU_SET_UNITS = 5.5     # the menu set dropdown (= menu_sets.draw_menu_bar)
-MENU_MORE_UNITS = 1.5    # the » button
-MENU_SLACK_UNITS = 0.5   # kept free before the right-hand region
-_menus_shown = {}        # window pointer -> (menu names in bar order, how many the bar shows)
-
-
-def menu_fit(widths, width, fixed, more):
-    """How many leading menus (px ``widths``) the bar shows in ``width`` px after ``fixed`` px; when they don't all
-    fit, the » button (``more`` px) takes its place at the end."""
-    if fixed + sum(widths) <= width:
-        return len(widths)
-    return fit_beside_more(widths, width, fixed, more)
-
-
-def fit_beside_more(widths, width, fixed, more):
-    """How many leading menus fit in ``width`` px next to the » button."""
-    x = fixed + more
-    n = 0
-    for w in widths:
-        if x + w > width:
-            break
-        x += w
-        n += 1
-    return n
-
-
-def _menu_units(context, names):
-    """{menu idname: ``menu_sets.menu_width_units`` of its label} for the menus of ``names``."""
-    out = {}
-    for name in names:
-        idname = menu_sets.menu_idname(name)
-        cls = getattr(bpy.types, idname, None)
-        out[idname] = menu_sets.menu_width_units(cls.bl_label if cls is not None else name, context)
-    return out
-
-
-def menu_bar_widths(context, names, menu_set, units=None):
-    """(px width of each menu of ``names``, fixed px: padding, logo, menu set dropdown, slack, » button).
-    ``units``: ``_menu_units(context, names)`` already worked out."""
-    from .toolbar_fit import unit
-    system = context.preferences.system
-    u = unit(system.ui_scale or 1.0, system.pixel_size)
-    if units is None:
-        units = _menu_units(context, names)
-    widths = [int(units[menu_sets.menu_idname(name)] * u) for name in names]
-    fixed = int((MENU_LEAD_UNITS + LOGO_UNITS + MENU_SLACK_UNITS) * u) + (int(MENU_SET_UNITS * u) if menu_set else 0)
-    return widths, fixed, int(MENU_MORE_UNITS * u)
-
-
-def shown_menus(window):
-    """(menu names, how many the menu bar of ``window`` showed when it was last drawn)."""
-    return _menus_shown.get(window.as_pointer(), ((), 0)) if window is not None else ((), 0)
-
-
-def _menu_set_field(layout, prefs):
-    sub = layout.row()
-    sub.ui_units_x = MENU_SET_UNITS
-    sub.prop(prefs, "menu_set", text="")
-
-
-def draw_menu_bar_fit(layout, context, menu_set=True):
-    """``menu_sets.draw_menu_bar`` when every menu fits the region, else the menus that fit and Maya's » overflow."""
-    from .. import preferences
-    prefs = preferences.get(context)
-    names = menu_sets.menus_for_set(prefs.menu_set)
-    region = getattr(context, "region", None)
-    units = _menu_units(context, names)     # once: the widths below and the menus drawn use them
-    widths, fixed, more = menu_bar_widths(context, names, menu_set, units)
-    width = region.width if region is not None and region.width > 1 else None
-    # other add-ons' top-bar menus follow the Maya menus when there is room for them, else they wait behind »
-    funcs = menu_sets.addon_menu_funcs(context)
-    reserve = menu_sets.addon_menus_width(context, funcs) if funcs else 0
-    inline = width is None or fixed + sum(widths) + reserve <= width
-    n = len(names) if inline else menu_fit(widths, width, fixed, more)
-    if not inline and n >= len(names):     # the Maya menus fit: only the add-on menus go behind »
-        n = fit_beside_more(widths, width, fixed, more)
-    if context.window is not None:
-        _menus_shown[context.window.as_pointer()] = (tuple(names), n)
-    if inline:
-        menu_sets.draw_menu_bar(layout, context, menu_set=menu_set, units=units)
-        return
-    layout.menu("TOPBAR_MT_blender", text="", icon='BLENDER')
-    common = len(menu_sets._SET_MENUS[menu_sets.COMMON_SET])    # the menu set dropdown follows these
-    for i, name in enumerate(names[:n]):
-        idname = menu_sets.menu_idname(name)
-        sub = layout.row(align=True)
-        sub.ui_units_x = units[idname]
-        sub.menu(idname)
-        if menu_set and i == common - 1:
-            _menu_set_field(layout, prefs)
-    if menu_set and n < common:
-        _menu_set_field(layout, prefs)
-    sub = layout.row(align=True)
-    sub.ui_units_x = MENU_MORE_UNITS
-    icon = status_icons.icon("pt_more") if "pt_more" in status_icons.EXTRA else 0
-    if icon:
-        sub.menu(ALLSET_MT_menu_more.bl_idname, text="", icon_value=icon)
-    else:
-        sub.menu(ALLSET_MT_menu_more.bl_idname, text="\u00bb")
-
-
-class ALLSET_MT_menu_more(bpy.types.Menu):
-    """More Maya menus: the ones that don't fit the menu bar"""
-    bl_idname = "ALLSET_MT_menu_more"
-    bl_label = "More Menus"
-
-    def draw(self, context):
-        names, n = shown_menus(context.window)
-        for name in names[n:]:
-            self.layout.menu(menu_sets.menu_idname(name))
-        if menu_sets.addon_menu_funcs(context):     # other add-ons' top-bar menus, at the end
-            if n < len(names):
-                self.layout.separator()
-            menu_sets.draw_addon_menus(self.layout, context)
-
-
 def draw_left(self, context):
     if context.window is not None and context.area is not None:
         _top_bars[context.window.as_pointer()] = context.area
@@ -915,8 +389,9 @@ def status_line_shown(context):
     screen = context.screen
     if screen is None:
         return False
-    if strip_area(screen) is not None:
-        return True
+    strip = strip_area(screen)
+    if strip is not None:
+        return strip.spaces.active.show_region_header      # hidden: Status Line off (status_line_row)
     from .. import preferences
     try:
         if not preferences.get(context).show_status_line:
@@ -951,7 +426,10 @@ def _set_workspace(self, value):
 
 def draw_tool_header(self, context):
     """Status Line at the start of the main 3D View's tool header row."""
-    from .. import preferences
+    from .. import preferences, switch
+    if not switch._registered[0]:
+        # left in the header's draw list by another add-on's own header swap after Maya mode went off (#423)
+        return
     try:
         if not preferences.get(context).show_status_line:
             return
@@ -968,6 +446,7 @@ def draw_tool_header(self, context):
     self.layout.separator(type='LINE')
 
 
+@own_draw.kit_draw("TOPBAR_HT_upper_bar")
 def draw_upper_bar(self, context):
     """The top bar's own draw while the kit is on (as space_topbar.py TOPBAR_HT_upper_bar.draw, with the kit's
     left / right): Blender's ``draw_left`` / ``draw_right`` methods stay untouched."""
@@ -1004,7 +483,7 @@ def register():
         items=_workspaces, get=_get_workspace, set=_set_workspace, options={'SKIP_SAVE'})
     patch_topbar()
     bpy.types.VIEW3D_HT_tool_header.prepend(draw_tool_header)
-    bpy.types.VIEW3D_PT_active_tool.append(draw_tool_symmetry)
+    safe_reg.blender_class("VIEW3D_PT_active_tool").append(draw_tool_symmetry)
     bpy.app.handlers.load_pre.append(_masks_before_load)
     bpy.app.handlers.load_post.append(_masks_after_load)
     for name, fn in _SNAP_UNDO_HANDLERS:
@@ -1024,7 +503,7 @@ def unregister():
         if fn in handlers:
             handlers.remove(fn)
     _carried.clear()
-    bpy.types.VIEW3D_PT_active_tool.remove(draw_tool_symmetry)
+    safe_reg.blender_class("VIEW3D_PT_active_tool").remove(draw_tool_symmetry)
     bpy.types.VIEW3D_HT_tool_header.remove(draw_tool_header)
     unpatch_topbar()
     del bpy.types.WindowManager.allset_workspace

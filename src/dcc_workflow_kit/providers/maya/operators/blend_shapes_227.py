@@ -31,6 +31,8 @@ drops records whose keys went away.
 import bpy
 from bpy.props import BoolProperty, EnumProperty, FloatProperty, StringProperty
 
+from .. import update_summary
+
 INB = "allset_inbetweens"
 COMB = "allset_combinations"
 METHODS = (('MULTIPLY', "Multiplication", "Product of the input weights (the default, like Maya)"),
@@ -449,7 +451,7 @@ def _tick():
 
 @bpy.app.handlers.persistent
 def _on_depsgraph(scene, depsgraph):
-    for u in depsgraph.updates:
+    for u in update_summary.updates(depsgraph, _on_depsgraph):
         idb = getattr(u.id, "original", u.id)
         key = None
         if isinstance(idb, bpy.types.Key):

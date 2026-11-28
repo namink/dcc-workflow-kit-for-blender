@@ -13,9 +13,15 @@ gives a new window exactly the size and place of the area it copies; Python can'
   remembered);
 - opening that kind again carves an area of the remembered size and place out of the largest area of the window
   the command runs in (one split per tick: Blender lays areas out only between ticks), runs the opening command
-  again, which copies that piece into the new window, and closes the pieces, so the main layout is as it was. A remembered rect is first fitted inside that area: the kit can only place a window over
+  again, which copies that piece into the new window, and reverses the splits, so the main layout is as it was. A remembered rect is first fitted inside that area: the kit can only place a window over
   the window it opens from, which also brings a window that was on another monitor or off the
   screen back into view.
+- the pieces split off become an Info editor at once (``PIECE``): a piece joined back is never a 3D View (a gizmo
+  tooltip waiting on a freed 3D View region crashed Blender). In the four view a window that fits in the panel it is
+  opened from is carved out of that panel alone (the other panels don't change; a Space tap waits until the panel is
+  whole again, ``four_view.busy``); a bigger one (its remembered size) is carved out of the whole view folded into one
+  panel for a moment (``four_view.fold`` / ``unfold``), so it keeps its size. Either way the panels keep their
+  proportions.
 
 ``open_window(context, area, kind)`` in ``operators/menu_extras.py`` is the one place every kit window opens.
 """
@@ -153,9 +159,10 @@ def carved(got, rect, slack=CARVE_SLACK):
     return all(abs(g - t) <= slack for g, t in zip(got, rect))
 
 
-def target_in_window(kind, window, area):
-    """The remembered rect of ``kind`` in ``window``-relative px, fitted inside ``area``; None = no place."""
-    rect = place(kind)
+def target_in_window(kind, window, area, default=None):
+    """The remembered rect of ``kind`` (else ``default``, screen px) in ``window``-relative px, fitted inside ``area``;
+    None = no place."""
+    rect = place(kind) or default
     if rect is None:
         return None
     rel = (rect[0] - window.x, rect[1] - window.y, rect[2], rect[3])
@@ -168,6 +175,13 @@ def target_in_window(kind, window, area):
 
 def _rect(a):
     return (a.x, a.y, a.width, a.height)
+
+
+class _Rect:
+    """An area's rect without the area (``target_in_window`` reads x / y / width / height)."""
+
+    def __init__(self, x, y, width, height):
+        self.x, self.y, self.width, self.height = x, y, width, height
 
 
 def _contains(a, px, py):
@@ -225,54 +239,105 @@ def calling_operator():
 
 
 class _Carve:
-    """Splits ``area`` one cut per tick (Blender lays the areas out only between ticks) until one piece covers the
-    target rect, then runs the opening operator again, which copies that piece (``open_at``), and closes the pieces
-    afterwards."""
+    """Splits ``area`` until one piece covers the target rect — every cut in one tick, each piece's rect worked out
+    from the cut (Blender lays areas out only between ticks: an area split in this call keeps its old rect, and the
+    new area a second cut makes has none yet) — then, on the next tick, runs the opening operator again, which copies
+    that piece (``open_at``), and joins the pieces back in the same tick. ``op_call`` is (operator idname, keywords), or a function that gets the new window (None when it
+    could not open) instead of the operator running again. ``piece_type``: the editor each area split off becomes at
+    once. ``fold``: ``area`` is a panel of the four view, which is folded into one panel first (the rect is fitted
+    into that panel again, ``default`` as in ``target_in_window``) and unfolded after the pieces are joined."""
 
-    def __init__(self, kind, window, area, rect, op_call):
-        self.kind, self.rect, self.call = kind, rect, op_call
+    def __init__(self, kind, window, area, rect, op_call, piece_type=None, fold=False, default=None, busy=False):
+        self.kind, self.rect, self.call, self.piece_type = kind, rect, op_call, piece_type or PIECE
+        self.fold, self.default, self.busy, self.known = (1 if fold else 0), default, busy, None
         self.win, self.source = window.as_pointer(), area.as_pointer()
-        self.piece, self.made, self.last = area.as_pointer(), [], None
+        self.piece, self.made = area.as_pointer(), []
+        self.joins = []
         self.todo = cuts(rect, _rect(area))
         self.wait = 0
 
     def _window(self):
         return live_refs.window(self.win)
 
+    def _fold(self, window):
+        """The four view into one panel first: no panel of it is split. False when it couldn't fold."""
+        from . import four_view
+        with bpy.context.temp_override(window=window):
+            kept = four_view.fold(bpy.context, window, keep=_area(window, self.source))
+        if kept is None:
+            self.fold = 0
+            return False
+        self.fold = 3
+        self.source = self.piece = kept.as_pointer()
+        # the joined panel keeps its old rect until the screen is laid out: its place is the recorded view
+        whole = four_view.state(window.screen).get("rect")
+        self.known = (whole[0], whole[1], whole[2] - whole[0], whole[3] - whole[1]) if whole else _rect(kept)
+        rect = target_in_window(self.kind, window, _Rect(*self.known), self.default)
+        if rect is None:
+            return False
+        self.rect, self.todo = rect, cuts(rect, self.known)
+        return True
+
+    def start(self):
+        """The fold and the cuts in the opening call itself (the screen shows them once); the copy comes on the next
+        tick (``tick``)."""
+        window = self._window()
+        if window is None or (self.fold == 1 and not self._fold(window)):
+            return
+        piece = _area(window, self.piece)
+        if piece is not None and self.todo:
+            self._cut_all(window, piece)
+
     def tick(self):
         window = self._window()
         if window is None:
             _pending.pop(self.kind, None)
             return None
+        if self.fold == 1 and not self._fold(window):
+            return self.finish(window, ok=False)
         piece = _area(window, self.piece)
         if piece is None:
             return self.finish(window, ok=False)
-        if self.last is not None:
-            new = _area(window, self.last)
-            if new is not None and new.width == 0 and self.wait < 20:     # not laid out yet
-                self.wait += 1
-                return TICK_FAST
-            cx, cy = self.rect[0] + self.rect[2] / 2, self.rect[1] + self.rect[3] / 2
-            piece = next((a for a in (piece, new) if a is not None and _contains(a, cx, cy)), piece)
-            self.piece, self.last = piece.as_pointer(), None
+        if self.todo:
+            self._cut_all(window, piece)
+            return TICK_FAST                   # laid out by the next tick: copy the piece then
+        if piece.width == 0 and self.wait < 20:             # not laid out yet
+            self.wait += 1
+            return TICK_FAST
+        got = _rect(piece)
+        ok = carved(got, self.rect)
+        return self.finish(window, ok)
+
+    def _cut_all(self, window, piece):
+        """Every cut now. The rects come from the cuts: [x, y, w, h] per piece pointer."""
+        geo = {piece.as_pointer(): list(self.known if self.known is not None else _rect(piece))}
+        self.known = None
+        cx, cy = self.rect[0] + self.rect[2] / 2, self.rect[1] + self.rect[3] / 2
         while self.todo:
             direction, at = self.todo.pop(0)
-            span = (piece.x, piece.width) if direction == 'VERTICAL' else (piece.y, piece.height)
-            factor = (at - span[0]) / span[1] if span[1] else 0
+            px, py, pw, ph = geo[piece.as_pointer()]
+            vertical = direction == 'VERTICAL'
+            lo, size = (px, pw) if vertical else (py, ph)
+            factor = (at - lo) / size if size else 0
             if not 0.02 < factor < 0.98:
                 continue
             before = {a.as_pointer() for a in window.screen.areas}
             with bpy.context.temp_override(window=window, screen=window.screen, area=piece):
                 bpy.ops.screen.area_split(direction=direction, factor=factor)
-            new = [a for a in window.screen.areas if a.as_pointer() not in before]
-            if new:
-                self.last = new[0].as_pointer()
-                self.made.append(self.last)
-                self.wait = 0
-            return TICK_FAST
-        got = _rect(piece)
-        ok = carved(got, self.rect)
-        return self.finish(window, ok)
+            new = next((a for a in window.screen.areas if a.as_pointer() not in before), None)
+            if new is None:
+                continue
+            new.ui_type = self.piece_type
+            self.made.append(new.as_pointer())
+            self.joins.append((piece.as_pointer(), new.as_pointer()))
+            # the smaller part is the new area: left / bottom below the middle, right / top above it
+            first = [px, py, at - px, ph] if vertical else [px, py, pw, at - py]
+            second = [at, py, px + pw - at, ph] if vertical else [px, at, pw, py + ph - at]
+            geo[new.as_pointer()], geo[piece.as_pointer()] = (first, second) if factor < 0.5 else (second, first)
+            inside = geo[new.as_pointer()]
+            if inside[0] <= cx < inside[0] + inside[2] and inside[1] <= cy < inside[1] + inside[3]:
+                piece = new
+        self.piece = piece.as_pointer()
 
     def finish(self, window, ok):
         _pending.pop(self.kind, None)
@@ -284,42 +349,76 @@ class _Carve:
         else:
             _ready[self.kind] = self.piece if ok else None
         source = _area(window, self.source) or max(window.screen.areas, key=lambda a: a.width * a.height)
-        idname, kwargs = self.call
-        module, _sep, name = idname.partition("_OT_")
-        op = getattr(getattr(bpy.ops, module.lower()), name)
         try:
-            with bpy.context.temp_override(window=window, screen=window.screen, area=source):
-                try:
-                    op('EXEC_DEFAULT', **kwargs)
-                except RuntimeError:
-                    op('INVOKE_DEFAULT', **kwargs)
-        except (RuntimeError, TypeError) as ex:
+            if callable(self.call):
+                with bpy.context.temp_override(window=window, screen=window.screen, area=source):
+                    new = open_at(bpy.context, source, self.kind)
+                self.call(new)
+            else:
+                idname, kwargs = self.call
+                module, _sep, name = idname.partition("_OT_")
+                op = getattr(getattr(bpy.ops, module.lower()), name)
+                with bpy.context.temp_override(window=window, screen=window.screen, area=source):
+                    try:
+                        op('EXEC_DEFAULT', **kwargs)
+                    except RuntimeError:
+                        op('INVOKE_DEFAULT', **kwargs)
+        except (RuntimeError, TypeError, ReferenceError) as ex:
             print("Maya Workflow Kit: reopening a window failed:", ex)
         finally:
             _ready.pop(self.kind, None)
-        made = list(self.made)
-        ptr = self.win
-        bpy.app.timers.register(lambda: _close_later(ptr, made), first_interval=TICK_FAST)
+        # the pieces are laid out: join them back now (the copy is made), and bring the four view back
+        _close_later(self.win, list(self.joins), self.source if self.fold else 0, self.busy)
         return None
 
 
-def _close_later(win_ptr, made):
+def _close_later(win_ptr, joins, folded=0, busy=False):
     window = live_refs.window(win_ptr)
     if window is None:
         return None
-    for ptr in reversed(made):
-        a = _area(window, ptr)
-        if a is None:
-            continue
-        with bpy.context.temp_override(window=window, screen=window.screen, area=a):
-            try:
-                bpy.ops.screen.area_close()
-            except RuntimeError as ex:
-                print("Maya Workflow Kit: area close failed:", ex)
+    from . import four_view
+    try:
+        _join_back(window, joins)
+    finally:
+        if folded:                       # the four view comes back in this call, once the pieces are joined
+            _unfold_now(window, folded)
+        elif busy:
+            four_view.release_when_whole(window)
     return None
 
 
+def _unfold_now(window, panel_ptr):
+    from . import four_view
+    panel = _area(window, panel_ptr)
+    whole = four_view.state(window.screen).get("rect")
+    try:
+        with bpy.context.temp_override(window=window):
+            four_view.unfold(bpy.context, window, panel, whole)
+    except (ReferenceError, RuntimeError):
+        four_view._folded.discard(window.as_pointer())
+
+
+def _join_back(window, joins):
+    # Reverse each split: area_close can give a piece to the Outliner or dock instead of the viewport.
+    for keep_ptr, remove_ptr in reversed(joins):
+        keep, remove = _area(window, keep_ptr), _area(window, remove_ptr)
+        if keep is None or remove is None:
+            return
+        with bpy.context.temp_override(window=window, screen=window.screen):
+            try:
+                outcome = bpy.ops.screen.area_join(
+                    source_xy=(keep.x + keep.width // 2, keep.y + keep.height // 2),
+                    target_xy=(remove.x + remove.width // 2, remove.y + remove.height // 2))
+                if outcome != {'FINISHED'}:
+                    print('Maya Workflow Kit: window split join cancelled')
+                    return
+            except RuntimeError as ex:
+                print("Maya Workflow Kit: window split join failed:", ex)
+                return
+
+
 TICK_FAST = 0.02
+PIECE = 'INFO'           # what a carved piece becomes at once (never a 3D View, see the module docstring)
 STRICT = set()           # kinds that open nothing rather than a copy of the whole calling area (set by their modules)
 _pending = {}            # kind -> _Carve running
 _ready = {}              # kind -> pointer of the carved piece while the operator runs again (None = plain)
@@ -337,10 +436,12 @@ def reopening(kind):
     return kind in _ready
 
 
-def open_at(context, area, kind):
-    """A new window copying ``area``: at the remembered place of ``kind`` when there is one. When that place
-    first has to be carved out of ``area``, None is returned (``deferred()`` True) and the calling kit operator
-    runs again once the piece is ready."""
+def open_at(context, area, kind, default=None, then=None, piece_type=None):
+    """A new window copying ``area``: at the remembered place of ``kind`` (else at ``default``, screen px) when there
+    is one. When that place first has to be carved out of ``area``, None is returned (``deferred()`` True) and the
+    calling kit operator runs again once the piece is ready — or, given ``then``, ``then(new window)`` is called
+    instead. ``piece_type``: the editor the pieces split off become (default ``PIECE``). When ``area`` is a panel of
+    the four view, the place is carved out of the whole view folded into one panel (``_Carve`` ``fold``)."""
     _deferred[0] = False
     window = context.window
     if kind in _ready:                         # the second run: copy the carved piece
@@ -350,11 +451,25 @@ def open_at(context, area, kind):
             return None
         new = dupli(context, window, piece or area)
     else:
-        rect = target_in_window(kind, window, area) if kind and not bpy.app.background else None
-        op = calling_operator() if rect is not None and rect != _rect(area) else None
-        if op is not None and kind not in _pending:
-            carve = _pending[kind] = _Carve(kind, window, area, rect, (op.bl_idname, op.as_keywords()))
-            bpy.app.timers.register(carve.tick, first_interval=0.0)
+        rect = target_in_window(kind, window, area, default) if kind and not bpy.app.background else None
+        call = None
+        if rect is not None and rect != _rect(area):
+            if then is not None:
+                call = then
+            else:
+                op = calling_operator()
+                call = (op.bl_idname, op.as_keywords()) if op is not None else None
+        if call is not None and kind not in _pending:
+            from . import four_view
+            pane = four_view.pane_of(window.screen, area)
+            want = place(kind) or default
+            fits = want is None or (abs(rect[2] - want[2]) <= CARVE_SLACK and abs(rect[3] - want[3]) <= CARVE_SLACK)
+            if pane and fits:
+                four_view._folded.add(window.as_pointer())       # the panel is cut for a moment: Space waits
+            carve = _pending[kind] = _Carve(kind, window, area, rect, call, piece_type, pane and not fits, default,
+                                            busy=pane and fits)
+            carve.start()
+            bpy.app.timers.register(carve.tick, first_interval=TICK_FAST)
             _deferred[0] = True
             return None
         if kind in _pending:
@@ -373,6 +488,13 @@ def track(window, kind):
     remember(kind, (window.x, window.y, window.width, window.height))
     if not bpy.app.timers.is_registered(_tick):
         bpy.app.timers.register(_tick, first_interval=TICK, persistent=True)
+
+
+def handed_on(old, new):
+    """Window ``new`` replaces the kit window ``old`` (the same panel reopened): it is tracked under ``old``'s name."""
+    kind = _tracked.get(old.as_pointer())
+    if kind is not None:
+        track(new, kind)
 
 
 def settled(ptr, rect):

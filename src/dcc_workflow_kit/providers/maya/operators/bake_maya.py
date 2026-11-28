@@ -17,7 +17,7 @@ Kit translation: Blender's ``nla.bake`` (visual keying, current action, constrai
 Maya rules run on the baked F-curves. Rule 5 = **mute** every non-IK constraint on a baked object / pose bone (Blender
 has no disconnect; the constraint stays and shows as off) and every driver on a baked channel (a driver would win over
 the baked curve; Maya's bake replaces any input connection). Limit constraints stay: Maya's transform
-limits are attributes, not constraint nodes. Rule 6 = an IK constraint (kit IK handle, operators/skin.py)
+limits are attributes, not constraint nodes. Rule 6 = an IK constraint (kit IK handle, operators/ik_handle.py)
 whose chain holds a baked bone and whose target is not baked gets influence 0 (ikBlend = influence).
 Visibility (rule 1) is not baked: Maya visibility = ``hide_viewport``, which no constraint drives.
 """
@@ -81,6 +81,22 @@ def _trim(fcurve, start, end, step, keep_unbaked):
     return len(drop)
 
 
+def _default_tangents(fcurve, start, end):
+    """Maya's baked keys get the default in / out tangents (Auto unless changed), like any new key; Blender's bake
+    writes linear keys."""
+    from . import graph_key_menu, maya_tangents
+    hit = False
+    for kp in fcurve.keyframe_points:
+        if start - _EPS <= kp.co[0] <= end + _EPS:
+            kp.interpolation = 'BEZIER'
+            kp.handle_left_type = kp.handle_right_type = maya_tangents.AUTO
+            graph_key_menu.apply_default(fcurve, kp)
+            hit = True
+    if hit:
+        fcurve.update()
+        maya_tangents.apply(fcurve)
+
+
 def _ik_chain(pb, con):
     """Pose bones an IK constraint on ``pb`` moves (chain_count 0 = up to the root)."""
     chain, b = [], pb
@@ -102,7 +118,7 @@ def bake(context, objects=None, bones=None, start=1, end=10, step=1, keep_unbake
     layered = [idb for idb in ids if anim_layers.has_layers(idb)]
     for idb in layered:
         # Issue #143: bake onto BaseAnimation (the active action is the shown layer at influence 0,
-        # anim_layers.show) — then solved below so base + layers give the baked result (Maya 2026: the pose doesn't
+        # anim_layer_tracks.show) — then solved below so base + layers give the baked result (Maya 2026: the pose doesn't
         # change and the layers stay)
         anim_layers.show_base(idb)
     before = {}
@@ -132,6 +148,7 @@ def bake(context, objects=None, bones=None, start=1, end=10, step=1, keep_unbake
                     coll.remove(fc)
                 continue
             _trim(fc, start, end, step, keep_unbaked)
+            _default_tangents(fc, start, end)
     # rule 5: the constraint (and any driver) no longer drives the baked channels
     muted = drivers = iks = 0
     for o in owners:

@@ -1,6 +1,6 @@
 {
   "repository": "https://github.com/neom315/blender-max",
-  "tag": "v0.8.3",
-  "release": "https://github.com/neom315/blender-max/releases/tag/v0.8.3",
-  "archive_sha256": "f934bc33c0e90837a4ed951846d134f3171234f676bfa2450929cd258767b0ad"
+  "tag": "0.8.5",
+  "release": "https://github.com/neom315/blender-max/blob/main/blender_max-0.8.5.zip",
+  "archive_sha256": "e4742fa47cf7ee5bda282323421a7c0c929ba9c29b26ef11fd5c70acd275bf66"
 }

@@ -16,7 +16,7 @@ from mathutils import Euler, Matrix, Vector
 from mathutils.geometry import intersect_line_plane
 
 from . import extrude, hold, pivot, smart_geometry, units
-from .. import undo_steps
+from .. import compat, undo_steps
 
 TOOL = "allset.smart_extrude_tool"
 DRAG = None
@@ -73,8 +73,7 @@ def replace(ob, source, selection=None):
     try:
         source.to_mesh(mesh)
         bm = bmesh.from_edit_mesh(ob.data)
-        bm.clear()
-        bm.from_mesh(mesh)
+        compat.refill_bmesh(bm, mesh)
         if selection is not None:
             history, active_face = selection
             seqs = {'VERT': bm.verts, 'EDGE': bm.edges, 'FACE': bm.faces}

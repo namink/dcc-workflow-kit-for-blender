@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Maya Graph Editor View / Show modes Blender lacks (#96).
 
-Maya 2022's Graph Editor View menu (with its factory
+Maya's Graph Editor View menu (with its default
 states) has check / radio items Blender's Graph Editor has no setting for. The kit adds them as add-on
 preferences (``preferences.graph_auto_frame`` / ``graph_auto_frame_time`` / ``graph_curve_names``; the kit writes no
 Blender preference, store review #40) mapped in ``editor_menu_map``:
@@ -10,9 +10,9 @@ Blender preference, store review #40) mapped in ``editor_menu_map``:
   / pose-bone selection; when it changes, every Graph Editor in F-Curve mode refits its value axis to every curve it
   draws with Maya's Frame All rule (``operators/graph_frame.py``: 25 % value margins) and keeps its time range
   (Blender lists the selected objects' curves with Only Show Selected, so that frames them).
-* **Auto Frame Time** (factory off, "... reframe ... along the time axis"): the time axis too, with Maya-style 10 % time
+* **Auto Frame Time** (off by default, "... reframe ... along the time axis"): the time axis too, with Maya-style 10 % time
   margins (alone: only the time axis). A normalised view gets Blender's View All.
-* **Curve Name** Always / Never / Active Only (factory Never): a WINDOW POST_PIXEL handler writes each visible
+* **Curve Name** Always / Never / Active Only (default Never): a WINDOW POST_PIXEL handler writes each visible
   curve's Maya plug name ("pCube1.translateX") in the curve colour just right of its last key (clamped into the
   view), at the curve's stored value — the view's value axis is the stored value. Normalized views
   (``use_normalization``) are skipped: Blender's normalisation factor isn't exposed.
@@ -36,7 +36,7 @@ LABEL_DY = 4.0                    # baseline px above the curve (x UI scale)
 # Show > Objects > Clear Below turns these type filters back on (the ones the Show > Objects items map to)
 OBJECT_FILTERS = ("show_meshes", "show_curves", "show_cache_files", "show_cameras", "show_armatures")
 
-# ... and the kit's own Show > Objects items (WindowManager flags, ui/editor_chrome.py) off
+# ... and the kit's own Show > Objects items (WindowManager flags, ui/graph_list.py) off
 KIT_OBJECT_FILTERS = ("allset_show_ik_handles", "allset_show_sets", "allset_show_characters")
 
 _state = {"sig": None}

@@ -32,6 +32,7 @@ CENTER = 0.1            # half size of the centre square / box
 
 OPS = {'TRANSLATE': "transform.translate", 'ROTATE': "transform.rotate", 'RESIZE': "transform.resize"}
 AXES = {'U': (True, False, False), 'V': (False, True, False), 'UV': (False, False, False)}
+LAST = {}               # region pointer -> (x, y) region pixels of the centre last drawn (tests read it)
 
 
 # --- selection --------------------------------------------------------------------------------------------------
@@ -39,7 +40,10 @@ AXES = {'U': (True, False, False), 'V': (False, True, False), 'UV': (False, Fals
 def _picked_loops(a, bm, uv, shown, sync, ts):
     """Per loop: its UV is selected (the UVs a UV transform moves)."""
     if not sync or getattr(bm, "uv_select_sync_valid", False):
-        return a.uv_sel(bm, uv, shown)      # UV Sync on keeps its own UV selection while that is valid
+        # UV Sync on keeps its own UV selection while that is valid. A UV pick changes no mesh data, so the shared
+        # arrays outlive it: read again when the UV Editor says the selection changed (#579)
+        from ..operators import uv_arrays
+        return a.uv_sel(bm, uv, shown, epoch=uv_arrays.selection_epoch())
     vert, _edge, face = ts.mesh_select_mode
     if face and not vert:
         return a.face_sel[a.corner_face]    # face mode: the selected faces' UVs
@@ -205,6 +209,11 @@ class ALLSET_GGT_uv_xform(GizmoGroup):
         self.kit_built = None
         self.kit_handles = []
 
+    def refresh(self, context):
+        # the UV Editor refreshes its gizmos on a selection change: this group may come before the watcher below
+        from ..operators import uv_arrays
+        uv_arrays.selection_changed()
+
     def _build(self, kind):
         from . import manipulator
         for gz in self.kit_handles:
@@ -243,8 +252,11 @@ class ALLSET_GGT_uv_xform(GizmoGroup):
         # so they hide while it runs and come back at the new centre.
         bounds = None if uv_arrays.editing_now(context.window_manager) else selected_uv_bounds(context)
         hide = bounds is None
-        if not hide:
+        if hide:
+            LAST.pop(context.region.as_pointer(), None)
+        else:
             cx, cy = center_px(context, bounds)
+            LAST[context.region.as_pointer()] = (cx, cy)
             length = length_px(context)
             m = Matrix.Translation((cx, cy, 0.0)) @ Matrix.Scale(length, 4)
         for gz in self.kit_handles:
@@ -256,12 +268,43 @@ class ALLSET_GGT_uv_xform(GizmoGroup):
             gz.matrix_basis = m
 
 
-classes = (ALLSET_GT_uv_handle, ALLSET_GGT_uv_xform)
+def _uv_editor_edit(context):
+    space = context.space_data
+    return (space is not None and space.type == 'IMAGE_EDITOR' and space.mode == 'UV'
+            and context.mode == 'EDIT_MESH')
+
+
+# No gizmos: Blender refreshes the UV Editor's gizmo groups when it is told the UV selection changed (and on a few
+# other changes), so ``refresh`` is the kit's "the UV selection may have changed" signal (#579): the manipulator and
+# the soft select colours read the UV selection again only then.
+class ALLSET_GGT_uv_select_watch(GizmoGroup):
+    bl_idname = "ALLSET_GGT_uv_select_watch"
+    bl_label = "UV Selection Watch"
+    bl_space_type = 'IMAGE_EDITOR'
+    bl_region_type = 'WINDOW'
+    bl_options = {'PERSISTENT'}
+
+    @classmethod
+    def poll(cls, context):
+        return _uv_editor_edit(context)
+
+    def setup(self, context):
+        pass
+
+    def refresh(self, context):
+        from ..operators import uv_arrays
+        uv_arrays.selection_changed()
+        from . import uv_soft_overlay
+        uv_soft_overlay.selection_changed()
+
+
+classes = (ALLSET_GT_uv_handle, ALLSET_GGT_uv_xform, ALLSET_GGT_uv_select_watch)
 
 
 # --- tool widget swap ---------------------------------------------------------------------------------------------
 
-_saved = {}
+_saved = {}           # 'UV' -> [(swapped ToolDef, Blender's ToolDef)] while the kit handles are on
+_registered = [False]
 
 
 def _panel():
@@ -269,46 +312,64 @@ def _panel():
     return IMAGE_PT_tools_active
 
 
-def _swap_items(items):
-    out = []
-    for it in items:
-        if isinstance(it, tuple) and not hasattr(it, "idname"):
-            out.append(tuple(_swap_items(it)))
-        elif getattr(it, "idname", None) in TOOLS and getattr(it, "widget", None) in BLENDER_WIDGETS:
-            out.append(it._replace(widget=GROUP))
-        else:
-            out.append(it)
-    return out
+def _is_group(it):
+    return isinstance(it, tuple) and not hasattr(it, "idname")
 
 
-def _original_widget(idname):
-    for it in _flat(_saved.get('UV', ())):
-        if getattr(it, "idname", None) == idname:
-            return it.widget
-    return None
+def _swap(it, pairs):
+    if getattr(it, "idname", None) in TOOLS and getattr(it, "widget", None) in BLENDER_WIDGETS:
+        new = it._replace(widget=GROUP)
+        pairs.append((new, it))
+        return new
+    return it
 
 
 def _flat(items):
     for it in items:
-        if isinstance(it, tuple) and not hasattr(it, "idname"):
+        if _is_group(it):
             yield from _flat(it)
         elif it is not None and hasattr(it, "idname"):
             yield it
 
 
+def _original_widget(idname):
+    for _new, old in _saved.get('UV', ()):
+        if old.idname == idname:
+            return old.widget
+    return None
+
+
 def patch_tools():
-    cls = _panel()
+    """The Move / Rotate / Scale ToolDefs of the UV toolbar swapped for copies with the kit's handles, in place: the
+    list itself stays the one Blender and ``bpy.utils.register_tool`` / ``unregister_tool`` use, so tools other
+    modules add or remove meanwhile (the kit's UV brushes) stay where they are."""
     if 'UV' in _saved:
         return
-    items = cls._tools['UV']
-    _saved['UV'] = items
-    cls._tools['UV'] = type(items)(_swap_items(items))
+    items = _panel()._tools['UV']
+    pairs = []
+    for i, it in enumerate(items):
+        if _is_group(it):
+            group = tuple(_swap(sub, pairs) for sub in it)
+            if group != it:
+                items[i] = group
+        else:
+            items[i] = _swap(it, pairs)
+    _saved['UV'] = pairs
 
 
 def unpatch_tools():
-    cls = _panel()
-    if 'UV' in _saved:
-        cls._tools['UV'] = _saved.pop('UV')
+    """Blender's own ToolDefs back in place of the swapped ones."""
+    pairs = _saved.pop('UV', None)
+    if not pairs:
+        return
+    back = {id(new): old for new, old in pairs}
+    items = _panel()._tools['UV']
+    for i, it in enumerate(items):
+        if _is_group(it):
+            if any(id(sub) in back for sub in it):
+                items[i] = tuple(back.get(id(sub), sub) for sub in it)
+        elif id(it) in back:
+            items[i] = back[id(it)]
 
 
 def ensure_tools(patched=True):
@@ -363,7 +424,10 @@ def wanted():
 
 
 def follow_preference():
-    """Give the UV tools the kit handles or Blender's gizmos, as the preference says."""
+    """Give the UV tools the kit handles or Blender's gizmos, as the preference says (only while Maya mode is on:
+    in Blender mode Blender's UV tools keep their own gizmos)."""
+    if not _registered[0]:
+        return
     if wanted():
         patch_tools()
     else:
@@ -382,12 +446,14 @@ def _ensure_timer():
 def register():
     for cls in classes:
         bpy.utils.register_class(cls)
+    _registered[0] = True
     if wanted():
         patch_tools()
     bpy.app.timers.register(_ensure_timer, first_interval=0.1, persistent=True)
 
 
 def unregister():
+    _registered[0] = False
     if bpy.app.timers.is_registered(_ensure_timer):
         bpy.app.timers.unregister(_ensure_timer)
     unpatch_tools()

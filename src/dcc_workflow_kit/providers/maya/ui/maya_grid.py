@@ -28,6 +28,10 @@ import time
 
 import bpy
 
+# the depth pass of Grid Behind Surfaces (re-exported: tests and handlers read them here)
+from .maya_grid_depth import (_DEPTH_HANDLERS, _clear_depth, _depth_batches, _depth_on_depsgraph,  # noqa: F401
+                              _depth_on_frame, _draw_mesh_depth, depth_pass_on, opaque_material)
+
 # Default grid.
 SIZE = 12
 SPACING = 5
@@ -44,8 +48,6 @@ OFF_LINES = 16          # Blender's default grid_lines: "not the Maya grid"
 _handle = []
 _batches = {}
 _times = []
-
-
 # --- maths (no bpy) ----------------------------------------------------------------------
 
 MAX_LINES = 2000          # per direction and side: a tiny spacing must not build a huge batch
@@ -275,6 +277,8 @@ def _draw():
         chunk = spacing * 2 ** max(0, math.ceil(math.log2(max(half / 2.0 / spacing, 1e-9))))   # few distinct keys
         span = (view_span(loc[ix] / unit, half, chunk), view_span(loc[iy] / unit, half, chunk))
     shader, batches = _batch_set(plane, unit, opts, span)
+    if depth_pass_on():
+        _draw_mesh_depth(context)
     gpu.state.depth_test_set('LESS_EQUAL')
     gpu.state.depth_mask_set(False)
     gpu.state.blend_set('ALPHA')
@@ -295,12 +299,20 @@ def _draw():
 
 
 def _callback():
+    import gpu
+    depth_test = gpu.state.depth_test_get()
+    depth_mask = gpu.state.depth_mask_get()
+    blend = gpu.state.blend_get()
     try:
         _draw()
     except Exception:  # never let a draw error repeat every frame
         import traceback
         traceback.print_exc()
         unregister_draw()
+    finally:
+        gpu.state.depth_test_set(depth_test)
+        gpu.state.depth_mask_set(depth_mask)
+        gpu.state.blend_set(blend)
 
 
 def unregister_draw():
@@ -315,10 +327,17 @@ def register():
     for cls in classes:
         bpy.utils.register_class(cls)
     _handle.append(bpy.types.SpaceView3D.draw_handler_add(_callback, (), 'WINDOW', 'POST_VIEW'))
+    for event, fn in _DEPTH_HANDLERS:
+        getattr(bpy.app.handlers, event).append(fn)
 
 
 def unregister():
     unregister_draw()
+    for event, fn in _DEPTH_HANDLERS:
+        handlers = getattr(bpy.app.handlers, event)
+        while fn in handlers:
+            handlers.remove(fn)
+    _clear_depth()
     _batches.clear()
     _times.clear()
     for cls in reversed(classes):

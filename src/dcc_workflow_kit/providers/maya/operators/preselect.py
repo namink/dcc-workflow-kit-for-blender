@@ -5,7 +5,7 @@ Maya highlights the component under the mouse before you click (``preSelectHilit
 following the select mode, also while the
 Move / Rotate / Scale tool is active: a vertex = 5 px red
 square, an edge = 2 px red line (an edge also near its vertices), a face = red outline + red stipple.
-Maya 2022 doesn't highlight objects in object mode (pre_01), so neither does the kit,
+Maya doesn't highlight objects in object mode, so neither does the kit,
 except for component targets while editing a custom pivot.
 
 Blender's ``GIZMO_GT_mesh_preselect_elem_3d`` picks the nearest vertex in every select
@@ -29,6 +29,8 @@ from bpy_extras import view3d_utils
 from gpu_extras.batch import batch_for_shader
 from mathutils import Vector
 from mathutils.bvhtree import BVHTree
+
+from .. import update_summary
 
 MODES = {'EDIT_MESH'}
 SELECT_TOOLS = ("builtin.select", "allset.target_weld_tool", "allset.cut_sew_tool")   # the edge a press cuts
@@ -129,20 +131,24 @@ def mesh_arrays(bm):
     BMesh has no foreach_get. A native copy avoids hundreds of thousands of
     Python corner wrappers on dense retopology, without touching the real mesh.
     """
+    from ..ui.component_colors import _INT, _attr, _ints, _positions
     mesh=bpy.data.meshes.new('_allset_mesh_cache')
     try:
         bm.to_mesh(mesh)
-        def read(collection,name,size,dtype):
-            data=np.empty(size,dtype=dtype);collection.foreach_get(name,data);return data
-        co=read(mesh.vertices,'co',len(mesh.vertices)*3,'float64').reshape(-1,3)
-        edges=read(mesh.edges,'vertices',len(mesh.edges)*2,'int32').reshape(-1,2)
-        vok=~read(mesh.vertices,'hide',len(mesh.vertices),'bool')
-        eok=~read(mesh.edges,'hide',len(mesh.edges),'bool')
-        sizes=read(mesh.polygons,'loop_total',len(mesh.polygons),'int32')
-        starts=read(mesh.polygons,'loop_start',len(mesh.polygons),'int32')
-        shown=~read(mesh.polygons,'hide',len(mesh.polygons),'bool')
-        corners=read(mesh.loops,'vertex_index',len(mesh.loops),'int32')
-        loop_edges=read(mesh.loops,'edge_index',len(mesh.loops),'int32')
+        nv,ne,nf,nl=len(mesh.vertices),len(mesh.edges),len(mesh.polygons),len(mesh.loops)
+        # attributes into C int / float32 / bool buffers: one block copy each (the per-element properties and
+        # numpy int32, a C long on Windows, are copied item by item: a quarter of a second on 130k vertices)
+        co=_positions(mesh,nv).reshape(-1,3).astype(np.float64)
+        edges=_ints(mesh,'.edge_verts',ne*2,lambda out:mesh.edges.foreach_get('vertices',out)).reshape(-1,2)
+        vok=~_attr(mesh,'.hide_vert',nv)
+        eok=~_attr(mesh,'.hide_edge',ne)
+        starts=np.empty(nf,_INT)
+        if nf:
+            mesh.polygons.foreach_get('loop_start',starts)
+        sizes=np.diff(np.append(starts,nl)).astype(_INT)          # face corners are stored face by face
+        shown=~_attr(mesh,'.hide_poly',nf)
+        corners=_ints(mesh,'.corner_vert',nl,lambda out:mesh.loops.foreach_get('vertex_index',out))
+        loop_edges=_ints(mesh,'.corner_edge',nl,lambda out:mesh.loops.foreach_get('edge_index',out))
         counts=np.bincount(loop_edges,minlength=len(edges))
         face_vertex=np.zeros(len(co),dtype=bool);face_vertex[corners]=True
         border=np.zeros(len(co),dtype=bool);border[edges[counts==1].ravel()]=True
@@ -179,18 +185,28 @@ class MeshCache:
             self.vok = np.array([not v.hide for v in bm.verts], dtype=bool)
             self.edges = np.array([(e.verts[0].index, e.verts[1].index) for e in bm.edges],dtype=np.int64).reshape(-1,2)
             self.eok = np.array([not e.hide for e in bm.edges], dtype=bool)
+        # a skinned mesh's components sit on the posed mesh (the skin shown on the edit cage)
+        self.cage = _deformed_cage(ob, len(bm.verts)) if self.editing else None
+        if self.cage is not None:
+            local = self.cage
         self.co = local @ m[:3, :3].T + m[:3, 3]
         hidden = np.flatnonzero(~self.arrays[6]).tolist() if self.arrays else [f.index for f in bm.faces if f.hide]
-        if not hidden:
+        if not hidden and self.cage is None:
             self.bvh_map = None                         # BVH index = face index
             self._bvh = BVHTree.FromBMesh(bm) if len(bm.faces) else None
         else:
             vis = [f.index for f in bm.faces if not f.hide]
             self.bvh_map = vis
-            self._bvh = BVHTree.FromPolygons([v.co.copy() for v in bm.verts],
+            self._bvh = BVHTree.FromPolygons(self._points(),
                                             [self.face_verts(i) for i in vis]) if vis else None
         self._sel = None
         self._bvh_dirty = False
+
+    def _points(self):
+        """Object-space vertex positions as drawn: the posed cage, else the BMesh."""
+        if self.cage is not None:
+            return [Vector(p) for p in self.cage]
+        return [v.co.copy() for v in self.bm.verts]
 
     @property
     def bvh(self):
@@ -198,7 +214,7 @@ class MeshCache:
             if self.bvh_map is None:
                 self._bvh=BVHTree.FromBMesh(self.bm) if len(self.bm.faces) else None
             else:
-                self._bvh=BVHTree.FromPolygons([v.co.copy() for v in self.bm.verts],[self.face_verts(i) for i in self.bvh_map])
+                self._bvh=BVHTree.FromPolygons(self._points(),[self.face_verts(i) for i in self.bvh_map])
             self._bvh_dirty=False
         return self._bvh
 
@@ -224,6 +240,16 @@ class MeshCache:
             if not self.editing:
                 self._sel = ([mw.translation.copy()], mw.translation.copy())
                 return self._sel
+            if self.cage is not None:                    # posed skin: the drawn (world) positions
+                co = self.co
+                pts = [Vector(co[v.index]) for v in bm.verts if v.select and not v.hide]
+                el, active = bm.select_history.active, None
+                if isinstance(el, bmesh.types.BMVert):
+                    active = Vector(co[el.index])
+                elif isinstance(el, (bmesh.types.BMEdge, bmesh.types.BMFace)):
+                    active = Vector(co[[v.index for v in el.verts]].mean(axis=0))
+                self._sel = (pts, active)
+                return self._sel
             pts = [mw @ v.co for v in bm.verts if v.select and not v.hide]
             el, active = bm.select_history.active, None
             if isinstance(el, bmesh.types.BMVert):
@@ -245,6 +271,24 @@ class MeshCache:
         if loc is None:
             return None
         return (self.mw @ loc - origin).length, (idx if self.bvh_map is None else self.bvh_map[idx])
+
+
+def _deformed_cage(ob, n):
+    """(n, 3) object-space positions of an edit mesh whose skin is shown on the edit cage (the posed vertices), or
+    None when the cage is the BMesh itself."""
+    from ..ui.component_colors import use_evaluated
+    if not any(md.show_viewport and md.show_in_editmode for md in ob.modifiers) or not use_evaluated(ob.modifiers):
+        return None
+    ev = ob.evaluated_get(bpy.context.evaluated_depsgraph_get())
+    me = ev.to_mesh()
+    try:
+        if len(me.vertices) != n:
+            return None
+        out = np.empty(n * 3, dtype=np.float64)
+        me.vertices.foreach_get("co", out)
+        return out.reshape(-1, 3)
+    finally:
+        ev.to_mesh_clear()
 
 
 def caches(context):
@@ -273,7 +317,7 @@ def invalidate(_scene=None, depsgraph=None):
     keeps them and only forgets the selection."""
     global _coordinate_session
     if depsgraph is not None:
-        for u in depsgraph.updates:
+        for u in update_summary.updates(depsgraph, invalidate):
             if isinstance(u.id, (bpy.types.Mesh, bpy.types.Object)) and (u.is_updated_geometry or u.is_updated_transform):
                 # Only a running coordinate-only modal can retain topology.
                 # Transforms, other meshes and all explicit invalidations reset it.
@@ -316,6 +360,8 @@ def coordinates_changed(ob,verts):
     global _coordinate_session
     c=_cache.get(ob.as_pointer())
     if c is None or not c.editing:return
+    if c.cage is not None:                              # posed skin: read the whole cage again
+        _cache.pop(ob.as_pointer(),None);return
     _coordinate_session=(ob.as_pointer(),ob.data.as_pointer())
     ids=[v.index for v in verts if v.is_valid]
     if ids:
@@ -439,7 +485,8 @@ def pick(context, region, rv3d, mouse):
     if not cs or _handles_block(context, region, rv3d, mouse, cs) or _extrude_block(context, region, rv3d, mouse):
         return None
     ts = context.tool_settings
-    multi = pivot_picking(context)
+    # Multi-Component mode (F7, all three select modes) and pivot editing: the vertex, edge or face under the mouse
+    multi = pivot_picking(context) or tuple(ts.mesh_select_mode) == (True, True, True)
     vmode, emode, fmode = (True, True, True) if multi else tuple(ts.mesh_select_mode)
     xray = _xray(context.space_data)
     scale = context.preferences.system.ui_scale or 1.0

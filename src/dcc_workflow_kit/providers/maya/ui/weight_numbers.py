@@ -19,6 +19,9 @@ import blf
 import bpy
 import numpy as np
 
+from .. import live_refs
+from .. import update_summary
+
 LIMIT = 2000
 FONT = 0
 _handles = []
@@ -34,7 +37,7 @@ def settings(context):
 def _stroke_running(context):
     win = context.window
     return win is not None and any(op.bl_idname in {"PAINT_OT_weight_paint", "PAINT_OT_weight_gradient"}
-                                   for op in win.modal_operators)
+                                   for op in live_refs.running_modals(win))
 
 
 def format_weight(w, places):
@@ -113,8 +116,7 @@ def _brush_radius(context):
     ts = context.tool_settings
     brush = ts.weight_paint.brush
     ups = compat.unified_paint_settings(ts)
-    owner = ups if (ups.use_unified_size or brush is None) else brush
-    return float(getattr(owner, "size", 50))
+    return float(getattr(compat.unified_value_owner(ups, brush, 'size'), "size", 50))
 
 
 def draw():
@@ -191,7 +193,7 @@ class ALLSET_OT_weight_numbers_hover(bpy.types.Operator):
 
 @bpy.app.handlers.persistent
 def _on_depsgraph(scene, depsgraph):
-    for u in depsgraph.updates:
+    for u in update_summary.updates(depsgraph, _on_depsgraph):
         if isinstance(u.id, (bpy.types.Object, bpy.types.Mesh)) and (u.is_updated_geometry or u.is_updated_transform):
             _cache["dirty"] = True
             return

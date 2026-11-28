@@ -3,9 +3,9 @@
 
 Maya: the Graph Editor lists each selected layer under
 the object and draws every selected layer's curves in their own values. Blender's Graph Editor draws and edits one
-action per object: the last picked layer stays the active action (operators/anim_layers.show, editable); the other
+action per object: the last picked layer stays the active action (operators/anim_layer_tracks.show, editable); the other
 selected layers' curves are drawn here (Graph Editor WINDOW POST_VIEW, Maya channel colours dimmed, read only) and
-listed as rows in the kit outliner (ui/editor_chrome.py rows); picking such a row or a drawn curve makes that layer
+listed as rows in the kit outliner (ui/graph_list.py rows); picking such a row or a drawn curve makes that layer
 the last picked one, so its curves become Blender's editable ones.
 
 Drawing follows Blender's Graph Editor mapping (ANIM_unit_mapping_get_factor): rotation curves in degrees while the
@@ -18,6 +18,8 @@ import math
 import bpy
 import gpu
 from gpu_extras.batch import batch_for_shader
+
+from .draw_replay import call
 
 KINDS = ("LAYER", "LAYER_ATTR")     # kit outliner rows: a selected layer's name, its curves
 DIM = 0.6                           # other selected layers: Maya colours, dimmer
@@ -86,11 +88,17 @@ def activate_row(context, row):
 # --- curve lines -------------------------------------------------------------------------------------------------
 
 def value_factor(scene, fc):
-    """Blender's Graph Editor unit factor: rotations in degrees unless the scene's rotation unit is radians."""
+    """Blender's Graph Editor unit factor: rotations in degrees unless the scene's rotation unit is radians; lengths
+    in the scene's length unit where Blender draws them so (5.3)."""
     tail = fc.data_path.rsplit(".", 1)[-1]
-    if tail in _ROTATIONS and not (tail == "rotation_axis_angle" and fc.array_index == 0) \
-            and scene.unit_settings.system_rotation == 'DEGREES':
-        return 180.0 / math.pi
+    if tail in _ROTATIONS and not (tail == "rotation_axis_angle" and fc.array_index == 0):
+        return 180.0 / math.pi if scene.unit_settings.system_rotation == 'DEGREES' else 1.0
+    from .. import compat
+    length = compat.graph_length_factor(scene.unit_settings)
+    if length != 1.0:
+        from .graph_units import curve_unit
+        if curve_unit(fc) == 'LENGTH':
+            return length
     return 1.0
 
 
@@ -239,20 +247,20 @@ class ALLSET_OT_graph_layer_pick(bpy.types.Operator):
         return {'FINISHED'}
 
 
-# --- outliner rows (drawn by editor_chrome.draw_channels) -----------------------------------------------------------
+# --- outliner rows (drawn by graph_outliner.draw_channels) -----------------------------------------------------------
 
 def draw_row(row, y, h, s, font, width):
     import blf
     from .editor_chrome import TEXT, attr_color, attr_label
     kind, _ob, item = row
     if kind == "LAYER":
-        blf.color(font, *TEXT)
-        blf.position(font, 22 * s, y - h + 6 * s, 0)
-        blf.draw(font, layer_of_row(row) or "")
+        call(blf.color, font, *TEXT)
+        call(blf.position, font, 22 * s, y - h + 6 * s, 0)
+        call(blf.draw, font, layer_of_row(row) or "")
     else:
-        blf.color(font, *dim(attr_color(item)))
-        blf.position(font, 44 * s, y - h + 6 * s, 0)
-        blf.draw(font, attr_label(item))
+        call(blf.color, font, *dim(attr_color(item)))
+        call(blf.position, font, 44 * s, y - h + 6 * s, 0)
+        call(blf.draw, font, attr_label(item))
 
 
 _handle = []

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Channel Box in component mode: the selected points' rows.
 
-Maya 2022: with
+Maya: with
 points selected the Channel Box shows the shape's name, a ``CVs (click to show)`` line and INPUTS; a click on that
 line shows a table — one row per selected point (its index, X, Y, Z) — and the line reads ``CVs (click to hide)``.
 The table stays open for the next selection. Edges / faces selected: no CVs line.

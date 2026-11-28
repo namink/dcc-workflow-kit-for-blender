@@ -11,16 +11,23 @@ change what they look at. Blender's ``depsgraph.updates`` per kind of edit (5.2)
 
 A pass over ``depsgraph.updates`` walks every ID the depsgraph holds (about 0.3 ms with 5,000 objects), so a handler
 reads it once (``Look``) and answers what it can from ``depsgraph.id_type_updated`` first: the type of every entry
-is flagged there (a flag can also be set with no entry of that type: a selection flags OBJECT)."""
+is flagged there (a flag can also be set with no entry of that type: a selection flags OBJECT). Kit handlers pass
+themselves (``me``) to share one pass per round with the other kit handlers (``update_summary``)."""
 
 import bpy
 
+from . import update_summary
 
-def only_motion(depsgraph):
+
+def only_motion(depsgraph, me=None):
     """True when every update is a transform or geometry change of a non-Scene / non-Collection ID — nothing that
-    adds, removes, renames, re-parents, hides or selects."""
+    adds, removes, renames, re-parents, hides or selects. ``me``: the asking handler (``look``)."""
     if depsgraph is None:
         return False
+    if me is not None:
+        summary = update_summary.shared(depsgraph, me)
+        if summary is not None:
+            return _look_of(summary).motion
     seen = False
     for u in depsgraph.updates:
         seen = True
@@ -77,6 +84,31 @@ class Look:
     def outliner_skip(self):
         """= ``outliner_skip`` of the same update."""
         return not self.armature and (self.scene_only or self.motion)
+
+
+class _Entries:
+    """A stand-in depsgraph for ``Look``: the entries of a shared walk."""
+
+    __slots__ = ("updates",)
+
+    def __init__(self, entries):
+        self.updates = entries
+
+
+def _look_of(summary):
+    got = summary.look
+    if got is None:
+        got = summary.look = Look(_Entries(summary.updates))
+    return got
+
+
+def look(depsgraph, me):
+    """``Look(depsgraph)`` for handler ``me``: made once per round from the walk the kit handlers share
+    (``update_summary``) while it is still right, else made from the update now."""
+    summary = update_summary.shared(depsgraph, me)
+    if summary is None:
+        return Look(depsgraph)
+    return _look_of(summary)
 
 
 def outliner_skip(depsgraph):

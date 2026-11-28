@@ -4,7 +4,7 @@ Connection Editor.
 
 Same mechanism as the Reference Editor (ui/reference_editor.py) and the Hypershade panes: a new
 window whose one area is a Properties editor on the Tool tab (header and navigation bar hidden) marked by hidden tab
-flags. Each kind has its own flag pair (``KINDS``) — none of them is a ``maya_dock.ROLE_FLAGS`` single flag, the
+flags. Each kind has its own flag pair (``KINDS``) — none of them is a ``maya_dock_roles.ROLE_FLAGS`` single flag, the
 Hypershade ``MARK`` pair or the Reference Editor's triple, so their checks never match each other. The editor's panel
 (``bl_space_type`` VIEW_3D, ``bl_category`` "Tool") polls ``context_kind(context) == kind``.
 """
@@ -119,11 +119,30 @@ def redraw(context, kind):
         a.tag_redraw()
 
 
+AREA_STATE = []      # dicts keyed by area pointer that kit editors keep per area (the Hypergraph's view)
+
+
+def handed_on(old_ptr, area):
+    """The editor of area ``old_ptr`` now shows in ``area`` (its window was brought to the front): per-area state
+    follows it."""
+    new_ptr = area.as_pointer()
+    for state in AREA_STATE:
+        if old_ptr in state:
+            state[new_ptr] = state.pop(old_ptr)
+
+
+def to_front(context, window):
+    """Bring the kit editor ``window`` to the front (Maya raises an editor window that is asked for again)."""
+    from . import maya_dock_windows
+    return maya_dock_windows.to_front(context, window)
+
+
 def open_window(context, kind):
-    """A new window with one Properties area marked ``kind`` (Maya: a floating window); the open one if any."""
+    """A new window with one Properties area marked ``kind`` (Maya: a floating window); the open one, brought to the
+    front, if any."""
     found = find_window(context, kind)
     if found is not None:
-        return found
+        return to_front(context, found)
     from ..operators import menu_extras
     area = max(context.window.screen.areas, key=lambda a: a.width * a.height, default=None)
     if area is None:

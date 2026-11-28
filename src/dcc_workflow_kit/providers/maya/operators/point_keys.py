@@ -276,8 +276,10 @@ def _editing_meshes():
 
 @persistent
 def _on_frame(scene, _depsgraph=None):
+    if not _editing_meshes():           # checked first: the usual case reads nothing more
+        return
     from . import anim_snapshot
-    if getattr(anim_snapshot, "_busy", False) or not _editing_meshes():
+    if getattr(anim_snapshot, "_busy", False):
         return
     try:
         apply_frame(scene)

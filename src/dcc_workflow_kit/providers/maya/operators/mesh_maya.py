@@ -17,10 +17,10 @@ from bpy.props import BoolProperty, EnumProperty, FloatProperty
 from mathutils import Matrix, Vector
 
 from .. import results
-from . import freeze, naming, parenting, units
+from . import freeze, naming, units
 
-# Maya Y-up axis -> Blender (axis index, sign): X -> X, Y -> Z, Z -> -Y
-MAYA_AXES = {'X': (0, 1.0), 'Y': (2, 1.0), 'Z': (1, -1.0)}
+# Mirror Axis (scene axes, like the Channel Box) -> (axis index, sign)
+AXES = {"X": (0, 1.0), "Y": (1, 1.0), "Z": (2, 1.0)}
 
 
 def _mesh_selection(context):
@@ -111,20 +111,23 @@ def separate(context, ob):
                  "delta_rotation_euler", "delta_scale"):
         setattr(grp, attr, getattr(ob, attr))
     context.view_layer.update()
-    # Maya: the pieces have translate 0 and their pivot at the group's own origin, not at its pivot
-    # (polySurface1/2 rotatePivot (0, 0, 0) under pCube2). The group carries the pivot
-    # offset in delta_location, so each piece's pivot moves back by it (freeze.shift_pivot keeps the data).
+    # Maya: the pieces have translate 0 and their pivot at the group's frame origin, not at its pivot
+    # (polySurface1/2 rotatePivot (0, 0, 0) under pCube2). The group carries the pivot offset in delta_location: the
+    # pieces' parent inverse takes it out (the group's frame, like freeze.frame_inverse) and their geometry is
+    # baked into that frame, so their own transform is the identity.
     lin = Matrix.LocRotScale(None, grp.matrix_basis.to_quaternion(), grp.matrix_basis.to_scale()).to_3x3()
-    back = lin.inverted_safe() @ -Vector(grp.delta_location)
+    frame = Matrix.Translation(-(lin.inverted_safe() @ Vector(grp.delta_location)))
+    to_frame = (grp.matrix_world @ frame).inverted_safe()
     for piece in pieces:
-        world = piece.matrix_world.copy()      # separate copied the original's pivot delta to every piece
+        world = piece.matrix_world.copy()
+        piece.parent = grp
+        piece.matrix_parent_inverse = frame
         piece.delta_location, piece.delta_rotation_euler, piece.delta_scale = (0, 0, 0), (0, 0, 0), (1, 1, 1)
-        piece.matrix_world = world
-        parenting.set_parent_maya(piece, grp)
-        context.view_layer.update()
-        if back.length > 1e-9:
-            freeze.shift_pivot(piece, back)
+        piece.delta_rotation_quaternion = (1, 0, 0, 0)
+        piece.matrix_basis = Matrix.Identity(4)
+        freeze.bake_into_data(piece, to_frame @ world)
         _maya_rename(piece, "polySurface")
+    context.view_layer.update()
     for o in context.selected_objects:
         o.select_set(False)
     for piece in pieces:
@@ -136,8 +139,8 @@ def separate(context, ob):
 # --- Mirror ---------------------------------------------------------------------------------------
 
 def mirror_plane(ob, axis, position, offset, direction):
-    """(point, receiving-side direction) in world space; ``offset`` in Blender units along the Maya axis."""
-    index, sign = MAYA_AXES[axis]
+    """(point, receiving-side direction) in world space; ``offset`` in Blender units along the axis."""
+    index, sign = AXES[axis]
     n = Vector((0.0, 0.0, 0.0))
     n[index] = sign
     d = n if direction == 'POSITIVE' else -n
@@ -196,8 +199,8 @@ class ALLSET_OT_mirror(bpy.types.Operator):
     offset: FloatProperty(name="Offset", description="Plane offset along the axis (Maya units)", default=0.0,
                           precision=4)
     axis: EnumProperty(name="Mirror Axis", default='X',
-                       items=(('X', "X", "Maya X = Blender X"), ('Y', "Y", "Maya Y (up) = Blender Z"),
-                              ('Z', "Z", "Maya Z = Blender -Y")))
+                       items=(('X', "X", "The scene's X axis"), ('Y', "Y", "The scene's Y axis"),
+                              ('Z', "Z", "The scene's Z axis (up)")))
     direction: EnumProperty(name="Mirror Direction", default='NEGATIVE',
                             items=(('POSITIVE', "+", "The copy goes to the + side"),
                                    ('NEGATIVE', "-", "The copy goes to the - side")))
@@ -382,6 +385,100 @@ def _boolean_order(context, objs):
     return order[0], order[1:]
 
 
+# Maya 2026 Booleans that keep or drop parts of the first mesh's own surface: Slice = the Difference and the
+# Intersection as two closed shells; Hole Punch = the first mesh outside the others, left open; Cut Out = the first
+# mesh inside them, open; Split Edges = the first mesh cut along the intersection, nothing removed.
+CUTS = {'SLICE', 'HOLE_PUNCH', 'CUT_OUT', 'SPLIT_EDGES'}
+
+
+def _bool_result(context, base, cutter, op, tag):
+    """BMesh (base local space) of ``base`` ``op`` ``cutter`` with only that Boolean evaluated; the cutter's faces
+    keep the ``tag`` material."""
+    others = [(md, md.show_viewport) for md in base.modifiers]
+    for md, _shown in others:
+        md.show_viewport = False
+    mod = base.modifiers.new("allset_cut", 'BOOLEAN')
+    mod.operation, mod.object, mod.solver, mod.material_mode = op, cutter, 'EXACT', 'TRANSFER'
+    try:
+        dg = context.evaluated_depsgraph_get()
+        dg.update()
+        ev = base.evaluated_get(dg)
+        me = ev.to_mesh()
+        bm = bmesh.new()
+        bm.from_mesh(me)
+        # the evaluated mesh lists evaluated copies of the materials
+        tagged = {i for i, m in enumerate(me.materials) if m is not None and m.original == tag}
+        ev.to_mesh_clear()
+    finally:
+        base.modifiers.remove(mod)
+        for md, shown in others:
+            md.show_viewport = shown
+    return bm, tagged
+
+
+def _cutter(context, base, operands, tag):
+    """One temporary object holding every operand (base local space), its faces on the ``tag`` material."""
+    bm = bmesh.new()
+    to_local = base.matrix_world.inverted()
+    dg = context.evaluated_depsgraph_get()
+    for ob in operands:
+        n = len(bm.verts)
+        ev = ob.evaluated_get(dg)
+        bm.from_mesh(ev.to_mesh())
+        ev.to_mesh_clear()
+        bm.verts.ensure_lookup_table()
+        bmesh.ops.transform(bm, matrix=to_local @ ob.matrix_world, verts=bm.verts[n:])
+    me = bpy.data.meshes.new("allset_cutter")
+    bm.to_mesh(me)
+    bm.free()
+    me.materials.append(tag)
+    for p in me.polygons:
+        p.material_index = 0
+    ob = bpy.data.objects.new("allset_cutter", me)
+    ob.matrix_world = base.matrix_world
+    context.scene.collection.objects.link(ob)
+    return ob
+
+
+def maya_cut(context, base, operands, kind):
+    """Apply a Maya Slice / Hole Punch / Cut Out / Split Edges to ``base`` (operands left in place)."""
+    ops = {'HOLE_PUNCH': ('DIFFERENCE',), 'CUT_OUT': ('INTERSECT',)}.get(kind, ('DIFFERENCE', 'INTERSECT'))
+    if base.data.users > 1:
+        base.data = base.data.copy()
+    slot_added = not base.data.materials   # material index 0 must not be the tag's
+    if slot_added:
+        base.data.materials.append(None)
+    tag = bpy.data.materials.new("allset_cut_tag")
+    cutter = _cutter(context, base, operands, tag)
+    try:
+        parts = [_bool_result(context, base, cutter, op, tag) for op in ops]
+    finally:
+        me = cutter.data
+        bpy.data.objects.remove(cutter)
+        bpy.data.meshes.remove(me)
+        bpy.data.materials.remove(tag)
+    out = bmesh.new()
+    for bm, tagged in parts:
+        if kind == 'SLICE':
+            for f in bm.faces:          # the caps take the first mesh's first material
+                if f.material_index in tagged:
+                    f.material_index = 0
+        else:                           # only the first mesh's own surface
+            bmesh.ops.delete(bm, geom=[f for f in bm.faces if f.material_index in tagged], context='FACES')
+        tmp = bpy.data.meshes.new("allset_cut_part")
+        bm.to_mesh(tmp)
+        bm.free()
+        out.from_mesh(tmp)
+        bpy.data.meshes.remove(tmp)
+    if kind == 'SPLIT_EDGES':           # weld the two halves along the cut
+        bmesh.ops.remove_doubles(out, verts=out.verts, dist=1e-5)
+    out.to_mesh(base.data)
+    out.free()
+    if slot_added:
+        base.data.materials.pop()
+    base.data.update()
+
+
 class ALLSET_OT_boolean(bpy.types.Operator):
     """Maya Booleans: select the first object, then the others; the first meets all the others together"""
     # Difference (A - B) = first minus the rest, Difference (B - A) = the rest minus the first,
@@ -392,7 +489,12 @@ class ALLSET_OT_boolean(bpy.types.Operator):
 
     operation: EnumProperty(items=(('UNION', "Union", ""), ('DIFFERENCE', "Difference (A - B)", ""),
                                    ('DIFFERENCE_BA', "Difference (B - A)", "Maya 2026: the others minus the first"),
-                                   ('INTERSECT', "Intersection", "")), name="Operation", default='UNION')
+                                   ('INTERSECT', "Intersection", ""),
+                                   ('SLICE', "Slice", "Maya 2026: the first split into its parts outside and inside"),
+                                   ('HOLE_PUNCH', "Hole Punch", "Maya 2026: the first minus the others, left open"),
+                                   ('CUT_OUT', "Cut Out", "Maya 2026: the first's surface inside the others"),
+                                   ('SPLIT_EDGES', "Split Edges", "Maya 2026: edges where the others cross the first")),
+                          name="Operation", default='UNION')
 
     @classmethod
     def poll(cls, context):
@@ -402,6 +504,14 @@ class ALLSET_OT_boolean(bpy.types.Operator):
         from . import prim_history
         history = prim_history.history_on(context)
         first, rest = _boolean_order(context, _mesh_selection(context))
+        if self.operation in CUTS:          # baked: Blender has no live modifier for these (Maya with history off)
+            maya_cut(context, first, rest, self.operation)
+            for ob in rest:
+                delete_bool_input(ob)
+            first.select_set(True)
+            context.view_layer.objects.active = first
+            results.result(self, f"Boolean {self.operation.replace('_', ' ').title()}: {first.name}")
+            return {'FINISHED'}
         others = rest[0]
         for ob in rest[1:]:                  # Maya: the first object against the union of the others
             _apply_boolean(context, others, ob, 'UNION', history)

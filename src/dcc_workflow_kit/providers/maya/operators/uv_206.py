@@ -5,7 +5,7 @@ the UV Sets items Rename Current UV Set / Copy UVs to UV Set > map1 / map1.
 Rules follow Maya.
 Maya UVs are kit points (operators/uv_shells.uv_points: loops of one vertex sharing a
 coordinate); a Maya cut that leaves the UVs where they are can't be told apart from no cut in Blender (islands are
-made from shared coordinates), so a split UV moves uv_tools.NUDGE towards its own faces (same convention as
+made from shared coordinates), so a split UV moves uv_islands.NUDGE towards its own faces (same convention as
 Cut / Create UV Shell).
 
 - Cycle: the first face of the selection (faces, else faces touching the selection) is cut
@@ -30,7 +30,7 @@ import heapq
 
 import bmesh
 import bpy
-from bpy.props import StringProperty
+from bpy.props import EnumProperty, StringProperty
 from mathutils import Vector
 
 from .. import compat, results, undo_steps
@@ -398,12 +398,37 @@ def shell_seams(shell, uv):
     return set(_shortest_path(inner, a, b))
 
 
-def auto_seams(bm, uv, faces):
-    """Auto Seams on ``faces`` (their shells): returns the edges cut."""
+def hard_edges(shell, uv):
+    """Edges inside ``shell`` that shade hard (marked sharp, or next to a flat-shaded face) and aren't cut yet."""
+    fs = set(shell)
+    out = set()
+    for f in shell:
+        for e in f.edges:
+            linked = [g for g in e.link_faces if not g.hide]
+            if len(linked) != 2 or not all(g in fs for g in linked):
+                continue
+            a, b = linked
+            if not all(_same(uv_tools._uv_at(a, v, uv), uv_tools._uv_at(b, v, uv)) for v in e.verts):
+                continue          # already a cut
+            if not e.smooth or not a.smooth or not b.smooth:
+                out.add(e)
+    return out
+
+
+def auto_seams(bm, uv, faces, select=False, along_hard=False):
+    """Auto Seams on ``faces`` (their shells): returns the seam edges. ``along_hard`` = Method Cut along hard edges
+    (the edges that shade hard), else the kit's automatic seams; ``select`` = Seams: Select (the edges are selected
+    instead of cut)."""
     cut = set()
     for shell in islands(bm, uv, faces):
-        cut |= shell_seams(shell, uv)
-    if cut:
+        cut |= hard_edges(shell, uv) if along_hard else shell_seams(shell, uv)
+    if cut and select:
+        for el in (*bm.verts, *bm.edges, *bm.faces):
+            el.select = False
+        for e in cut:
+            e.select = True
+        bm.select_flush_mode()
+    elif cut:
         map_cut(bm, uv, cut)
     return cut
 
@@ -415,7 +440,7 @@ class _UVOp:
     poll = classmethod(lambda cls, context: _poll(context))
     empty = "Select UVs"
     # a main UV menu command: with UV Sync Selection off it can take the 3D View selection
-    # (uv_tools.mesh_selection_wanted)
+    # (uv_components.mesh_selection_wanted)
     reads_3d = False
 
     def run(self, context, bm, uv, synced, uv_mode):
@@ -501,13 +526,23 @@ class ALLSET_OT_uv_auto_seams(_UVOp, bpy.types.Operator):
     empty = "No seams needed: every shell can already be unfolded"
     reads_3d = True
 
+    # the Auto Seams options: Seams Cut / Select, Method Automatic / Cut along hard edges
+    seams: EnumProperty(items=[('CUT', "Cut", ""), ('SELECT', "Select", "")], default='CUT', options={'SKIP_SAVE'})
+    method: EnumProperty(items=[('AUTOMATIC', "Automatic", ""), ('HARD_EDGES', "Cut along hard edges", "")],
+                         default='AUTOMATIC', options={'SKIP_SAVE'})
+
     def run(self, context, bm, uv, synced, uv_mode):
         shown = [f for f in bm.faces if not f.hide and (synced or f.select)]
         picked = [f for f in shown if f.select] if synced else []
         if not synced and uv_mode == 'FACE':
             picked = [f for f in shown if all(compat.uv_vert_selected(l, uv) for l in f.loops)]
-        cut = auto_seams(bm, uv, picked or [f for f in bm.faces if not f.hide])
-        if cut:
+        select = self.seams == 'SELECT'
+        cut = auto_seams(bm, uv, picked or [f for f in bm.faces if not f.hide], select=select,
+                         along_hard=self.method == 'HARD_EDGES')
+        if cut and select:
+            context.scene.tool_settings.mesh_select_mode = (False, True, False)
+            results.result(self, "Auto Seams: %d edges selected" % len(cut))
+        elif cut:
             results.result(self, "Auto Seams: %d edges cut" % len(cut))
         return len(cut)
 

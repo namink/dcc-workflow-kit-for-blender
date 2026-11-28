@@ -6,7 +6,7 @@ ICONS = {Maya menu path: picture}; picture = ("shelf", shelf file, button label,
 button's kit drawing (``shelf_icons.draw``), like Maya shows the shelf picture of the same command in its
 menus; ("status", glyph) = a ``status_icons`` glyph, ("kit", glyph) = a ``kit_icons`` glyph (the same
 Maya picture on the Status Line / Tool Box); ("menu", name) = a ``menu_drawings`` drawing (
-#54: items on no shelf). Only items Maya 2022 draws with an icon are listed.
+#54: items on no shelf). Only items Maya draws with an icon are listed.
 """
 
 ICONS = {
@@ -340,8 +340,13 @@ ICONS = {
     'Mesh Tools/Sculpting Tools/Wax Tool': ('shelf', 'Sculpting', 'Wax Tool', 10),
     'Mesh Tools/Slide Edge': ('menu', 'Mesh Tools/Slide Edge'),
     'Mesh Tools/Target Weld': ('shelf', 'Polygons', 'Target Weld', 35),
+    'Mesh/Booleans/Cut Out': ('menu', 'Mesh/Booleans/Cut Out'),
     'Mesh/Booleans/Difference (A - B)': ('menu', 'Mesh/Booleans/Difference (A - B)'),
+    'Mesh/Booleans/Difference (B - A)': ('menu', 'Mesh/Booleans/Difference (B - A)'),
+    'Mesh/Booleans/Hole Punch': ('menu', 'Mesh/Booleans/Hole Punch'),
     'Mesh/Booleans/Intersection': ('menu', 'Mesh/Booleans/Intersection'),
+    'Mesh/Booleans/Slice': ('menu', 'Mesh/Booleans/Slice'),
+    'Mesh/Booleans/Split Edges': ('menu', 'Mesh/Booleans/Split Edges'),
     'Mesh/Booleans/Union': ('menu', 'Mesh/Booleans/Union'),
     'Mesh/Cleanup...': ('menu', 'Mesh/Cleanup...'),
     'Mesh/Clipboard Actions/Clear Clipboard': ('menu', 'Mesh/Clipboard Actions/Clear Clipboard'),
@@ -365,6 +370,7 @@ ICONS = {
     'Mesh/Transfer Shading Sets': ('menu', 'Mesh/Transfer Shading Sets'),
     'Mesh/Transfer Vertex Order': ('menu', 'Mesh/Transfer Vertex Order'),
     'Mesh/Triangulate': ('menu', 'Mesh/Triangulate'),
+    'Mesh/Unsmooth': ('menu', 'Mesh/Unsmooth'),
     'Modify/Align Tool': ('menu', 'Modify/Align Tool'),
     'Modify/Center Pivot': ('shelf', 'Polygons', 'Center Pivot', 13),
     'Modify/Convert/Displacement to Polygons': ('menu', 'Modify/Convert/Displacement to Polygons'),

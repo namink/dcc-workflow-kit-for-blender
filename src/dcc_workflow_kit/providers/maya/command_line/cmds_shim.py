@@ -4,7 +4,7 @@
 Re-implemented from Maya's documented command behaviour (flag long/short
 names, return values and Maya's results) — no Maya code. Numbers are in the
 scene's display units like Maya's current linear unit (cm by default) and angles in degrees (radians if
-the scene's rotation unit is radians). Attribute names match the Channel Box (``ui/channel_box.py`` MAIN). Channel
+the scene's rotation unit is radians). Attribute names match the Channel Box (``ui/cb_keys.py`` MAIN). Channel
 numbers are Blender's axes as they are (the Channel Box's convention); Maya's Y-up is not converted.
 
 Supported: ls, select, move, rotate, scale, setAttr, getAttr, addAttr, xform, polyCube, polySphere, polyCylinder,
@@ -579,6 +579,8 @@ def channel_keys(ob, name):
         return (_SCALAR[name],)
     if name in ob.keys() and not name.startswith("_"):
         return (_cb().CUSTOM_PREFIX + name,)
+    if name in ("intensity", "in") and ob.type == 'LIGHT':
+        return (_cb().SHAPE_PREFIX + "energy",)      # a light's intensity = Blender's Power (a sun: Strength) as is
     return None
 
 

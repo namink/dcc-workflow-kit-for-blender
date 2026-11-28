@@ -2,9 +2,9 @@
 """Joint display with Maya's controls (Issue #165): the Channel Box Radius row, Display > Transform Display >
 Local Rotation Axes, Display > Animation > Joint Size....
 
-- Radius = the Maya joint radius the kit keeps on each bone (``joints.RADIUS``, a plain number drawn in centimetres
+- Radius = the Maya joint radius the kit keeps on each bone (``joint_frames.RADIUS``, a plain number drawn in centimetres
   whatever the scene unit, ``units.radius_unit``; a joint without one reads
-  the default 1). It sizes the joint's click sphere (``joints.joint_sphere_radius``).
+  the default 1). It sizes the joint's click sphere (``joint_tool.joint_sphere_radius``).
 - Joint Size = Maya's scene-wide jointDisplayScale (default 1) as ``Scene.allset_joint_size``: it scales every joint's
   click sphere. Blender draws a bone's size from its length only, so the drawn joints keep their size.
 - Local Rotation Axes: Maya toggles the selected nodes' displayLocalAxis. Blender shows bone axes per skeleton
@@ -135,6 +135,15 @@ def joint_size(scene):
         except (AttributeError, KeyError, TypeError):
             return 1.0
     return 1.0
+
+
+def skeleton_scale(ob):
+    """How much the joints of skeleton object ``ob`` grow with its transforms: by the scale of what the object sits
+    under (a scaled parent, like a Maya group above the skeleton), not by the object's own scale. Like Maya, where a
+    joint's own scale leaves its sphere alone and the joints below keep their size (Segment Scale Compensate): an
+    armature scaled to fit a character keeps Radius-sized joints."""
+    mw = ob.matrix_world
+    return max((mw @ ob.matrix_basis.inverted_safe()).to_scale())
 
 
 classes = (ALLSET_OT_local_rotation_axes, ALLSET_OT_joint_size)

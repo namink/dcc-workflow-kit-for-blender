@@ -9,6 +9,7 @@ from mathutils import Euler, Matrix, Vector
 
 from . import in_view, manipulator
 from ..operators import smart_extrude as smart, smart_geometry
+from ..keymap.ic_data import platform_tool
 
 ROTATE_SIZE = .55  # keep edge-on rings away from the arrow tips and scale boxes
 
@@ -159,7 +160,7 @@ class ALLSET_TL_smart_extrude(bpy.types.WorkSpaceTool):
 def register():
     bpy.utils.register_class(ALLSET_GGT_smart_extrude)
     # no separator: inside a tool group it becomes a None entry that breaks Blender's tool cycling (T in edit mode)
-    bpy.utils.register_tool(ALLSET_TL_smart_extrude, after={'builtin.extrude_region'})
+    bpy.utils.register_tool(platform_tool(ALLSET_TL_smart_extrude), after={'builtin.extrude_region'})
 
 
 def unregister():

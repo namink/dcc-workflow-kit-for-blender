@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Maya's Undo / Redo text in the Command Line result field.
 
-Maya 2022: after Ctrl+Z / z / Edit > Undo the result field reads ``Undo: <undo chunk name>``
+Maya: after Ctrl+Z / z / Edit > Undo the result field reads ``Undo: <undo chunk name>``
 and after Shift+Z / Edit > Redo ``Redo: <name>`` — no ``//`` around it, normal text colour, and ``Undo: `` with
 nothing after it when the chunk has no name. The chunk name is the command's name: the runtime command of a menu item
 or hotkey (``Group``, ``CreatePolygonCube``), the typed text of a Command Line entry. The kit's result field kept the

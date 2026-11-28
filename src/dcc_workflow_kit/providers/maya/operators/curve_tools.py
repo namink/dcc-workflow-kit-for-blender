@@ -167,9 +167,7 @@ def bevel_plus(context, ob):
     new = bpy.data.objects.new("bevelPolygon", me)
     new.matrix_world = ob.matrix_world
     _link_new(context, new, "bevelPolygon", select=False)
-    from . import material
     me.materials.clear()
-    material.give_default(new)
     return new
 
 

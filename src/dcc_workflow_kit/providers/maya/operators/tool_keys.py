@@ -11,9 +11,8 @@
 import bpy
 import gpu
 from bpy.props import EnumProperty
-from gpu_extras.batch import batch_for_shader
 
-from .. import results
+from .. import compat, results
 
 # --- box zoom ------------------------------------------------------------------------------------
 
@@ -49,7 +48,7 @@ class ALLSET_OT_box_zoom(bpy.types.Operator):
             return
         (x0, y0), (x1, y1) = self._start, self._end
         shader = gpu.shader.from_builtin('UNIFORM_COLOR')
-        batch = batch_for_shader(shader, 'LINE_LOOP', {"pos": [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]})
+        batch = compat.closed_line_batch(shader, [(x0, y0), (x1, y0), (x1, y1), (x0, y1)])
         gpu.state.blend_set('ALPHA')
         shader.uniform_float("color", (1.0, 1.0, 1.0, 0.8))
         batch.draw(shader)
@@ -192,7 +191,8 @@ def _carry():
     area, region = main_view3d(window.screen) if window is not None else (None, None)
     try:
         if area is not None:
-            with context.temp_override(window=window, area=area, region=region):
+            from . import joint_selection
+            with context.temp_override(window=window, area=area, region=region), joint_selection.kit_tool_set():
                 bpy.ops.wm.tool_set_by_id(name=tool, space_type='VIEW_3D')
     except (RuntimeError, ReferenceError, TypeError):   # tool unavailable in this mode / no UI
         pass
@@ -209,9 +209,56 @@ def _on_depsgraph(_scene, _depsgraph):
         bpy.app.timers.register(_carry, first_interval=0.0)
 
 
+_LOAD_TICKS = 10    # x 0.1 s after a load: the Maya layout on open switches the workspace from its own timer
+_after_load = {"ws": 0, "ticks": 0, "saved": {}}   # saved: workspace pointer -> {mode: the tool the file has}
+
+
+def _select_after_load():
+    """Timer after a file loads: the 3D View starts on the Select tool, like Maya after File > Open / New. Runs for a
+    second so a workspace the Maya layout switches to afterwards starts on Select too; each workspace once, and only
+    while it still has the tool the file was saved with (a tool picked after opening stays)."""
+    context = bpy.context
+    _after_load["ticks"] += 1
+    again = 0.1 if _after_load["ticks"] < _LOAD_TICKS else None
+    try:
+        mode = context.mode
+        window = context.window or (context.window_manager.windows[0] if context.window_manager.windows else None)
+        workspace = window.workspace if window is not None else None
+    except (AttributeError, ReferenceError):
+        return again
+    if workspace is None or workspace.as_pointer() == _after_load["ws"]:
+        return again
+    _after_load["ws"] = workspace.as_pointer()
+    current = _tool_of(workspace, mode)
+    saved = _after_load["saved"].get(workspace.as_pointer(), {}).get(mode)
+    if mode not in CARRY_MODES or current in (None, "builtin.select_box") or current != saved:
+        return again
+    from ..ui.status_line import main_view3d
+    area, region = main_view3d(window.screen)
+    if area is None:
+        return again
+    try:
+        from . import joint_selection
+        with context.temp_override(window=window, area=area, region=region), joint_selection.kit_tool_set():
+            bpy.ops.wm.tool_set_by_id(name="builtin.select_box", space_type='VIEW_3D')
+    except (RuntimeError, ReferenceError, TypeError):   # tool unavailable in this mode / no UI
+        return again
+    _seen[mode] = "builtin.select_box"
+    return again
+
+
 @bpy.app.handlers.persistent
 def _on_load(*_args):
     _mode[0] = None
+    saved = {}
+    try:
+        for ws in bpy.data.workspaces:
+            saved[ws.as_pointer()] = {m: _tool_of(ws, m) for m in CARRY_MODES}
+    except (AttributeError, TypeError, ValueError):
+        pass
+    _after_load.update(ws=0, ticks=0, saved=saved)
+    if not bpy.app.timers.is_registered(_select_after_load):
+        bpy.app.timers.register(_select_after_load, first_interval=0.0)
 
 
 class ALLSET_OT_last_tool(bpy.types.Operator):
@@ -324,8 +371,9 @@ def register_timer():
 def unregister_timer():
     if bpy.app.timers.is_registered(_watch):
         bpy.app.timers.unregister(_watch)
-    if bpy.app.timers.is_registered(_carry):
-        bpy.app.timers.unregister(_carry)
+    for fn in (_carry, _select_after_load):
+        if bpy.app.timers.is_registered(fn):
+            bpy.app.timers.unregister(fn)
     for lst, fn in ((bpy.app.handlers.depsgraph_update_post, _on_depsgraph), (bpy.app.handlers.load_post, _on_load)):
         if fn in lst:
             lst.remove(fn)

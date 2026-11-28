@@ -276,7 +276,7 @@ def offsets_place(translate, rotate, scale, under=PARENT):
     ``rotate`` about the joint (Euler X, Y, Z about the joint's orient axes: its frame before its own rotation) and
     scaled by ``scale`` along its own axes, k times over. ``translate`` / ``rotate`` / ``scale`` are the operator's:
     Maya X / Y / Z as X / -Z / Y (``translate``, world space), X / -Z / Y (``rotate``) and X / Z / Y (``scale``).
-    A joint's Maya X / Y / Z are its bone's Y / Z / X (``joints.JOINT_AXES``, turned by a stored Maya frame)."""
+    A joint's Maya X / Y / Z are its bone's Y / Z / X (``joint_frames.JOINT_AXES``, turned by a stored Maya frame)."""
     from mathutils import Quaternion
     from .joint_selection import joint_mode
     from .joints import JOINT_AXES, MAYA_FRAME

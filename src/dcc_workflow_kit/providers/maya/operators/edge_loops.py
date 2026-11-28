@@ -26,6 +26,7 @@ from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty, St
 from bpy_extras import view3d_utils
 from mathutils import Vector
 
+from .. import compat
 from . import mesh_tools
 from .menu_items import edge_flow
 from .select_convert import loop_next
@@ -46,6 +47,19 @@ SLIDE_MODES = (('RELATIVE', "Relative", "Each vertex slides the same fraction of
 CONNECT_MODES = (('SLIDE', "Slide", "A middle-drag moves the connection along the edges"),
                  ('SEGMENTS', "Segments", "A middle-drag changes how many edges the connection makes"),
                  ('PINCH', "Pinch", "A middle-drag pulls the connection's segments together or apart"))
+
+
+def _connect_redo(_self, context):
+    """Like Maya, a new Slide / Segments / Pinch value typed into the Connect options re-does the last connection
+    while the mesh is still as that connection left it."""
+    from . import connect_tool
+    from .. import compat
+    if connect_tool.has_last() and connect_tool.redo_last(context) and not connect_tool.dragging()             and not compat.UI_UNDO_FOR_SCENE_IN_EDIT:
+        # Blender 5.2 keeps no undo step for a Scene value typed in edit mode: one step for the re-done connection
+        try:
+            bpy.ops.ed.undo_push(message="Connect")
+        except RuntimeError:
+            pass
 
 
 class ALLSET_PG_loop_tools(bpy.types.PropertyGroup):
@@ -83,11 +97,11 @@ class ALLSET_PG_loop_tools(bpy.types.PropertyGroup):
     # Connect Tool (operators/connect_tool.py): Maya's Tool Settings, the radio picks what a middle-drag changes
     ct_mode: EnumProperty(name="Middle-drag changes", items=CONNECT_MODES, default='SEGMENTS',
                           description="The value a middle-drag in the Connect Tool changes")
-    ct_slide: FloatProperty(name="Slide", default=0.5, min=0.0, max=1.0, precision=4,
+    ct_slide: FloatProperty(name="Slide", default=0.5, min=0.0, max=1.0, precision=4, update=_connect_redo,
                             description="Where a connection cuts an edge (0 = its first end, 1 = the other)")
-    ct_segments: IntProperty(name="Segments", default=1, min=1, soft_max=10, max=100,
+    ct_segments: IntProperty(name="Segments", default=1, min=1, soft_max=10, max=100, update=_connect_redo,
                              description="New edges a connection makes between two edges (loops through a ring)")
-    ct_pinch: FloatProperty(name="Pinch", default=0.0, min=-100.0, max=100.0, precision=2,
+    ct_pinch: FloatProperty(name="Pinch", default=0.0, min=-100.0, max=100.0, precision=2, update=_connect_redo,
                             description="Pulls a connection's segments together (positive) or apart (negative)")
 
 
@@ -235,7 +249,7 @@ def insert_loops(bm, edge, t, position='RELATIVE', count=2, smoothing=math.radia
     points = _cut_points(bm, items, fractions)
     new = _connect(bm, points, len(faces), closed)
     _smooth(new, smoothing)
-    if flow is not None and new:
+    if flow is not None and new and position != 'MULTIPLE':     # Maya: several loops are cut straight
         edge_flow(bm, new, flow)
     _select_only(bm, new)
     return new
@@ -489,8 +503,7 @@ class _PreMesh:
         bm.to_mesh(self.me)
 
     def restore(self, bm):
-        bm.clear()
-        bm.from_mesh(self.me)
+        compat.refill_bmesh(bm, self.me)
         bm.verts.ensure_lookup_table()
         bm.edges.ensure_lookup_table()
         bm.faces.ensure_lookup_table()

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Maya Pipe / Helix / Gear / Soccer Ball (Create > Polygon Primitives) as data, like ``prim_shapes``.
 
-Pure Python (no bpy), Maya Y-up space and Maya units, ``prim_shapes.Mesh`` results. Every rule follows
+Pure Python (no bpy), Maya Y-up space and Maya units, ``prim_nodes.Mesh`` results. Every rule follows
 Maya (default Create menu commands).
 No Maya code or data was copied; vertex order, face lists (start corner
 and winding), UVs per face corner and hard edges follow Maya's.
@@ -68,15 +68,15 @@ NODES = {
     "polyPrimitiveMisc": [*AXIS, _a("radius", "Radius", 1.0, "length", 0.01),
                           _a("sideLength", "Side Length", 0.4036, "length", 0.01)],
 }
-# Soccer Ball: Maya keeps Side Length = Radius * 0.4036 (both ways: radius 2 -> 0.8072, side 1 -> radius 2.4777;
-# Maya 2022); the shape follows the radius.
+# Soccer Ball: Maya keeps Side Length = Radius * 0.4036 (both ways: radius 2 -> side 0.8072, side 1 -> radius 2.4777);
+# the shape follows the radius.
 SOCCER_SIDE = 0.4036
 
 
 def orient_z(verts, a):
     """polyPipe / polyPrimitiveMisc axis: the +Y build is first turned +Y -> +Z (90 degrees about X), then by the
     shortest rotation +Z -> axis (pipe_sa6_ax100: (0.5, -0.5, 0) -> (-0.5, 0, -0.5); ax111, ax001, axm; soccer_*).
-    Not the shortest +Y -> axis of polyCube / polyCylinder (``prim_shapes._orient``), which polyHelix uses."""
+    Not the shortest +Y -> axis of polyCube / polyCylinder (``prim_poly._orient``), which polyHelix uses."""
     x, y, z = a.get("axisX", 0.0), a.get("axisY", 1.0), a.get("axisZ", 0.0)
     n = math.sqrt(x * x + y * y + z * z)
     if n < 1e-12:

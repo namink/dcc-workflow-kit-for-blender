@@ -10,6 +10,7 @@ from .shelf_icons import (DARK, KEY, LIGHT, ORANGE, WHITE, arrow, brush, cube, c
                           lerp, nosign, pencil, plus, shade, sphere_colour, sun, xmark)
 
 GREYF = shade(LIGHT, -0.12)
+RED_EDGE = (0.78, 0.2, 0.23)      # new edges along a cut
 
 
 # --- shared parts -----------------------------------------------------------------------------
@@ -660,6 +661,40 @@ def i_bool_difference(cv):
     dashed_ring(cv, 19, 19, 9.5, 1.6)
 
 
+@icon("Mesh/Booleans/Difference (B - A)")
+def i_bool_difference_ba(cv):
+    cv.fill(cv.m_circle(19, 19, 9.5) & ~cv.m_circle(12, 12, 9.5), ORANGE, ol=True)
+    dashed_ring(cv, 12, 12, 9.5, 1.6)
+
+
+@icon("Mesh/Booleans/Slice")
+def i_bool_slice(cv):
+    a, b = cv.m_circle(12, 13, 10), cv.m_circle(21, 20, 9)
+    cv.fill(a & ~b, ORANGE, ol=True)
+    cv.fill(a & b, shade(ORANGE, -0.3), ol=True)      # A cut in two along B, both pieces kept
+    dashed_ring(cv, 21, 20, 9, 1.4)
+
+
+@icon("Mesh/Booleans/Hole Punch")
+def i_bool_hole_punch(cv):
+    cv.fill(cv.m_rect(3, 12, 29, 25) & ~cv.m_circle(16, 18, 5), ORANGE, ol=True)
+    arrow(cv, (16, 1), (16, 13), w=2.2, head=4)
+
+
+@icon("Mesh/Booleans/Cut Out")
+def i_bool_cut_out(cv):
+    cv.fill(cv.m_rect(2, 4, 20, 20) & ~cv.m_circle(20, 20, 7), ORANGE, ol=True)
+    cv.fill(cv.m_circle(23, 23, 7) & cv.m_rect(16, 16, 31, 31) & ~cv.m_rect(27, 27, 31, 31), shade(ORANGE, -0.3),
+            ol=True)
+
+
+@icon("Mesh/Booleans/Split Edges")
+def i_bool_split_edges(cv):
+    cv.fill(cv.m_circle(12, 12, 9.5), ORANGE, ol=True)
+    dashed_ring(cv, 19, 19, 9.5, 1.4)
+    cv.fill(cv.m_ring(19, 19, 9.5, 2.0) & cv.m_circle(12, 12, 9.5), RED_EDGE)
+
+
 @icon("Mesh/Booleans/Intersection")
 def i_bool_intersection(cv):
     dashed_ring(cv, 13, 13, 11, 1.6)
@@ -742,6 +777,17 @@ def i_subdiv_proxy(cv):
 def i_proxy_toggle(cv):
     hex_cube(cv, 11, 22, 8, LIGHT, wire=True)
     cv.poly([(24, 2), (29, 5), (29, 11), (24, 14), (19, 11), (19, 5)], ORANGE, ol=True)
+
+
+@icon("Mesh/Unsmooth")
+def i_unsmooth(cv):
+    left = [(2, 9), (13, 9), (13, 23), (2, 23)]
+    cv.poly(left, ORANGE, ol=True)
+    face_grid(cv, left, 4, DARK)
+    arrow(cv, (14, 16), (20, 16), w=2.2, head=3.5)
+    right = [(20, 7), (30, 7), (30, 25), (20, 25)]
+    cv.poly(right, ORANGE, ol=True)
+    face_grid(cv, right, 1, DARK)
 
 
 @icon("Mesh/Transfer Attributes")

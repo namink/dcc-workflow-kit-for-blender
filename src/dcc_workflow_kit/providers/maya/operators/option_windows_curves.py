@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Maya option windows of the Curves menu and Create > Curve Tools (same spec as operators/option_windows.py;
+"""Maya option windows of the Curves menu and Create > Curve Tools (same spec as operators/option_windows_spec.py;
 option_windows._extend appends ``WINDOWS``). Titles, fields and default values match the Maya option windows
 (each option with its default value). Fields Blender / the kit can't follow are listed as ``missing``."""
 
@@ -32,7 +32,7 @@ def _run_ep_tool(context, v):
 DEGREES = ("1 Linear", "2", "3 Cubic", "5", "7")
 
 WINDOWS = [
-    # Curves > Rebuild (factory: Uniform, 4 spans, degree 3, keep ends, 0 to 1)
+    # Curves > Rebuild (default: Uniform, 4 spans, degree 3, keep ends, 0 to 1)
     Window("rebuild_curve", "Rebuild Curve Options", "Rebuild", ("allset.curve_rebuild", {}), [
         F("spans", "Number of spans:", "int", 4, lo=1, hi=1000),
         F("degree", "Degree:", "enum", "3 Cubic", items=("1 Linear", "2", "3 Cubic", "5", "7")),
@@ -40,14 +40,14 @@ WINDOWS = [
         missing=("Rebuild type: Reduce / Match knots / No multiple knots / Curvature / End conditions / Clean "
                  "(Uniform only)", "Parameter range: Keep / 0 to #spans (0 to 1 only)",
                  "Keep: CVs / Tangents / NumSpans (Ends always kept)", "Keep original (off)")),
-    # Curves > Attach (factory: Blend, bias 0.5, keep multiple knots, keep originals)
+    # Curves > Attach (default: Blend, bias 0.5, keep multiple knots, keep originals)
     Window("attach_curves", "Attach Curves Options", "Attach", ("allset.curve_attach", {}), [
         F("method", "Attach method:", "enum", "Blend", items=("Connect", "Blend")),
         F("bias", "Blend bias:", "float", 0.5, lo=0.0, hi=1.0),
         F("keep_originals", "", "bool", True, text="Keep originals"),
     ], _run_attach, paths=("Curves/Attach",),
         missing=("Multiple knots: Keep / Remove (Keep)", "Insert knot / Insert parameter (off, 0.1)")),
-    # Curves > Fillet (factory: Circular, radius 1, no trim / join)
+    # Curves > Fillet (default: Circular, radius 1, no trim / join)
     Window("fillet_curve", "Fillet Curve Options", "Fillet", ("allset.curve_fillet", {}), [
         F("radius", "Radius:", "float", 1.0, lo=0.0001, hi=1000.0),
     ], _run_fillet, paths=("Curves/Fillet",),

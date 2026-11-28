@@ -25,11 +25,12 @@ import math
 
 import numpy as np
 
+from .draw_replay import call
 from .status_icons import SS, Canvas
 
-LIGHT = (0.741, 0.741, 0.741)      # #bdbdbd  Maya icon grey
-TEAL = (0.282, 0.667, 0.710)       # #48aab5  Maya icon accent
-RIM = (0.227, 0.227, 0.227)        # #3a3a3a  Maya icon rim
+LIGHT = (0.741, 0.741, 0.741)      # #bdbdbd  icon grey
+TEAL = (0.282, 0.667, 0.710)       # #48aab5  icon accent
+RIM = (0.227, 0.227, 0.227)        # #3a3a3a  icon rim
 DARK = (0.165, 0.165, 0.165)
 DIMMED = (0.42, 0.42, 0.42)
 RIM_ALPHA = 0.85
@@ -524,6 +525,15 @@ def make(name, n):
     return pv.icon_id
 
 
+def make_all(context=None):
+    """Every glyph at the current UI scale now (from a timer, before a layout's first frame): the first draw
+    doesn't show Blender's fallback icons and swap them a moment later."""
+    import bpy
+    scale = (context or bpy.context).preferences.system.ui_scale
+    for name in GLYPHS:
+        make(name, size_for(name, scale))
+
+
 def _make_pending():
     try:
         for name, n in list(_pending):
@@ -669,9 +679,9 @@ def draw_texture(name, x, y, n, greyed=False):
             _quads.clear()
         batch = _quads[key] = batch_for_shader(sh, 'TRI_FAN', {"pos": coords,
                                                               "texCoord": ((0, 0), (1, 0), (1, 1), (0, 1))})
-    sh.uniform_sampler("image", texture(name, n, greyed))
-    gpu.state.blend_set('ALPHA')
-    batch.draw(sh)
+    call(sh.uniform_sampler, "image", texture(name, n, greyed))
+    call(gpu.state.blend_set, 'ALPHA')
+    call(batch.draw, sh)
 
 
 def register():

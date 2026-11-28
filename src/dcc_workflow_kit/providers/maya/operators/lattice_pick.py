@@ -21,9 +21,8 @@ import bpy
 import gpu
 import numpy as np
 from bpy.props import BoolProperty, IntProperty
-from gpu_extras.batch import batch_for_shader
 
-from .. import live_refs
+from .. import compat, live_refs
 from .preselect import project
 
 CLICK_PX = 75.0       # Blender's click distance for lattice points (px at pixel size 1)
@@ -233,7 +232,7 @@ class ALLSET_OT_lattice_box(bpy.types.Operator):
         for width, color in ((3.0, (0.0, 0.0, 0.0, 0.6)), (1.0, (1.0, 1.0, 1.0, 0.9))):
             gpu.state.line_width_set(width)
             shader.uniform_float("color", color)
-            batch_for_shader(shader, 'LINE_LOOP', {"pos": loop}).draw(shader)
+            compat.closed_line_batch(shader, loop).draw(shader)
         gpu.state.line_width_set(1.0)
         gpu.state.blend_set('NONE')
 

@@ -34,24 +34,27 @@ def set_parent_maya(child, parent):
     Blender channels can't, so the residual goes into the parent inverse and the
     channels hold the closest translate/rotate/scale.
     """
+    from .freeze import frame_inverse
     world = child.matrix_world.copy()
-    local = parent.matrix_world.inverted_safe() @ world
+    frame = frame_inverse(parent)           # a frozen group's frame, like Maya (its pivot offset taken out)
+    local = (parent.matrix_world @ frame).inverted_safe() @ world
     t, q, s = local.decompose()
     trs = Matrix.LocRotScale(t, q, s)
     residual = local @ trs.inverted_safe()
     exact = all(abs(residual[i][j] - (1.0 if i == j else 0.0)) < EPS
                 for i in range(4) for j in range(4))
     child.parent = parent
-    child.matrix_parent_inverse = Matrix.Identity(4) if exact else residual
+    child.matrix_parent_inverse = frame if exact else frame @ residual
     child.matrix_world = world
 
 
 def set_parent_relative(child, parent):
     """Maya Parent / Unparent with Preserve position off (``cmds.parent(relative=True)``): the child keeps its local
     values, so it moves with the new parent (t 1 2 3 under a parent at 10 0 0 stays t 1 2 3)."""
+    from .freeze import frame_inverse
     basis = child.matrix_basis.copy()
     child.parent = parent
-    child.matrix_parent_inverse = Matrix.Identity(4)
+    child.matrix_parent_inverse = frame_inverse(parent) if parent is not None else Matrix.Identity(4)
     child.matrix_basis = basis
 
 

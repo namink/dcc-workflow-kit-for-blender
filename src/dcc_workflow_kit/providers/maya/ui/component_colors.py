@@ -54,6 +54,9 @@ from operator import attrgetter
 import bpy
 import numpy as np
 
+from .. import update_summary
+from .selection_wire_show import antialiasing
+
 HILITE = "#64dcff"          # the object being edited, every edge
 VERT = "#c800c8"            # unselected vertices
 VERT_SEL = "#fdff88"        # selected vertices
@@ -181,8 +184,12 @@ def face_overlay_action(want_off, show_faces, ours):
 
 
 def use_evaluated(modifiers):
-    """True when the evaluated edit mesh is the cage: no modifier is shown in edit mode."""
-    return not any(md.show_viewport and md.show_in_editmode for md in modifiers)
+    """True when the evaluated edit mesh is the cage: no modifier is shown in edit mode, or only skin modifiers
+    (Armature, and the weight sum of Normalize Weights Disable / Enable) on the cage (a skinned mesh's components on
+    the posed mesh)."""
+    from ..operators.skin_normalize_weights import is_part
+    return all((md.type == 'ARMATURE' or is_part(md)) and md.show_on_cage
+               for md in modifiers if md.show_viewport and md.show_in_editmode)
 
 
 def readable(n_verts, evaluated):
@@ -298,7 +305,8 @@ def counts_signature(me, bm):
 
 
 class _State:
-    __slots__ = ("arrays", "faces", "batches", "bkey", "name", "me_name", "uv", "op", "sel", "wire", "counts")
+    __slots__ = ("arrays", "faces", "batches", "bkey", "name", "me_name", "uv", "op", "sel", "wire", "counts",
+                 "uvsel")
 
     def __init__(self, ob):
         self.arrays = None
@@ -312,6 +320,7 @@ class _State:
         self.op = 0                 # the transform running when the arrays were read in full (0: none)
         self.sel = set()            # selection_kinds whose flags in arrays are current
         self.counts = None          # (vertices, edges, faces) of the BMesh the arrays were read from
+        self.uvsel = None           # (vertex count, uv_selected_verts) read last while no transform ran
 
 
 def _transform_ptr():
@@ -491,6 +500,21 @@ def _read(st, ob, depsgraph, bm, faces, uv):
     return True
 
 
+def _uv_selection(st, bm):
+    """uv_selected_verts, or during a transform the one read before it (a transform changes no selection). While
+    a transform runs the mesh's UV loops are not read at all: Python's first look at a loop of a BMesh adds a layer
+    to the loops (and takes it away again when the BMesh is let go), which moves the loop data the transform holds
+    (a UV Editor move writes to freed memory and Blender crashes)."""
+    n = len(bm.verts)
+    if _transform_ptr():
+        if st.uvsel is not None and st.uvsel[0] == n:
+            return st.uvsel[1].copy()
+        return np.zeros(n, bool)
+    out = uv_selected_verts(bm)
+    st.uvsel = (n, out.copy())
+    return out
+
+
 def _select(st, me, bm, need):
     """Make the selection flags in ``need`` (selection_kinds) current: read from the BMesh, the evaluated mesh's
     selection stays as it was at its last geometry update."""
@@ -499,7 +523,7 @@ def _select(st, me, bm, need):
         return
     m = st.arrays
     if "uv" in missing:
-        m.vsel = uv_selected_verts(bm)
+        m.vsel = _uv_selection(st, bm)
         m.esel = np.zeros(len(m.esel), bool)
         m.fsel = np.zeros(len(m.fsel), bool)
         st.sel = {"uv"}
@@ -560,7 +584,7 @@ def state(ob, depsgraph, faces=True, uv=False, select_mode=None):
     _select(st, ob.data, bm, need)
     # The selection poll compares with what was drawn last
     if uv:
-        if len(bm.verts) <= BMESH_LIMIT:
+        if len(bm.verts) <= BMESH_LIMIT and not op:     # (no element is read while a transform runs)
             bm.verts.index_update()
             bm.edges.index_update()
             bm.faces.index_update()
@@ -644,6 +668,8 @@ def _draw():
         return
     scale = context.preferences.system.ui_scale or 1.0
     vert_px = theme_point_sizes(context)
+    smooth = antialiasing(context)
+    blend = gpu.state.blend_get() if smooth else None
     gpu.state.depth_test_set('NONE' if _xray(space) else 'LESS_EQUAL')
     gpu.state.depth_mask_set(False)
     proj = {'LINES': _biased_projection(rv3d, DEPTH_BIAS), 'TRIS': _biased_projection(rv3d, FACE_BIAS),
@@ -662,9 +688,18 @@ def _draw():
                     elif kind in ('LINES', 'LINES_SEL'):
                         sh.uniform_float("viewportSize", (region.width, region.height))
                         sh.uniform_float("lineWidth", size * scale)
+                        sh.uniform_bool("lineSmooth", smooth)
+                        if smooth:
+                            gpu.state.blend_set('ALPHA')
+                            batch.draw(sh)
+                            gpu.state.blend_set(blend)
+                            continue
                     batch.draw(sh)
         gpu.state.point_size_set(1.0)
     finally:
+        if smooth:
+            _builtin('POLYLINE_UNIFORM_COLOR').uniform_bool("lineSmooth", False)
+            gpu.state.blend_set(blend)
         gpu.matrix.pop_projection()
         gpu.state.depth_test_set('NONE')
     _times.append(time.perf_counter() - t0)
@@ -778,7 +813,7 @@ def _on_depsgraph(_scene=None, depsgraph=None):
     more / less: a selection-only update; an object move) -> only the selection flags."""
     if depsgraph is None or not _cache:
         return
-    for u in depsgraph.updates:
+    for u in update_summary.updates(depsgraph, _on_depsgraph):
         if isinstance(u.id, (bpy.types.Mesh, bpy.types.Object)):
             name = u.id.original.name if u.id.original is not None else u.id.name
             (_dirty if u.is_updated_geometry else _dirty_sel).add(name)

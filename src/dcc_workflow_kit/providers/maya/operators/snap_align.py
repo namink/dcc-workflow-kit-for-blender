@@ -708,3 +708,45 @@ class ALLSET_OT_step_snap(bpy.types.Operator):
 
 
 classes += (ALLSET_OT_step_snap,)
+
+
+# UV Editor Step Snap (Move / Rotate / Scale UV tool option menus, marking/menus.UV_OPT_*): Blender's UV increment
+# snapping, which the UV Editor keeps apart from the 3D View's (use_snap_uv / snap_uv_element); a transform snaps
+# only while its Affect flag is on.
+def uv_step_snap_on(ts, kind):
+    return bool(ts.use_snap_uv and 'INCREMENT' in ts.snap_uv_element and getattr(ts, STEP_FLAGS[kind]))
+
+
+def set_uv_step_snap(ts, kind, on):
+    elements = set(ts.snap_uv_element) if ts.use_snap_uv else set()
+    if on:
+        ts.snap_uv_element = elements | {'INCREMENT'}
+        ts.use_snap_uv = True
+        setattr(ts, STEP_FLAGS[kind], True)
+        return True
+    elements.discard('INCREMENT')
+    if elements:
+        ts.snap_uv_element = elements
+    else:
+        ts.use_snap_uv = False
+    return False
+
+
+class ALLSET_OT_uv_step_snap(bpy.types.Operator):
+    """Step Snap of the UV Editor's Move / Rotate / Scale tool: move, turn or scale UVs in fixed increments"""
+    bl_idname = "allset.uv_step_snap"
+    bl_label = "Step Snap"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    kind: EnumProperty(items=(('TRANSLATE', "Move", ""), ('ROTATE', "Rotate", ""), ('RESIZE', "Scale", "")))
+
+    def execute(self, context):
+        ts = context.scene.tool_settings
+        on = set_uv_step_snap(ts, self.kind, not uv_step_snap_on(ts, self.kind))
+        results.result(self, f"UV step snap {'on' if on else 'off'}")
+        for area in context.screen.areas if context.screen else ():
+            area.tag_redraw()
+        return {'FINISHED'}
+
+
+classes += (ALLSET_OT_uv_step_snap,)

@@ -5,7 +5,7 @@
 bl_info = {
     "name": "MaxFlow",
     "author": "neom315",
-    "version": (0, 8, 3),
+    "version": (0, 8, 5),
     "blender": (5, 0, 0),
     "location": "Top bar > MaxFlow",
     "description": "A 3ds Max-style workspace, Command Panel and quad menus",
@@ -14,7 +14,7 @@ bl_info = {
 }
 
 import bpy
-__version__ = '0.8.3'
+__version__ = '0.8.5'
 from bpy.props import PointerProperty
 from . import max_gizmo, edit_poly, i18n
 from . import (preferences, params, operators, editors, ui, runtime, chrome, toolbar, interactions, commands, flyouts, quad,

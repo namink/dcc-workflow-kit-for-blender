@@ -14,17 +14,26 @@ out = (h+/3, m h+/3). Slope rules, key k with neighbours (t-, v-) and (t+, v+):
 - plateau: flat for end keys, keys equal to a neighbour and extremes; otherwise the spline slope unless the control
   polygon of the segment before or after (with the neighbour key's own slope) passes the segment's key values, then
   flat;
-- flat: m = 0, handles at a third of the interval like every other type.
+- flat: m = 0, handles at a third of the interval like every other type;
+- linear: the side points at its neighbouring key, m = the secant to it (0 on the side of an end key that has no
+  neighbour). A segment is a straight line only when both of its keys are linear on the sides facing it.
 
 Blender knows two automatic handle types: 'AUTO' (the kit's Spline) and 'AUTO_CLAMPED' (Auto, Clamped and Plateau)
-and places them by its own rule, so the kit writes Maya's handles itself. Which of Auto / Clamped / Plateau (and
-Flat, an Aligned / Free handle) a key side has is kept per curve on its Action:
+and places them by its own rule, so the kit writes Maya's handles itself. Linear is a 'VECTOR' handle side (Bezier
+interpolation). Which of Auto / Clamped / Plateau (and Flat, an Aligned / Free handle) a key side has is kept per
+curve on its Action:
 
 ``Action["allset_tangents"]`` = {"<data_path>|<array_index>": {"f": [key frames], "t": "<in, out char per key>"}}
-with chars A / S / C / P / F, "-" = told by the handle type ('AUTO' = Spline, 'AUTO_CLAMPED' = Auto). The entry
-follows its keys by index while the key count stays (keys moved), else by frame. A stored Clamped / Plateau side
-that is no longer 'AUTO_CLAMPED', or a Flat side that isn't level any more, is the user's own tangent now (Maya
-Fixed) and loses its type.
+with chars A / S / C / P / F / L, "-" = told by the handle type ('AUTO' = Spline, 'AUTO_CLAMPED' = Auto,
+'VECTOR' = Linear). The entry follows its keys by index while the key count stays (keys moved), else by frame. A
+stored Clamped / Plateau side that is no longer 'AUTO_CLAMPED', a Linear side that is no longer 'VECTOR', or a Flat
+side that isn't level any more, is the user's own tangent now (Maya Fixed) and loses its type.
+
+Infinity: Blender extrapolates both ends of a curve the same way, Maya per side. A curve with Linear infinity on
+one side only extrapolates linearly in Blender and keeps the outer handle of the end key on the other side level
+(it shapes nothing between the keys), so that side stays constant. The sides are kept while they differ:
+``Action["allset_infinity"]`` = {"<data_path>|<array_index>": "<pre><post>"} with L = linear, C = not linear.
+Linear infinity follows the end key's outer tangent like Maya: flat for an Auto or a Linear end key.
 
 Blender recomputes automatic handles whenever it edits the curve (a Graph Editor drag), so ``watch`` (every 0.25 s
 from ``ui/graph_view``, never while a modal tool runs) writes Maya's handles again on every curve of an Action
@@ -35,7 +44,8 @@ import bpy
 
 AUTO = 'AUTO_CLAMPED'
 PROP = "allset_tangents"
-CHARS = {"AUTO": "A", "SPLINE": "S", "CLAMPED": "C", "PLATEAU": "P", "FLAT": "F"}
+INF_PROP = "allset_infinity"
+CHARS = {"AUTO": "A", "SPLINE": "S", "CLAMPED": "C", "PLATEAU": "P", "FLAT": "F", "LINEAR": "L"}
 KINDS = {c: k for k, c in CHARS.items()}
 # kinds that keep the key's stored type (they only change the handle type)
 KEEP = {"BREAK", "UNIFY"}
@@ -90,6 +100,15 @@ def clamped_slope(times, values, k, tol=CLAMP_TOL):
     return 0.0
 
 
+def linear_slope(times, values, k, side):
+    """Linear side (0 = in, 1 = out): the secant to the neighbouring key on that side, 0 without one."""
+    j = k - 1 if side == 0 else k + 1
+    if not 0 <= j < len(times):
+        return 0.0
+    dt = times[k] - times[j]
+    return (values[k] - values[j]) / dt if abs(dt) > 1e-9 else 0.0
+
+
 def _polygon(t0, v0, m0, t1, v1, m1):
     """Lowest and highest point of a segment's control polygon (handles at a third of the segment)."""
     d = (t1 - t0) / 3.0
@@ -118,8 +137,8 @@ def _plateau(times, values, k, m_prev, m_next, eps):
 
 def solve(times, values, kinds, current=None, tol=CLAMP_TOL, eps=EQUAL_EPS):
     """[(in slope, out slope)] per key. ``kinds`` = [(in kind, out kind)] with 'AUTO' / 'SPLINE' / 'CLAMPED' /
-    'PLATEAU' / 'FLAT' or None (the side keeps ``current``'s slope, default 0); ``tol`` = the Clamped closeness and
-    ``eps`` the Plateau equality in the curve's own value units."""
+    'PLATEAU' / 'FLAT' / 'LINEAR' or None (the side keeps ``current``'s slope, default 0); ``tol`` = the Clamped
+    closeness and ``eps`` the Plateau equality in the curve's own value units."""
     n = len(times)
     cur = list(current) if current is not None else [(0.0, 0.0)] * n
     auto = None
@@ -137,6 +156,8 @@ def solve(times, values, kinds, current=None, tol=CLAMP_TOL, eps=EQUAL_EPS):
                 m = clamped_slope(times, values, k, tol)
             elif kind in ("FLAT", "PLATEAU"):
                 m = 0.0
+            elif kind == "LINEAR":
+                m = linear_slope(times, values, k, side)
             else:
                 m = cur[k][side]
             pair.append(m)
@@ -271,6 +292,8 @@ def side_kind(kp, side, char):
     elif char == "F":
         if t in {'ALIGNED', 'FREE'} and _level(kp, side):
             return "FLAT"
+    if t == 'VECTOR':
+        return "LINEAR"
     if t == 'AUTO':
         return "SPLINE"
     if t == AUTO:
@@ -294,6 +317,36 @@ def mark(fc, kp, kind, side="BOTH"):
     if side in ("OUT", "BOTH"):
         chars[2 * index + 1] = c
     _store(fc, frames, chars)
+
+
+def linear_sides(fc):
+    """(pre, post): which ends of ``fc`` have Linear infinity."""
+    if fc.extrapolation != 'LINEAR':
+        return False, False
+    act = _action(fc)
+    data = act.get(INF_PROP) if act is not None else None
+    text = str(data.get(curve_key(fc), "")) if data is not None else ""
+    if len(text) == 2:
+        return text[0] == "L", text[1] == "L"
+    return True, True
+
+
+def set_linear_sides(fc, pre, post):
+    """Linear infinity on the ends ``pre`` / ``post`` of ``fc`` (the others constant or cycled by a modifier).
+    Returns False when the sides differ but the curve has no Action to keep them on (both ends then linear)."""
+    fc.extrapolation = 'LINEAR' if pre or post else 'CONSTANT'
+    act = _action(fc)
+    key = curve_key(fc)
+    if pre == post:
+        if act is not None and INF_PROP in act and key in act[INF_PROP]:
+            del act[INF_PROP][key]
+        return True
+    if act is None:
+        return False
+    if INF_PROP not in act:
+        act[INF_PROP] = {}
+    act[INF_PROP][key] = ("L" if pre else "C") + ("L" if post else "C")
+    return True
 
 
 # --- writing --------------------------------------------------------------------------------------------------
@@ -363,6 +416,14 @@ def apply(fc):
         current.append((_slope(kp, 0), _slope(kp, 1)))
     tol, eps = tolerances(fc)
     pairs = solve(times, values, kinds, current, tol, eps)
+    pre_lin, post_lin = linear_sides(fc)
+    level = fc.extrapolation == 'LINEAR' and not (pre_lin and post_lin)
+    if level:
+        # the end without Linear infinity extrapolates along a level outer handle: constant
+        if not pre_lin:
+            pairs[0] = (0.0, pairs[0][1])
+        if not post_lin:
+            pairs[-1] = (pairs[-1][0], 0.0)
     n = 0
     for kp, kk, (lx, ly, rx, ry) in zip(pts, kinds, handles_of(times, values, pairs)):
         hit = False
@@ -373,6 +434,14 @@ def apply(fc):
             kp.handle_right = (rx, ry)
             hit = True
         n += hit
+    if level:
+        for kp, side, lin in ((pts[0], 0, pre_lin), (pts[len(pts) - 1], 1, post_lin)):
+            if lin or kinds[0 if side == 0 else len(pts) - 1][side] is not None or _side_type(kp, side) != 'FREE':
+                continue
+            h = kp.handle_left if side == 0 else kp.handle_right
+            if not _level(kp, side):
+                h.y = kp.co.y           # the user's own free outer handle: level too
+                n += 1
     _store(fc, times, kept)
     watch_action(fc)
     return n

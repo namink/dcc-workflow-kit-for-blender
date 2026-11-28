@@ -2,15 +2,15 @@
 """Kit-drawn pictures for Maya menu items that have no shelf button (issue #54).
 
 A Maya menu item gets the kit drawing of the shelf button / Status Line / Tool Box glyph of the same command
-(``menu_icon_data``). Maya 2022 also draws an icon on many items that are on no shelf (Deform deformers, Mesh Display,
+(``menu_icon_data``). Maya also draws an icon on many items that are on no shelf (Deform deformers, Mesh Display,
 Effects, Fields, Edit Mesh / Mesh Tools tools ...). This module draws those, from scratch, in the shelf's vocabulary
 (``shelf_icons``: one hue per kind, dark outline, light from the upper left, tool parts light grey, the action mark
 small in a corner) and following each Maya icon's subject, colour and composition as described by looking at it
 (no Maya pixels, no traced coordinates).
 
 ``@icon(path, ...)`` registers a drawing under its first Maya menu path (the picture's name); further paths are
-items Maya shows with the same picture. ``tools/gen_menu_icons.py`` reads the decorators (ast) and writes
-``("menu", name)`` pictures into ``menu_icon_data.ICONS``. Pure numpy, no bpy at import.
+items Maya shows with the same picture. The generated table ``menu_icon_data.ICONS`` (not edited by hand) links
+each of those paths to its ``("menu", name)`` picture. Pure numpy, no bpy at import.
 """
 
 import math

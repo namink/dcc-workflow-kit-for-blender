@@ -19,6 +19,8 @@ import bpy
 from bpy.props import FloatProperty
 from mathutils import Matrix, Vector
 
+from ..keymap.ic_data import platform_tool
+
 TUMBLE_TOOL, TRACK_TOOL, DOLLY_TOOL = "allset.tumble_tool", "allset.track_tool", "allset.dolly_tool"
 PAN_ZOOM_TOOL = "allset.pan_zoom_tool"
 MAYA_FILM_MM = 36.0       # 35 mm camera film back (create.MAYA_FILM_MM)
@@ -227,9 +229,9 @@ def register():
         name="Focal Length", description="Focal length of this view in mm (36 mm film back)",
         get=_persp_focal_get, set=_persp_focal_set, min=2.5, max=3500.0, precision=1)
     for i, tool in enumerate(TOOLS):
-        bpy.utils.register_tool(tool, after={"builtin.measure"}, separator=(i % len(_TOOLS) == 0))
+        bpy.utils.register_tool(platform_tool(tool), after={"builtin.measure"}, separator=(i % len(_TOOLS) == 0))
     for tool in PAN_ZOOM_TOOLS:          # after the Dolly Tool, like Maya's Camera Tools menu
-        bpy.utils.register_tool(tool, after={DOLLY_TOOL})
+        bpy.utils.register_tool(platform_tool(tool), after={DOLLY_TOOL})
 
 
 def unregister():

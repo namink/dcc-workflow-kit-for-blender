@@ -9,9 +9,13 @@ channels the Channel Box shows (``location``/``rotation``/``scale``) can read
 
 - Freeze = ``cmds.makeIdentity(apply=True, t=1, r=1, s=1, pn=1)``
   bakes into the data, keeps world positions
-  and the pivot, applies to the whole hierarchy below the selection.
+  and the pivot, applies to the whole hierarchy below the selection. Like Maya, groups and locators
+  zero their rotate and scale too, cameras / lights / joints and instances are not frozen, and the
+  children of a frozen object get their values in its frame: their parent inverse takes its pivot
+  offset out (``frame_inverse``), so they read like Maya's after the freeze, after Unparent and after
+  a pivot move.
 - Reset = Modify > Reset Transformations: channels back to
-  0/0/1, deltas (the last freeze) kept.
+  0/0/1 and the pivot back to the frame origin; the geometry stays where the last freeze left it.
 - Center Pivot = ``cmds.xform(centerPivots=True)``: pivot to the
   bounding box centre; vertices, translate and children stay.
 """
@@ -20,10 +24,14 @@ import bpy
 from bpy.props import BoolProperty
 from mathutils import Matrix, Vector
 
-from .. import results
+from .. import i18n, results
 
 # Object types whose data can absorb a matrix (``ID.transform``).
 BAKE_TYPES = {'MESH', 'CURVE', 'SURFACE', 'LATTICE', 'META'}
+# Maya freezes rotate and scale of these too (geometry; groups and locators have nothing to bake) ...
+FREEZE_TYPES = BAKE_TYPES | {'EMPTY'}
+# ... and leaves these as they are (under a frozen parent they only take its change, to stay in place)
+KEEP_TYPES = {'CAMERA', 'LIGHT', 'ARMATURE', 'LIGHT_PROBE', 'SPEAKER'}
 EPS = 1e-6
 
 
@@ -33,6 +41,35 @@ def _is_identity(m):
 
 def _same(a, b):
     return all(abs(a[i][j] - b[i][j]) < EPS for i in range(4) for j in range(4))
+
+
+def _drives(ob):
+    """``ob`` is a handle something else follows: a modifier or constraint (also a bone's) points to it."""
+    def points(item):
+        return any(p.type == 'POINTER' and getattr(item, p.identifier, None) is ob for p in item.bl_rna.properties)
+    for o in bpy.data.objects:
+        if any(points(md) for md in o.modifiers) or any(points(c) for c in o.constraints):
+            return True
+        if o.pose is not None and any(points(c) for pb in o.pose.bones for c in pb.constraints):
+            return True
+    return False
+
+
+def plain_empty(ob):
+    """A group or locator: an Empty whose rotate and scale Freeze can zero like Maya (it draws axes only and nothing
+    follows it; an image plane, a collection instancer or a deformer / IK handle keeps them)."""
+    return (ob.type == 'EMPTY' and ob.empty_display_type != 'IMAGE' and ob.instance_type == 'NONE'
+            and not _drives(ob))
+
+
+def frame_inverse(ob):
+    """Parent inverse that makes children's values relative to ``ob``'s Maya frame: its pivot offset
+    (``delta_location``) taken out, so a frozen group's children read like Maya's (a pivot moved away from the
+    frame doesn't move them). Identity when ``ob`` keeps a rotation or scale (the offset is only exact without)."""
+    m = ob.matrix_basis.to_3x3()
+    if any(abs(m[i][j] - (1.0 if i == j else 0.0)) > EPS for i in range(3) for j in range(3)):
+        return Matrix.Identity(4)
+    return Matrix.Translation(-Vector(ob.delta_location))
 
 
 def hierarchy(objects):
@@ -112,17 +149,44 @@ def bake_into_data(ob, matrix):
     return copied
 
 
-def freeze(objects, translate=True, rotate=True, scale=True):
-    """Freeze ``objects`` and their descendants. Returns (frozen count, data copies)."""
+def freeze(objects, translate=True, rotate=True, scale=True, refuse=()):
+    """Freeze ``objects`` and their descendants. Returns (frozen count, data copies, objects not frozen).
+
+    ``refuse``: objects left as they are with everything below them, like Maya's instances; one under a frozen parent
+    takes the parent's change into its channels so it stays in place."""
     obs = hierarchy(objects)
     w_old = {ob: ob.matrix_world.copy() for ob in obs}
     w_new = {}
+    framed = {}             # fully frozen object -> its children's parent inverse (its Maya frame)
     copies = 0
+    skipped, refused = set(), []
     for ob in obs:
-        frame = parent_frame(ob, w_old, w_new)
-        moved = ob.parent in w_new and not _same(w_new[ob.parent], w_old[ob.parent])
+        p = ob.parent
+        reframe = framed.get(p) if ob.parent_type == 'OBJECT' else None
+        if reframe is not None:     # like Maya, the values become relative to the frozen parent's frame
+            frame = w_new[p] @ reframe
+            moved = True
+        else:
+            frame = parent_frame(ob, w_old, w_new)
+            moved = p in w_new and not _same(w_new[p], w_old[p])
         b_eff = frame.inverted_safe() @ w_old[ob] if moved else ob.matrix_basis.copy()
+        keep = ob.type in KEEP_TYPES
+        if p in skipped or ob in refuse or keep:
+            if p not in skipped:
+                if not keep:
+                    refused.append(ob)
+                if moved:
+                    if reframe is not None:
+                        ob.matrix_parent_inverse = reframe
+                    ob.matrix_basis = b_eff
+            if not keep or p in skipped:    # below an instance nothing is frozen; below a camera / light it is
+                skipped.add(ob)
+            w_new[ob] = w_old[ob]
+            continue
+        if reframe is not None:
+            ob.matrix_parent_inverse = reframe
         bake = ob.type in BAKE_TYPES and ob.data is not None
+        full = bake or (ob.type in FREEZE_TYPES and plain_empty(ob))
         t, q, s = b_eff.decompose()
 
         if translate:
@@ -133,11 +197,11 @@ def freeze(objects, translate=True, rotate=True, scale=True):
                 carry = (frame.inverted_safe() @ w_old[ob] @ ob.matrix_basis.inverted_safe()).to_3x3()
                 ob.delta_location = carry @ Vector(ob.delta_location)
             ob.location = t - Vector(ob.delta_location)
-        if rotate and bake:
+        if rotate and full:
             clear_rotation(ob)
         elif moved:
             set_rotation(ob, q)
-        if scale and bake:
+        if scale and full:
             ob.scale = ob.delta_scale = (1.0, 1.0, 1.0)
         elif moved:
             ob.scale = s
@@ -148,11 +212,38 @@ def freeze(objects, translate=True, rotate=True, scale=True):
         if bake and not _is_identity(d):
             copies += bake_into_data(ob, d)
         w_new[ob] = frame @ b_new
-    return len(obs), copies
+        if full and translate and rotate and scale:
+            framed[ob] = frame_inverse(ob)
+    kept = sum(1 for ob in obs if ob.type in KEEP_TYPES and ob not in skipped)
+    return len(obs) - len(skipped) - kept, copies, refused
+
+
+def instanced(ob):
+    """An instance Freeze leaves alone, like Maya: an object sharing its data with another one, or a group made by
+    (or copied by) Duplicate Special > Instance."""
+    from .duplicate import INSTANCE_TAG, is_instance
+    if ob.data is not None:
+        return is_instance(ob)
+    if ob.get(INSTANCE_TAG):
+        return True
+    return any(o.data is None and o.get(INSTANCE_TAG) == ob.name for o in bpy.data.objects)
 
 
 def reset(objects, translate=True, rotate=True, scale=True):
-    for ob in objects:
+    """Maya Reset Transformations: translate / rotate / scale back to 0 / 0 / 1; with translate the pivot goes back
+    to the frame origin too (the geometry and the children stay; the geometry is then where the last freeze left
+    it)."""
+    for ob in parents_first(objects):
+        d = Vector(ob.delta_location)
+        if translate and d.length > EPS:
+            # the pivot offset goes into the data (its place in the frame, as the last freeze left it) and out of
+            # the children's parent inverse, so they keep their values in the frame
+            if ob.type in BAKE_TYPES and ob.data is not None:
+                bake_into_data(ob, Matrix.Translation(d))
+            ob.delta_location = (0.0, 0.0, 0.0)
+            for ch in ob.children:
+                if ch.parent_type == 'OBJECT':
+                    ch.matrix_parent_inverse = Matrix.Translation(d) @ ch.matrix_parent_inverse
         if translate:
             ob.location = (0.0, 0.0, 0.0)
         if rotate:
@@ -170,24 +261,46 @@ def _bbox_center(corners):
     return (lo + hi) / 2
 
 
-def local_center(ob):
-    """Bounding-box centre in ``ob``'s local space, or None (nothing to centre on)."""
-    if ob.type in BAKE_TYPES and ob.data is not None:
-        return _bbox_center([Vector(v) for v in ob.bound_box])
-    corners = []
-    stack = list(ob.children)
+def _box_corners(lo, hi):
+    return [Vector((x, y, z)) for x in (lo.x, hi.x) for y in (lo.y, hi.y) for z in (lo.z, hi.z)]
+
+
+def local_box(ob):
+    """(lo, hi) of ``ob``'s own data and all its descendants, axis-aligned in ``ob``'s space, or None (nothing to
+    centre on). Like Maya, level by level: each child's box (with everything below it) is made axis-aligned in its
+    parent's space, a box of boxes."""
+    kids, order, stack = {}, [], [ob]
     while stack:
-        ch = stack.pop()
-        stack.extend(ch.children)
-        if ch.type in BAKE_TYPES and ch.data is not None:
-            corners.extend(ch.matrix_world @ Vector(v) for v in ch.bound_box)
-    if not corners:
-        return None
-    return ob.matrix_world.inverted_safe() @ _bbox_center(corners)
+        o = stack.pop()
+        order.append(o)
+        kids[o] = list(o.children)
+        stack.extend(kids[o])
+    boxes = {}
+    for o in reversed(order):                 # every child before its parent
+        pts = [Vector(v) for v in o.bound_box] if o.type in BAKE_TYPES and o.data is not None else []
+        below = [(ch, boxes[ch]) for ch in kids[o] if boxes.get(ch) is not None]
+        if below:
+            inv = o.matrix_world.inverted_safe()
+            for ch, (lo, hi) in below:
+                to_parent = inv @ ch.matrix_world
+                pts.extend(to_parent @ c for c in _box_corners(lo, hi))
+        boxes[o] = (Vector(tuple(min(p[i] for p in pts) for i in range(3))),
+                    Vector(tuple(max(p[i] for p in pts) for i in range(3)))) if pts else None
+    return boxes[ob]
+
+
+def local_center(ob):
+    """Bounding-box centre in ``ob``'s local space, or None (nothing to centre on).
+
+    Like Maya, the box holds ``ob``'s own data and all its descendants', in ``ob``'s own space (``local_box``).
+    """
+    box = local_box(ob)
+    return None if box is None else (box[0] + box[1]) / 2
 
 
 def shift_pivot(ob, c):
-    """Move ``ob``'s origin by the local offset ``c``: data, translate and children stay."""
+    """Move ``ob``'s origin by the local offset ``c``: data, translate and children stay (like Maya, the children
+    keep their values too: the parent inverse takes the move)."""
     w_old = {ob: ob.matrix_world.copy()}
     for ch in ob.children:
         w_old[ch] = ch.matrix_world.copy()
@@ -197,6 +310,9 @@ def shift_pivot(ob, c):
         bake_into_data(ob, Matrix.Translation(-c))
     w_new = {ob: w_old[ob] @ Matrix.Translation(c)}
     for ch in ob.children:
+        if ch.parent_type == 'OBJECT':
+            ch.matrix_parent_inverse = Matrix.Translation(-c) @ ch.matrix_parent_inverse
+            continue
         frame = parent_frame(ch, w_old, w_new)
         b_new = frame.inverted_safe() @ w_old[ch]
         diff = b_new.translation - ch.matrix_basis.translation
@@ -240,10 +356,24 @@ class ALLSET_OT_freeze_transform(_SelectedObjectsOp, bpy.types.Operator):
     scale: BoolProperty(name="Scale", default=True)
 
     def execute(self, context):
-        obs = self.objects(context)
+        from .duplicate import unshare
+        from .group import selected_objects
+        obs = selected_objects(context)       # with groups a 3D View hides by its Locators filter
         if not obs:
+            self.report({'WARNING'}, "Nothing selected")
             return {'CANCELLED'}
-        count, copies = freeze(obs, self.translate, self.rotate, self.scale)
+        from .. import preferences
+        refuse = ()
+        if preferences.get(context).unshare_instances:     # an instance becomes a plain object, then freezes
+            copies = unshare(obs)
+        else:                                               # like Maya: an instance is not frozen (a warning)
+            copies = 0
+            refuse = {ob for ob in hierarchy(obs) if instanced(ob)}
+        count, baked, refused = freeze(obs, self.translate, self.rotate, self.scale, refuse)
+        copies += baked
+        if refused:
+            self.report({'WARNING'}, i18n.compose("Not frozen, an instance shares its geometry: {names}",
+                                                  names=", ".join(ob.name for ob in refused)))
         msg = f"Froze {count} object(s)"
         if copies:
             msg += f"; {copies} shared data block(s) made single user"

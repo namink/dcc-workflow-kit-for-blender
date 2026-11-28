@@ -23,6 +23,9 @@ ends and its undo never restores the cursor, so:
 import bpy
 from bpy.app.handlers import persistent
 
+from .. import live_refs
+from .. import update_summary
+
 SAMPLES = 64          # selected vertices compared (spread over the selection)
 EPS = 1e-6            # smallest offset that counts as a move
 SAME = 1e-5           # samples moved by the same vector within this
@@ -65,7 +68,7 @@ def _running(context):
     from .manip_scale import TRANSFORM_MODALS
     try:
         for window in context.window_manager.windows:
-            for op in window.modal_operators:
+            for op in live_refs.running_modals(window):
                 if op.bl_idname.startswith(TRANSFORM_MODALS):
                     return op.bl_idname
     except (AttributeError, ReferenceError):
@@ -287,7 +290,7 @@ def _on_depsgraph(_scene, depsgraph):
     if _snap["points"] is None:
         return
     try:
-        for change in depsgraph.updates:
+        for change in update_summary.updates(depsgraph, _on_depsgraph):
             if change.is_updated_geometry:
                 _geom[0] += 1
                 return

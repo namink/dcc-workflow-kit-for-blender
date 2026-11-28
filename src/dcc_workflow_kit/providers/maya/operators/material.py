@@ -10,124 +10,71 @@ or to the object the RMB menu was opened on when nothing is selected.
   shading group): one slot, every face/spline index 0.
 - Face assignment (mesh edit mode, face select mode, selected faces) = only those
   faces: the material's slot is found or added and their ``material_index`` set.
-  A mesh without slots first gets an empty slot (Blender's default grey, Maya's
-  lambert1) so the other faces keep it.
+  A mesh without slots first gets an empty slot so the other faces stay without a material.
+
+New objects get no material (Blender's grey); there is no default material.
 """
 
 import contextlib
 
 import bmesh
 import bpy
-from bpy.props import BoolProperty, EnumProperty, StringProperty
+from bpy.props import BoolProperty, StringProperty
 
 from .. import undo_steps
-from .. import compat, depsgraph_filter
+from .. import update_summary
+from .. import compat
 
 SUPPORTED = {'MESH', 'CURVE', 'SURFACE', 'FONT', 'META'}
 
-# Maya shader kinds (shelf shader buttons) on Principled BSDF.
-# Default values (lambert family).
-# Every lambert-family shader: color 0.5 grey, incandescence black (Principled's default Emission Color is white at
-# strength 0: the AE showed white), specularColor 0.5. diffuse 0.8 has no Principled input (its "Weight" socket is
-# disabled), so a "Maya Diffuse" Mix node (``ensure_diffuse``) puts color x diffuse into Base Color.
-_GREY = (0.5, 0.5, 0.5, 1.0)
-_BLACK = (0.0, 0.0, 0.0, 1.0)
-_COMMON = {"Base Color": _GREY, "Emission Color": _BLACK}
-_SPECULAR = {**_COMMON, "Specular Tint": _GREY}
-MAYA_ECCENTRICITY, MAYA_ROLL_OFF, MAYA_COSINE_POWER = 0.3, 0.7, 20.0
-
-
-def eccentricity_roughness(e):
-    """Principled Roughness for a Maya Blinn eccentricity: Blinn's highlight is the Trowbridge-Reitz distribution
-    with c3 = eccentricity (Blinn 1977) = the GGX alpha, and Principled's alpha = roughness^2."""
-    return max(0.0, min(1.0, e)) ** 0.5
-
-
-def cosine_power_roughness(n):
-    """Principled Roughness for a Maya Phong cosine power: exponent n <-> microfacet alpha = sqrt(2 / (n + 2)),
-    alpha = roughness^2."""
-    return (2.0 / (max(2.0, n) + 2.0)) ** 0.25
-
-
-# kind -> (Maya node name, UI label, Principled inputs).
-MATERIALS = {
-    # standardSurface: baseColor 0.8 (= Principled's), specularRoughness 0.4, emissionColor white
-    'STANDARD_SURFACE': ("standardSurface", "Standard Surface", {"Roughness": 0.4}),
-    # Arnold's default material (Maya with mtoa); same Principled stand-in
-    'AI_STANDARD_SURFACE': ("aiStandardSurface", "aiStandardSurface", {}),
-    'LAMBERT': ("lambert", "Lambert", {**_COMMON, "Roughness": 1.0, "Specular IOR Level": 0.0}),
-    # blinn: eccentricity 0.3, specularRollOff 0.7 (AE row = Specular IOR Level), specularColor 0.5 (#71)
-    'BLINN': ("blinn", "Blinn", {**_SPECULAR, "Roughness": eccentricity_roughness(MAYA_ECCENTRICITY),
-                                 "Specular IOR Level": MAYA_ROLL_OFF}),
-    # phong: cosinePower 20, specularColor 0.5 (#71)
-    'PHONG': ("phong", "Phong", {**_SPECULAR, "Roughness": cosine_power_roughness(MAYA_COSINE_POWER)}),
-    'SURFACE': ("surfaceShader", "Surface Shader", {"Emission Strength": 1.0}),
-    # the rest of Maya's Hypershade Create > Maya > Surface list that Blender can build (Principled stand-ins
-    # plus a node or two)
-    # phongE: roughness 0.5, highlightSize 0.5 (Specular IOR Level), whiteness 0.5 (Specular Tint)
-    'PHONG_E': ("phongE", "Phong E", {**_SPECULAR, "Roughness": 0.5, "Specular IOR Level": 0.5}),
-    # anisotropic: roughness 0.7, angle 0, specularColor 0.5 (spreadX 13 / spreadY 3: Blender's Anisotropic 0.5 stays)
-    'ANISOTROPIC': ("anisotropic", "Anisotropic", {**_SPECULAR, "Roughness": 0.7, "Anisotropic": 0.5,
-                                                   "Anisotropic Rotation": 0.0}),
-    'RAMP': ("rampShader", "Ramp Shader", {"Roughness": 0.5, "Emission Color": _BLACK}),
-    'LAYERED': ("layeredShader", "Layered Shader", {"Emission Color": _BLACK}),
-    'USE_BACKGROUND': ("useBackground", "Use Background", {}),
-}
-# Kinds whose look comes from extra nodes around the Principled BSDF (``_build``)
-BUILT = {'RAMP', 'LAYERED', 'USE_BACKGROUND'}
-KIND_ITEMS = [(k, v[1], f"Maya {v[0]} (Principled BSDF)") for k, v in MATERIALS.items()]
-# The Assign Favorite Material submenu (Maya's surface-shader favourites).
-FAVORITES = ('LAMBERT', 'BLINN', 'PHONG', 'STANDARD_SURFACE')
-# ID property naming the Maya node type of a kit-made material (AE tab label/sections).
+# Every Maya entry that makes a material (Assign New / Favorite Material, the marking menu, the shelf, Hypershade
+# Create, the command line's shadingNode) makes the same thing: Blender's new material, a Principled BSDF with
+# Blender's own values and Blender's name (Material, Material.001 ...). Shader values and formulas are Blender's.
+# ID property of materials made by older kit versions: the Maya node type they were made as (lambert, blinn,
+# rampShader ...). Such a material keeps rendering as it was saved and shows the same Principled BSDF tab.
 TYPE_PROP = "allset_type"
-# The default material, like Maya: every new shape joins initialShadingGroup, whose surface
-# shader is lambert1 (a lambert); Delete Unused Nodes keeps it, a new Lambert is lambert2.
-DEFAULT_PROP = "allset_default"
-DEFAULT_NAME = "lambert1"
+# New materials keep their viewport display colour equal to Base Color (the kit's shaded display mode draws it).
+SYNC_PROP = "allset_display_sync"
+NEW_NAME = "Material"
+# Maya surface shader types the command line's shadingNode makes as a new material.
+SURFACE_TYPES = ("standardSurface", "aiStandardSurface", "lambert", "blinn", "phong", "phongE", "anisotropic")
+# The command line's initialShadingGroup: the shapes (and faces) without a material. Older kit versions marked a
+# default material "lambert1" with "allset_default"; such a material is a plain material now.
 DEFAULT_GROUP = "initialShadingGroup"
-DEFAULT_TYPES = {'MESH', 'SURFACE'}   # Maya polygon and NURBS surface shapes (curves have no shading group)
+SHADED_TYPES = {'MESH', 'SURFACE'}   # Maya polygon and NURBS surface shapes (curves have no shading group)
 
 
 # --- data ------------------------------------------------------------------------------------
 
-def new_material(kind):
-    """A Maya-named (lambert1, blinn2, ...) Principled material of this kind."""
-    from . import naming
-    base, _label, values = MATERIALS[kind]
-    if _maya_scene():
-        default_material()   # Maya's scene always has lambert1, so a new Lambert is lambert2
-    n = naming.next_number(base, {m.name for m in bpy.data.materials})
-    mat = bpy.data.materials.new(f"{base}{n}")
-    mat[TYPE_PROP] = base
+def new_material():
+    """Blender's new material: a Principled BSDF with Blender's values, named by Blender (Material, Material.001)."""
+    mat = bpy.data.materials.new(NEW_NAME)
+    mat[SYNC_PROP] = True
     compat.ensure_material_nodes(mat)
-    node = next(nd for nd in mat.node_tree.nodes if nd.type == 'BSDF_PRINCIPLED')
-    for socket, value in values.items():
-        node.inputs[socket].default_value = value
-    if kind == 'SURFACE':
-        node.inputs["Emission Color"].default_value = node.inputs["Base Color"].default_value
-    if kind in BUILT:
-        _build(mat, node, kind)
-    if kind in DIFFUSE_KINDS:
-        ensure_diffuse(mat)
     sync_display(mat)
     return mat
 
 
-# --- Maya diffuse (#120) ---------------------------------------------------------------------------------
-# Maya's lambert family renders color x diffuse x light (diffuse 0.8 for
-# lambert / blinn / phong / phongE / anisotropic / rampShader, "rendered value = color x diffuse x intensity");
-# a texture connected to color is multiplied by diffuse as well. Principled has no diffuse weight, so a Mix node
-# (RGBA, MIX, factor = diffuse, A = black, B = the Maya colour) feeds Base Color: Base Color = diffuse x colour while
-# specular / emission / alpha stay untouched and the Principled BSDF stays linked straight to the output (Blender's
-# PrincipledBSDFWrapper needs that, $S\modules\bpy_extras\node_shader_utils.py:192-229). standardSurface has base 1 x
-# baseColor 0.8 and gets no node. The Principled Base Color default keeps the Maya colour too (sync), so readers that
-# skip links (Blender's own exporters) see the colour. Materials without the node read diffuse 1.0 (old files,
-# Blender-made materials: no migration).
+def maya_type(mat):
+    """The Maya node type the command line reports for a material: the type an older kit version recorded, else
+    standardSurface for a Principled BSDF material (its attributes take Standard Surface names), else "material"."""
+    if mat is None:
+        return "material"
+    recorded = mat.get(TYPE_PROP)
+    if isinstance(recorded, str) and recorded and _principled(mat) is not None:
+        return recorded
+    return "standardSurface" if _principled(mat) is not None else "material"
+
+
+# --- the "Maya Diffuse" node of older kit materials -------------------------------------------------------------
+# Lambert-family materials made by earlier kit versions have a Mix node (RGBA, MIX, factor = diffuse, A = black,
+# B = the colour or texture) in front of Principled Base Color. Such a material keeps rendering as it was saved:
+# its Color is the node's B input (``color_socket``), the Attribute Editor shows its Diffuse row, File > Export links
+# the colour straight to Base Color while it writes (``diffuse_bypass``), and Lighting/Shading > Convert Old Kit
+# Materials (``convert_old``) turns it into a plain Principled BSDF once. New materials have no such node.
 
 DIFFUSE_NODE = "Maya Diffuse"
 DIFFUSE_SOCKET = "Diffuse"       # AE / map-button name of the diffuse factor (operators/shading_maps.py)
-MAYA_DIFFUSE = 0.8
-DIFFUSE_KINDS = {'LAMBERT', 'BLINN', 'PHONG', 'PHONG_E', 'ANISOTROPIC', 'RAMP'}
 
 
 def _principled(mat):
@@ -172,29 +119,31 @@ def maya_input(mat, name):
     return bsdf.inputs.get(name)
 
 
-def ensure_diffuse(mat, value=MAYA_DIFFUSE):
-    """Give a Principled material the Maya Diffuse node (whatever fed Base Color moves to its B input) and set the
-    diffuse to ``value``; the node, or None without a Principled BSDF."""
-    bsdf = _principled(mat)
-    if bsdf is None:
+def convert_old(mat):
+    """Turn an older kit material's Maya Diffuse node into a plain Principled set-up: whatever feeds the node's
+    colour input is linked straight to Base Color, a plain colour becomes colour x diffuse, and the node is removed.
+    Returns None (nothing to convert), 'COLOR' or 'TEXTURE' (a linked colour: it now renders without the diffuse
+    factor, so it looks brighter)."""
+    node, bsdf = diffuse_node(mat), _principled(mat)
+    if node is None or bsdf is None or mat.library is not None:
         return None
-    node = diffuse_node(mat)
-    if node is None:
-        tree = mat.node_tree
-        base = bsdf.inputs["Base Color"]
-        node = tree.nodes.new('ShaderNodeMix')
-        node.name = node.label = DIFFUSE_NODE
-        node.data_type, node.blend_type, node.clamp_result = 'RGBA', 'MIX', False
-        node.location = (bsdf.location.x - 220, bsdf.location.y - 60)
-        _ident(node.inputs, "A_Color").default_value = _BLACK
-        b = _ident(node.inputs, "B_Color")
-        b.default_value = base.default_value
-        for link in list(base.links):
-            tree.links.new(link.from_socket, b)
+    tree, base = mat.node_tree, bsdf.inputs["Base Color"]
+    b = _ident(node.inputs, "B_Color")
+    fac = _ident(node.inputs, "Factor_Float")
+    for link in list(base.links):
+        if link.from_node == node:
             tree.links.remove(link)
-        tree.links.new(_ident(node.outputs, "Result_Color"), base)
-    _ident(node.inputs, "Factor_Float").default_value = value
-    return node
+    if b.is_linked:
+        tree.links.new(b.links[0].from_socket, base)
+        kind = 'TEXTURE'
+    else:
+        f = 1.0 if fac.is_linked else max(0.0, min(1.0, float(fac.default_value)))
+        r, g, bl, a = b.default_value
+        base.default_value = (r * f, g * f, bl * f, a)
+        kind = 'COLOR'
+    tree.nodes.remove(node)
+    sync_display(mat)
+    return kind
 
 
 def _sync_base(mat):
@@ -213,7 +162,7 @@ def _sync_base(mat):
 def diffuse_bypass():
     """Exchange-format writers (FBX / OBJ / glTF ...) read Base Color's default or an image node linked straight to
     it: for the duration, link whatever feeds each diffuse node's B directly to Base Color (default = the B colour),
-    then put the diffuse node back (kit File > Export, operators/file_io.write; Blender's own File > Export menu is
+    then put the diffuse node back (kit File > Export, operators/file_io_export.write; Blender's own File > Export menu is
     not wrapped)."""
     saved = []
     for mat in bpy.data.materials:
@@ -248,12 +197,12 @@ def diffuse_bypass():
 # Maya's shaded mode (5) draws the material colour. Blender's Solid shading with colour type MATERIAL (the kit's
 # display mode SHADED, operators/display.py) draws ``Material.diffuse_color``, the viewport display colour, which
 # a Principled Base Color edit (Attribute Editor Color, Blender's material panel) doesn't change. Kit materials
-# keep it equal to their Maya colour (surfaceShader: out colour = Emission Color; rampShader: the ramp's mean
-# colour) and transparency (Alpha); materials made in Blender keep Blender's own display colour.
+# keep it equal to their colour (Base Color; older kit materials: surfaceShader = Emission Color, rampShader = the
+# ramp's mean colour) and transparency (Alpha); materials made in Blender keep Blender's own display colour.
 
 def _maya_colour(mat):
-    """(r, g, b, a) Maya's shaded mode would show for a kit material, or None (not a kit material / no colour)."""
-    if mat is None or not mat.get(TYPE_PROP) or mat.node_tree is None:
+    """(r, g, b, a) the shaded display mode shows for a kit material, or None (not a kit material / no colour)."""
+    if mat is None or not (mat.get(TYPE_PROP) or mat.get(SYNC_PROP)) or mat.node_tree is None:
         return None
     bsdf = next((n for n in mat.node_tree.nodes if n.type == 'BSDF_PRINCIPLED'), None)
     if bsdf is None:
@@ -275,7 +224,7 @@ def _maya_colour(mat):
 
 
 def sync_display(mat):
-    """Set a kit material's viewport display colour to its Maya colour; True when it changed."""
+    """Set a kit material's viewport display colour to its colour; True when it changed."""
     col = _maya_colour(mat)
     if col is None or all(abs(x - y) < 1e-6 for x, y in zip(mat.diffuse_color, col)):
         return False
@@ -283,114 +232,12 @@ def sync_display(mat):
     return True
 
 
-def _build(mat, bsdf, kind):
-    """Node set-ups of Maya shaders that aren't one Principled BSDF:
-    rampShader = colour from a ramp over the facing ratio (Layer Weight Facing -> Color Ramp -> Base Color);
-    layeredShader = two layers mixed (Mix Shader; Maya's top layer transparency = the mix factor);
-    useBackground = the surface shows the background (Holdout)."""
-    nodes, links = mat.node_tree.nodes, mat.node_tree.links
-    out = next(n for n in nodes if n.type == 'OUTPUT_MATERIAL')
-    if kind == 'RAMP':
-        facing = nodes.new('ShaderNodeLayerWeight')
-        ramp = nodes.new('ShaderNodeValToRGB')
-        facing.location = (bsdf.location.x - 780, bsdf.location.y)
-        ramp.location = (bsdf.location.x - 520, bsdf.location.y)
-        for el in ramp.color_ramp.elements:      # default ramp (like Maya): one 0.5 grey entry
-            el.color = (0.5, 0.5, 0.5, 1.0)
-        links.new(facing.outputs["Facing"], ramp.inputs["Fac"])
-        links.new(ramp.outputs["Color"], bsdf.inputs["Base Color"])
-    elif kind == 'LAYERED':
-        second = nodes.new('ShaderNodeBsdfPrincipled')
-        mix = nodes.new('ShaderNodeMixShader')
-        second.location = (bsdf.location.x, bsdf.location.y - 700)
-        mix.location = (out.location.x - 200, out.location.y)
-        out.location.x += 100
-        mix.inputs["Fac"].default_value = 0.0      # top layer (input 1) fully opaque
-        links.new(bsdf.outputs["BSDF"], mix.inputs[1])
-        links.new(second.outputs["BSDF"], mix.inputs[2])
-        links.new(mix.outputs["Shader"], out.inputs["Surface"])
-    elif kind == 'USE_BACKGROUND':
-        hold = nodes.new('ShaderNodeHoldout')
-        hold.location = (bsdf.location.x, bsdf.location.y + 200)
-        links.new(hold.outputs["Holdout"], out.inputs["Surface"])
-
-
-def default_material(create=True):
-    """The scene's lambert1 (marked by DEFAULT_PROP, so a rename keeps it); made on first use with a fake user so
-    File > Optimize Scene Size / purges keep it like Maya's Delete Unused Nodes."""
-    mat = next((m for m in bpy.data.materials if m.get(DEFAULT_PROP)), None)
-    if mat is not None or not create:
-        return mat
-    old = bpy.data.materials.get(DEFAULT_NAME)
-    if old is not None and old.get(TYPE_PROP) == "lambert" and old.library is None:
-        # a kit "lambert1" from an older version (Assign New Material > Lambert): it becomes the default
-        old[DEFAULT_PROP] = True
-        old.use_fake_user = True
-        return old
-    mat = bpy.data.materials.new(DEFAULT_NAME)   # another material owns the name: Blender's suffix, names untouched
-    mat[TYPE_PROP] = "lambert"
-    mat[DEFAULT_PROP] = True
-    mat.use_fake_user = True
-    compat.ensure_material_nodes(mat)
-    node = next(nd for nd in mat.node_tree.nodes if nd.type == 'BSDF_PRINCIPLED')
-    for socket, value in MATERIALS['LAMBERT'][2].items():
-        node.inputs[socket].default_value = value
-    ensure_diffuse(mat)                      # Maya lambert1 diffuse 0.8
-    sync_display(mat)
-    return mat
-
-
-def is_default(mat):
-    return mat is not None and bool(mat.get(DEFAULT_PROP))
-
-
 def shading_group_name(mat):
-    """Maya's shading group of a material: initialShadingGroup for lambert1, else <material>SG."""
-    return DEFAULT_GROUP if is_default(mat) else f"{mat.name}SG"
+    """Maya's shading group of a material: <material>SG."""
+    return f"{mat.name}SG"
 
 
-def give_default(ob):
-    """A new shape without a material joins lambert1 (Maya: initialShadingGroup); True when assigned."""
-    if ob is None or ob.type not in DEFAULT_TYPES or ob.data is None or ob.library is not None:
-        return False
-    if any(m is not None for m in ob.data.materials) or any(s.material is not None for s in ob.material_slots):
-        return False
-    mat = default_material()
-    ob.data.materials.clear()
-    ob.data.materials.append(mat)
-    return True
-
-
-def _maya_scene(context=None):
-    from .. import preferences
-    try:
-        return preferences.get(context or bpy.context).maya_naming
-    except KeyError:
-        return True
-
-
-# New objects (any path: kit create, Blender's Add menu, duplicate, separate, import) are found by comparing the
-# scene's objects with the last known set; file load, undo and redo only re-baseline (their objects aren't new).
-_known = {}
 _busy = [False]
-
-
-def _baseline(*_args):
-    _known.clear()
-    for scene in bpy.data.scenes:
-        _known[scene.as_pointer()] = {o.as_pointer() for o in scene.objects}
-
-
-@bpy.app.handlers.persistent
-def _on_load(*_args):
-    _baseline()
-    if not bpy.data.filepath and _maya_scene():   # File > New: Maya's new scene already has lambert1
-        default_material()
-
-
-@bpy.app.handlers.persistent
-def _on_undo(*_args):
-    _baseline()
 
 
 @bpy.app.handlers.persistent
@@ -398,76 +245,22 @@ def _on_depsgraph(scene, depsgraph):
     if _busy[0]:
         return
     if depsgraph.id_type_updated('MATERIAL') or depsgraph.id_type_updated('NODETREE'):
+        update_summary.wrote()
         _busy[0] = True
         try:
             for mat in bpy.data.materials:
-                if mat.library is None and mat.get(TYPE_PROP):
+                if mat.library is None and (mat.get(TYPE_PROP) or mat.get(SYNC_PROP)):
                     sync_display(mat)
                 if mat.library is None:
                     _sync_base(mat)
         finally:
             _busy[0] = False
-    if not depsgraph.id_type_updated('OBJECT'):
-        return
-    key = scene.as_pointer()
-    known = _known.get(key)
-    # #191: objects are only added with a Scene / Collection update, and an addition raises the count —
-    # a move or a selection change skips the walk over every object (0.45 ms per update at 620 objects)
-    if known is not None and (not depsgraph_filter.structure_changed(depsgraph)
-                              or len(scene.objects) == len(known)):
-        return
-    now = {o.as_pointer() for o in scene.objects}
-    _known[key] = now
-    if known is None or not (now - known) or not _maya_scene():
-        return
-    _busy[0] = True
-    try:
-        for ob in scene.objects:
-            if ob.as_pointer() not in known:
-                give_default(ob)
-    finally:
-        _busy[0] = False
 
 
-HANDLERS = ((bpy.app.handlers.load_post, _on_load), (bpy.app.handlers.undo_post, _on_undo),
-            (bpy.app.handlers.redo_post, _on_undo), (bpy.app.handlers.depsgraph_update_post, _on_depsgraph))
+HANDLERS = ((bpy.app.handlers.depsgraph_update_post, _on_depsgraph),)
 
 
-# --- Maya attributes stored as Principled inputs (#71) -------------------------------------------------------------
-# The Attribute Editor shows Maya's numbers: Blinn Eccentricity and Phong Cosine Power are read from / written to the
-# Principled Roughness through the conversions above (nothing stored, so a Roughness edit elsewhere shows here).
-
-def _roughness_socket(mat):
-    if mat is None or not compat.material_uses_nodes(mat):
-        return None
-    node = next((n for n in mat.node_tree.nodes if n.type == 'BSDF_PRINCIPLED'), None)
-    return node.inputs.get("Roughness") if node is not None else None
-
-
-def _get_eccentricity(self):
-    sock = _roughness_socket(self)
-    return MAYA_ECCENTRICITY if sock is None else float(sock.default_value) ** 2
-
-
-def _set_eccentricity(self, value):
-    sock = _roughness_socket(self)
-    if sock is not None:
-        sock.default_value = eccentricity_roughness(value)
-
-
-def _get_cosine_power(self):
-    sock = _roughness_socket(self)
-    if sock is None:
-        return MAYA_COSINE_POWER
-    r4 = max(float(sock.default_value), 1e-3) ** 4
-    return max(2.0, 2.0 / r4 - 2.0)
-
-
-def _set_cosine_power(self, value):
-    sock = _roughness_socket(self)
-    if sock is not None:
-        sock.default_value = cosine_power_roughness(value)
-
+# --- Diffuse of older kit materials ---------------------------------------------------------------------------------
 
 def _get_diffuse(self):
     sock = maya_input(self, DIFFUSE_SOCKET)
@@ -475,26 +268,20 @@ def _get_diffuse(self):
 
 
 def _set_diffuse(self, value):
-    if compat.material_uses_nodes(self):
-        ensure_diffuse(self, max(0.0, min(1.0, value)))
+    sock = maya_input(self, DIFFUSE_SOCKET)       # only older kit materials have a diffuse factor
+    if sock is not None:
+        sock.default_value = max(0.0, min(1.0, value))
 
 
-MATERIAL_PROPS = ("allset_eccentricity", "allset_cosine_power", "allset_diffuse")
+MATERIAL_PROPS = ("allset_diffuse",)
 
 
 def register_props():
     from bpy.props import FloatProperty
-    bpy.types.Material.allset_eccentricity = FloatProperty(
-        name="Eccentricity", min=0.0, max=1.0, precision=3, get=_get_eccentricity, set=_set_eccentricity,
-        description="Maya Blinn eccentricity (size of the highlight); Principled Roughness = sqrt(eccentricity)")
-    bpy.types.Material.allset_cosine_power = FloatProperty(
-        name="Cosine Power", min=2.0, soft_max=100.0, precision=3, get=_get_cosine_power, set=_set_cosine_power,
-        description="Maya Phong cosine power (higher = smaller highlight); Principled Roughness = "
-                    "(2 / (power + 2)) ^ 0.25")
     bpy.types.Material.allset_diffuse = FloatProperty(
         name="Diffuse", min=0.0, max=1.0, precision=3, get=_get_diffuse, set=_set_diffuse,
-        description="Maya diffuse: the share of the colour reflected (Base Color = Color x Diffuse through the "
-                    "Maya Diffuse node)")
+        description="Maya diffuse of a material made by an older kit version: the share of the colour reflected "
+                    "(Base Color = Color x Diffuse through its Maya Diffuse node)")
 
 
 def unregister_props():
@@ -507,17 +294,12 @@ def register_handlers():
     for lst, fn in HANDLERS:
         if fn not in lst:
             lst.append(fn)
-    try:
-        _baseline()
-    except AttributeError:   # register runs with restricted bpy.data at startup: the first update baselines
-        pass
 
 
 def unregister_handlers():
     for lst, fn in HANDLERS:
         if fn in lst:
             lst.remove(fn)
-    _known.clear()
 
 
 def targets(context, rmb=False):
@@ -574,8 +356,8 @@ def assign_faces(ob, mat):
     slots = ob.material_slots
     index = next((i for i, s in enumerate(slots) if s.material == mat), None)
     if index is None:
-        if not slots:   # the rest of the mesh keeps the default: Maya's lambert1, else no material
-            ob.data.materials.append(default_material() if _maya_scene() else None)
+        if not slots:   # the rest of the mesh stays without a material (an empty slot)
+            ob.data.materials.append(None)
         ob.data.materials.append(mat)
         index = len(ob.material_slots) - 1
         bm = bmesh.from_edit_mesh(ob.data)
@@ -612,24 +394,29 @@ _RMB = BoolProperty(name="From RMB Menu", options={'HIDDEN', 'SKIP_SAVE'},
                     description="Use the object under the RMB menu when nothing is selected")
 
 
-def create_and_assign(op, context, kind):
+# A Maya shader type of an older call (a saved shelf button, a custom marking menu): accepted and ignored, every
+# entry makes the same new material.
+_KIND = StringProperty(name="Type", options={'HIDDEN', 'SKIP_SAVE'})
+
+
+def create_and_assign(op, context):
     obs = targets(context, op.rmb)
     if not obs:
         op.report({'WARNING'}, "Select objects or faces to assign a material to")
         return {'CANCELLED'}
-    mat = new_material(kind)
+    mat = new_material()
     _show_in_ae(context, assign(context, mat, obs))
     return {'FINISHED'}
 
 
 class ALLSET_OT_shelf_material(bpy.types.Operator):
-    """Create a material and assign it to the selected objects or faces (Maya shelf
-    material buttons, Assign Favorite Material)"""
+    """Create a new material (Blender's Principled BSDF) and assign it to the selected objects or faces (Maya
+    shelf material button, Assign Favorite Material)"""
     bl_idname = "allset.shelf_material"
-    bl_label = "Assign New Material"
+    bl_label = "New Material"
     bl_options = {'REGISTER', 'UNDO'}
 
-    kind: EnumProperty(items=KIND_ITEMS)
+    kind: _KIND
     rmb: _RMB
 
     @classmethod
@@ -637,32 +424,26 @@ class ALLSET_OT_shelf_material(bpy.types.Operator):
         return _poll(context)
 
     def execute(self, context):
-        return create_and_assign(self, context, self.kind)
+        return create_and_assign(self, context)
 
 
 @undo_steps.no_redo_panel      # no Adjust Last Operation (Maya has none)
 class ALLSET_OT_assign_new_material(bpy.types.Operator):
-    """Pick a material type, create it and assign it to the selected objects or faces
+    """Create a new material (Blender's Principled BSDF) and assign it to the selected objects or faces
     (Maya Assign New Material, Shift+T)"""
     bl_idname = "allset.assign_new_material"
     bl_label = "Assign New Material"
     bl_options = {'REGISTER', 'UNDO'}
-    bl_property = "kind"
 
-    kind: EnumProperty(items=KIND_ITEMS, name="Material")
+    kind: _KIND
     rmb: _RMB
 
     @classmethod
     def poll(cls, context):
         return _poll(context)
 
-    def invoke(self, context, event):
-        # Maya's "Assign New Material" type list with its search field.
-        context.window_manager.invoke_search_popup(self)
-        return {'RUNNING_MODAL'}
-
     def execute(self, context):
-        return create_and_assign(self, context, self.kind)
+        return create_and_assign(self, context)
 
 
 class ALLSET_OT_assign_material(bpy.types.Operator):
@@ -730,19 +511,47 @@ class ALLSET_OT_material_attributes(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class ALLSET_OT_convert_old_materials(bpy.types.Operator):
+    """Turn the materials made by older kit versions into plain Principled BSDF materials: the Maya Diffuse node in
+    front of Base Color is removed (a plain colour keeps its look, a texture now shows at full brightness)"""
+    bl_idname = "allset.convert_old_materials"
+    bl_label = "Convert Old Kit Materials"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        done = {'COLOR': 0, 'TEXTURE': 0}
+        for mat in bpy.data.materials:
+            kind = convert_old(mat)
+            if kind is not None:
+                done[kind] += 1
+        total = done['COLOR'] + done['TEXTURE']
+        from .. import results
+        if not total:
+            results.result(self, "No old kit materials to convert")
+            return {'CANCELLED'}
+        msg = f"Converted {total} material(s) to plain Principled BSDF"
+        if done['TEXTURE']:
+            msg += (f"; {done['TEXTURE']} with a texture on Color now show it at full brightness "
+                    "(brighter than before)")
+        if done['TEXTURE']:
+            self.report({'WARNING'}, msg)
+        else:
+            results.result(self, msg)
+        return {'FINISHED'}
+
+
 # --- menus -----------------------------------------------------------------------------------
 
 class ALLSET_MT_assign_favorite_material(bpy.types.Menu):
-    """Create a material of a favourite type and assign it (Maya Assign Favorite Material)"""
+    """Create a new material and assign it (Maya Assign Favorite Material: Blender has one material, the Principled
+    BSDF)"""
     bl_idname = "ALLSET_MT_assign_favorite_material"
     bl_label = "Assign Favorite Material"
     rmb = False
 
     def draw(self, context):
-        for kind in FAVORITES:
-            op = self.layout.operator("allset.shelf_material", text=MATERIALS[kind][1], icon='MATERIAL')
-            op.kind = kind
-            op.rmb = self.rmb
+        op = self.layout.operator("allset.shelf_material", text="New Material", icon='MATERIAL')
+        op.rmb = self.rmb
 
 
 class ALLSET_MT_assign_existing_material(bpy.types.Menu):
@@ -769,5 +578,5 @@ class ALLSET_MT_assign_existing_material_rmb(ALLSET_MT_assign_existing_material)
 
 
 classes = (ALLSET_OT_shelf_material, ALLSET_OT_assign_new_material, ALLSET_OT_assign_material,
-           ALLSET_OT_material_attributes, ALLSET_MT_assign_favorite_material,
+           ALLSET_OT_material_attributes, ALLSET_OT_convert_old_materials, ALLSET_MT_assign_favorite_material,
            ALLSET_MT_assign_existing_material, ALLSET_MT_assign_existing_material_rmb)

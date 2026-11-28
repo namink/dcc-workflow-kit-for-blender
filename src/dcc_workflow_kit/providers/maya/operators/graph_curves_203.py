@@ -34,7 +34,8 @@ import math
 import bpy
 from bpy.props import EnumProperty
 
-from .. import compat, results, undo_steps
+from .. import compat, live_refs, results, undo_steps
+from .. import update_summary
 from .. import i18n
 
 EPS = 1e-4
@@ -113,7 +114,7 @@ def continuous(quats):
 
 
 def squad_controls(quats):
-    """Shoemake's inner quadrangle points; an end key counts itself as its missing neighbour (close to Maya 2022's
+    """Shoemake's inner quadrangle points; an end key counts itself as its missing neighbour (close to Maya's
     quaternionSquad; mirrored ends are not)."""
     out = []
     n = len(quats)
@@ -651,7 +652,7 @@ SYNC_DELAY = 0.1
 def _transform_running():
     wm = bpy.context.window_manager
     for w in getattr(wm, "windows", ()):
-        for op in w.modal_operators:
+        for op in live_refs.running_modals(w):
             if op.bl_idname.startswith("TRANSFORM_OT"):
                 return True
     return False
@@ -681,12 +682,13 @@ def _sync_tick():
 
 @bpy.app.handlers.persistent
 def _on_depsgraph(_scene, depsgraph):
-    if _state["busy"] or _state["scheduled"]:
+    # scheduled: unless a file load dropped the timer meanwhile
+    if _state["busy"] or (_state["scheduled"] and bpy.app.timers.is_registered(_sync_tick)):
         return
     # an Action in the update flags the type (one array read; a pass over the update walks every ID of the depsgraph)
     if not depsgraph.id_type_updated('ACTION'):
         return
-    if any(isinstance(u.id, bpy.types.Action) for u in depsgraph.updates):
+    if any(isinstance(u.id, bpy.types.Action) for u in update_summary.updates(depsgraph, _on_depsgraph)):
         _state["scheduled"] = True
         bpy.app.timers.register(_sync_tick, first_interval=SYNC_DELAY)
 

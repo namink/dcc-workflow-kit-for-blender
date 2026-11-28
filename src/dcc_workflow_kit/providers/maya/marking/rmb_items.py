@@ -93,6 +93,72 @@ class ALLSET_OT_mm_select_hierarchy(bpy.types.Operator):
         return {'FINISHED'}
 
 
+# --- RMB list: joint items (#578) -----------------------------------------------------------------
+
+def joint_targets(context):
+    """(armature, [pose bones]) the joint menu acts on: the joint under the mouse when it opened, else the selected
+    joints of the armature (Maya: the joint's name, else the selection)."""
+    wm = context.window_manager
+    arm = target(context)
+    if arm is None or arm.type != 'ARMATURE':
+        return None, []
+    name = getattr(wm, "allset_mm_joint", "")
+    pb = arm.pose.bones.get(name) if name else None
+    if pb is not None:
+        return arm, [pb]
+    return arm, [b for b in arm.pose.bones if b.select]
+
+
+def _select_joints(context, arm, bones):
+    """``bones`` become the selection (replace), the first one the lead."""
+    if arm.mode != 'POSE':
+        _select_only(context, [arm], arm)
+        bpy.ops.object.mode_set(mode='POSE')
+    for ob in context.selected_objects:
+        if ob is not arm and ob.mode != 'POSE':
+            ob.select_set(False)
+    for other in context.objects_in_mode_unique_data or ():
+        if other.type == 'ARMATURE':
+            for b in other.pose.bones:
+                b.select = False
+    for b in bones:
+        b.select = True
+    if bones:
+        arm.data.bones.active = bones[0].bone
+
+
+class ALLSET_OT_mm_joint(bpy.types.Operator):
+    """Run this joint item on the joint the marking menu was opened on, like Maya"""
+    bl_idname = "allset.mm_joint"
+    bl_label = "Joint"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    action: EnumProperty(items=(('SET_PREFERRED', "Set Preferred Angle", ""),
+                                ('ASSUME_PREFERRED', "Assume Preferred Angle", ""),
+                                ('SELECT', "Select", ""), ('HIERARCHY', "Select Hierarchy", ""),
+                                ('ATTRIBUTES', "Attributes", "")), options={'SKIP_SAVE'})
+
+    @classmethod
+    def poll(cls, context):
+        return joint_targets(context)[0] is not None
+
+    def execute(self, context):
+        from ..operators import rig_maya
+        arm, bones = joint_targets(context)
+        if arm is None:
+            return {'CANCELLED'}
+        if self.action in {'SET_PREFERRED', 'ASSUME_PREFERRED'}:
+            bones = bones or [b for b in arm.pose.bones if b.parent is None]     # no joint: the whole skeleton
+            (rig_maya.set_preferred if self.action == 'SET_PREFERRED' else rig_maya.assume_preferred)(bones, True)
+            return {'FINISHED'}
+        if self.action == 'HIERARCHY':
+            bones = [x for b in bones for x in (b, *b.children_recursive)]
+        _select_joints(context, arm, bones)
+        if self.action == 'ATTRIBUTES':
+            return bpy.ops.allset.object_attributes()
+        return {'FINISHED'}
+
+
 BBOX_OWN = "allset_bbox_own"
 
 
@@ -364,6 +430,6 @@ class ALLSET_OT_mm_camera_based(bpy.types.Operator):
         return {'FINISHED'}
 
 
-classes = (ALLSET_OT_mm_object_item, ALLSET_OT_mm_select_hierarchy, ALLSET_OT_mm_bounding_box,
+classes = (ALLSET_OT_mm_object_item, ALLSET_OT_mm_joint, ALLSET_OT_mm_select_hierarchy, ALLSET_OT_mm_bounding_box,
            ALLSET_OT_mm_uv_set, ALLSET_OT_mm_color_set, ALLSET_MT_uv_sets_rmb, ALLSET_MT_color_sets_rmb,
            ALLSET_OT_mm_poly, ALLSET_OT_mm_camera_based)

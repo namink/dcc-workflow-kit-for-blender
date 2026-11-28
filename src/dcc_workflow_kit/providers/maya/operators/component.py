@@ -88,7 +88,9 @@ class ALLSET_OT_bevel(_BevelProps, bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        return context.mode == 'EDIT_MESH'
+        if context.mode == 'EDIT_MESH':
+            return True
+        return context.mode == 'OBJECT' and any(o.type == 'MESH' for o in context.selected_objects)
 
     def invoke(self, context, event):
         # Maya bevels at once (no drag; Esc / no mouse keeps it): #16,
@@ -97,6 +99,8 @@ class ALLSET_OT_bevel(_BevelProps, bpy.types.Operator):
     def execute(self, context):
         from . import bevel_maya, extrude, units
         unit = units.maya_unit(context.scene)
+        if context.mode == 'OBJECT':
+            return self._objects(context, unit)
         chamfer = bevel_affect(context.scene.tool_settings.mesh_select_mode) == 'VERTICES'
         done = 0
         for ob in context.objects_in_mode_unique_data:
@@ -115,6 +119,27 @@ class ALLSET_OT_bevel(_BevelProps, bpy.types.Operator):
         if not done:
             self.report({'WARNING'}, "Select edges or faces to bevel.")
             return {'CANCELLED'}
+        return {'FINISHED'}
+
+    def _objects(self, context, unit):
+        """Maya on an object selection: every edge of each selected mesh, still in object mode, with the new
+        polyBevel node in the In-View Editor."""
+        from . import bevel_maya, extrude
+        done, seen = [], set()
+        for ob in context.selected_objects:
+            if ob.type != 'MESH' or ob.data in seen:
+                continue
+            seen.add(ob.data)
+            if extrude.record_object(context, ob, bevel_maya.BEVEL, _bevel_params(self), unit) is not None:
+                done.append(ob)
+        if not done:
+            self.report({'WARNING'}, "Select edges or faces to bevel.")
+            return {'CANCELLED'}
+        view_layer = context.view_layer
+        if view_layer.objects.active not in done:
+            view_layer.objects.active = done[-1]
+        extrude.SHOWN.clear()
+        extrude.SHOWN["ob"] = view_layer.objects.active.name
         return {'FINISHED'}
 
 
@@ -232,11 +257,12 @@ class ALLSET_OT_convert_selection(bpy.types.Operator):
 
 
 def delete_components(bm, mode):
-    """Maya Delete on one mesh's selection; ``mode`` = 'FACE' / 'EDGE' / 'VERT'.
+    """Maya's Delete key on one mesh's selection; ``mode`` = 'FACE' / 'EDGE' / 'VERT'.
 
-    Returns (deleted, skipped): elements removed and border edges left alone.
-    DeleteEdge (polyDelEdge -cv true: non-border
-    edges, vertices cleaned up) and DeleteVertex (vertices and their attached edges).
+    Returns (deleted, skipped). Like Maya: faces go with their unused edges and vertices; edges between two faces
+    go and the faces merge, every vertex stays (border edges are left alone); a vertex goes only when it has two
+    edges (they become one), others stay. Edit Mesh > Delete Edge/Vertex (Ctrl+Delete, delete_edge_vertex_edges) is
+    the one that also cleans up the vertices left with two edges and deletes vertices with their edges.
     """
     if mode == 'FACE':
         faces = [f for f in bm.faces if f.select]
@@ -246,12 +272,103 @@ def delete_components(bm, mode):
         sel = [e for e in bm.edges if e.select]
         inner = [e for e in sel if len(e.link_faces) == 2]
         if inner:
-            bmesh.ops.dissolve_edges(bm, edges=inner, use_verts=True, use_face_split=False)
+            bmesh.ops.dissolve_edges(bm, edges=inner, use_verts=False, use_face_split=False)
         return len(inner), len(sel) - len(inner)
-    verts = [v for v in bm.verts if v.select]
-    if verts:
-        bmesh.ops.dissolve_verts(bm, verts=verts, use_face_split=False, use_boundary_tear=False)
-    return len(verts), 0
+    sel = [v for v in bm.verts if v.select]
+    winged = [v for v in sel if len(v.link_edges) == 2]
+    if winged:
+        bmesh.ops.dissolve_verts(bm, verts=winged, use_face_split=False, use_boundary_tear=False)
+    return len(winged), len(sel) - len(winged)
+
+
+def delete_edge_vertex_edges(bm):
+    """Edit Mesh > Delete Edge/Vertex on one mesh's selected edges, like Maya. Returns (deleted, kept edges).
+
+    The selected edges go one at a time in index order. An edge with two faces goes (the faces merge); then each of
+    its two end vertices that is left with two edges, and whose faces all keep four or more corners, is cleaned up
+    so its two edges become one. That joined edge carries on as the higher-numbered of the two: if it was selected
+    it is deleted in its turn, the lower-numbered one is gone. Border edges and their vertices stay. An edge whose
+    two faces already share another edge can't go (the merged face would need a hole) and stays.
+    """
+    lay = bm.edges.layers.int.new("_allset_delete_id")
+    bm.edges.index_update()
+    by_id = {}
+    for e in bm.edges:
+        e[lay] = e.index
+        by_id[e.index] = e
+    order = sorted(e.index for e in bm.edges if e.select)
+    pending = set(order)
+    kept, deleted = [], 0
+    for i in order:
+        if i not in pending:
+            continue
+        pending.discard(i)
+        e = by_id.get(i)
+        if e is None or not e.is_valid:
+            continue
+        if len(e.link_faces) != 2:
+            kept.append(e)
+            continue
+        ends = list(e.verts)
+        bmesh.ops.dissolve_edges(bm, edges=[e], use_verts=False, use_face_split=False)
+        if e.is_valid:
+            kept.append(e)
+            continue
+        deleted += 1
+        for v in ends:
+            if not v.is_valid or len(v.link_edges) != 2 or any(len(f.verts) < 4 for f in v.link_faces):
+                continue
+            a, b = v.link_edges
+            hi, lo = max(a[lay], b[lay]), min(a[lay], b[lay])
+            o1, o2 = a.other_vert(v), b.other_vert(v)
+            bmesh.ops.dissolve_verts(bm, verts=[v], use_face_split=False, use_boundary_tear=False)
+            if v.is_valid:
+                continue
+            joined = next((x for x in o1.link_edges if x.other_vert(o1) is o2), None)
+            pending.discard(lo)
+            if joined is not None:
+                joined[lay] = hi
+                by_id[hi] = joined
+    ends = [tuple(e.verts) for e in kept if e.is_valid]
+    bm.edges.layers.int.remove(lay)         # this makes the edge references stale: find the kept edges again
+    kept = [bm.edges.get(pair) for pair in ends]
+    return deleted, [e for e in kept if e is not None]
+
+
+class ALLSET_OT_delete_edge_vertex(bpy.types.Operator):
+    """Delete the selected edges and clean up the vertices they leave with two edges, or delete the selected
+    vertices (Maya Edit Mesh > Delete Edge/Vertex)"""
+    bl_idname = "allset.delete_edge_vertex"
+    bl_label = "Delete Edge/Vertex"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return context.mode == 'EDIT_MESH'
+
+    def execute(self, context):
+        if select_mode_kind(context.tool_settings) != 'EDGE':
+            return bpy.ops.mesh.dissolve_mode()
+        any_sel = False
+        for ob in context.objects_in_mode_unique_data:
+            if ob.type != 'MESH':
+                continue
+            bm = bmesh.from_edit_mesh(ob.data)
+            if not any(e.select for e in bm.edges):
+                continue
+            any_sel = True
+            _deleted, kept = delete_edge_vertex_edges(bm)
+            for seq in (bm.verts, bm.edges, bm.faces):
+                for el in seq:
+                    el.select = False
+            for e in kept:          # like Maya, edges that could not go stay selected
+                e.select = True
+            bm.select_flush(True)
+            bmesh.update_edit_mesh(ob.data)
+        if not any_sel:
+            results.result(self, "No Vertices / Edges have been selected for Delete!")
+            return {'CANCELLED'}
+        return {'FINISHED'}
 
 
 def select_mode_kind(ts):
@@ -260,8 +377,8 @@ def select_mode_kind(ts):
 
 
 class ALLSET_OT_delete_components(bpy.types.Operator):
-    """Delete the selected faces, edges (non-border, cleaning up their vertices) or vertices
-    right away, by the select mode (Maya Delete on components)"""
+    """Delete the selected faces, edges (non-border; their vertices stay) or two-edge vertices right away, by the
+    select mode (Maya Delete on components)"""
     bl_idname = "allset.delete_components"
     bl_label = "Delete Components"
     bl_options = {'REGISTER', 'UNDO'}
@@ -284,13 +401,10 @@ class ALLSET_OT_delete_components(bpy.types.Operator):
             bm.select_flush(False)
             bmesh.update_edit_mesh(ob.data)
             deleted, skipped = deleted + d, skipped + s
-        if skipped:
-            self.report({'WARNING'}, f"{skipped} border edge(s) kept (Maya Delete Edge skips borders)")
-        if not deleted:
-            if not skipped:
-                results.result(self, "Nothing selected")
+        if not deleted and not skipped:
+            results.result(self, "Nothing selected")
             return {'CANCELLED'}
-        return {'FINISHED'}
+        return {'FINISHED'}       # like Maya, the selection is cleared even when nothing could go
 
 
 class ALLSET_OT_select_loops(bpy.types.Operator):
@@ -301,21 +415,111 @@ class ALLSET_OT_select_loops(bpy.types.Operator):
     bl_options = {'REGISTER', 'UNDO'}
 
     ring: bpy.props.BoolProperty(name="Ring", description="Edge rings instead of edge loops")
+    border: bpy.props.BoolProperty(
+        name="Whole Border", options={'SKIP_SAVE'},
+        description="A selected open-border edge takes in its whole border, round the corners too "
+                    "(Maya Convert Selection > To Edge Loop)")
 
     @classmethod
     def poll(cls, context):
         return context.mode == 'EDIT_MESH'
 
     def execute(self, context):
+        starts = {}
+        if self.border and not self.ring:
+            for ob in context.objects_in_mode_unique_data:
+                bm = bmesh.from_edit_mesh(ob.data)
+                starts[ob.name] = [e.index for e in bm.edges if e.select and e.is_boundary]
         # Blender 5.0: mesh.loop_multi_select(ring); 5.1+: mesh.select_edge_loop_multi /
         # select_edge_ring_multi (VIEW3D_MT_edit_mesh_select_loops).
         from .. import compat
         if compat.has_op(bpy.ops.mesh, "loop_multi_select"):
-            return bpy.ops.mesh.loop_multi_select(ring=self.ring)
-        op = bpy.ops.mesh.select_edge_ring_multi if self.ring else bpy.ops.mesh.select_edge_loop_multi
-        return op()
+            res = bpy.ops.mesh.loop_multi_select(ring=self.ring)
+        else:
+            op = bpy.ops.mesh.select_edge_ring_multi if self.ring else bpy.ops.mesh.select_edge_loop_multi
+            res = op()
+        for ob in context.objects_in_mode_unique_data:
+            if starts.get(ob.name):
+                bm = bmesh.from_edit_mesh(ob.data)
+                bm.edges.ensure_lookup_table()
+                for e in border_run(bm.edges[i] for i in starts[ob.name]):
+                    e.select_set(True)
+                bmesh.update_edit_mesh(ob.data)
+        return res
 
+
+def border_run(edges):
+    """The open-border edges joined to ``edges`` through vertices where exactly two border edges meet: a border
+    edge's whole border loop, round its corners (Maya's edge loop of a border edge)."""
+    seen, todo = set(), list(edges)
+    while todo:
+        e = todo.pop()
+        if e in seen:
+            continue
+        seen.add(e)
+        for v in e.verts:
+            nxt = [o for o in v.link_edges if o is not e and o.is_boundary]
+            if len(nxt) == 1:
+                todo.append(nxt[0])
+    return seen
+
+
+
+def shrink_off_border(bm, mode):
+    """After Blender's Shrink: Maya also lets go of the selected vertices on an open border of the mesh and of the
+    selected faces that touch one (the mesh border counts as outside the selection). ``mode`` = 'VERT' / 'FACE'."""
+    if mode == 'VERT':
+        for v in bm.verts:
+            if v.select and v.is_boundary:
+                v.select_set(False)
+    else:
+        for f in bm.faces:
+            if f.select and any(v.is_boundary for v in f.verts):
+                f.select_set(False)
+    bm.select_flush_mode()
+
+
+@undo_steps.no_redo_panel      # no Adjust Last Operation (Maya has none)
+class ALLSET_OT_grow_selection(bpy.types.Operator):
+    """Grow the component selection by one step (Maya Select > Grow, >): vertices and faces take in every vertex
+    or face that shares a face with the selection, edges every edge that shares a vertex with a selected edge"""
+    bl_idname = "allset.grow_selection"
+    bl_label = "Grow Selection"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return context.mode == 'EDIT_MESH'
+
+    def execute(self, context):
+        mode = tuple(context.scene.tool_settings.mesh_select_mode)
+        return bpy.ops.mesh.select_more(use_face_step=mode != _MODES['EDGE'])
+
+
+@undo_steps.no_redo_panel      # no Adjust Last Operation (Maya has none)
+class ALLSET_OT_shrink_selection(bpy.types.Operator):
+    """Shrink the component selection by one step (Maya Select > Shrink, <): the border of the selected region goes,
+    and so do selected vertices and faces on an open border of the mesh"""
+    bl_idname = "allset.shrink_selection"
+    bl_label = "Shrink Selection"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return context.mode == 'EDIT_MESH'
+
+    def execute(self, context):
+        res = bpy.ops.mesh.select_less()
+        kind = next((k for k in ('VERT', 'FACE') if tuple(context.scene.tool_settings.mesh_select_mode) == _MODES[k]),
+                    None)
+        if kind is not None and 'FINISHED' in res:
+            for ob in context.objects_in_mode_unique_data:
+                bm = bmesh.from_edit_mesh(ob.data)
+                shrink_off_border(bm, kind)
+                bmesh.update_edit_mesh(ob.data)
+        return res
 
 
 classes = (ALLSET_OT_select_none, ALLSET_OT_bevel, ALLSET_OT_bevel_edit, ALLSET_OT_convert_selection,
-           ALLSET_OT_delete_components, ALLSET_OT_select_loops)
+           ALLSET_OT_delete_components, ALLSET_OT_delete_edge_vertex, ALLSET_OT_select_loops,
+           ALLSET_OT_grow_selection, ALLSET_OT_shrink_selection)

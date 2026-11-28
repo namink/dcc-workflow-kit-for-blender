@@ -498,7 +498,63 @@ class ALLSET_OT_shape_duplicate(_TargetOp, bpy.types.Operator):
         return {'FINISHED'}
 
 
+REBUILT = "allset_rebuilt"      # Key ID prop: {target name: the mesh object Rebuild Target made}
+
+
+def free_object_name(name):
+    """``name`` if no object has it, else name1, name2 ... (Maya's rebuilt target node name)."""
+    taken = {o.name for o in bpy.data.objects}
+    out, i = name, 1
+    while out in taken:
+        out, i = f"{name}{i}", i + 1
+    return out
+
+
+def rebuild_target(context, key, index):
+    """Maya Rebuild Target: a mesh of target ``index`` at full weight, named after the target, where the base is
+    (the base's world transform, at the top of the hierarchy, in the base's collection); the selection stays. A
+    target whose rebuilt mesh still exists gets none (Maya rebuilds a target that has no mesh). Returns the new
+    object or None."""
+    ob = owner(key)
+    kb = key.key_blocks[index]
+    record = dict(key.get(REBUILT, {}))
+    made = bpy.data.objects.get(record.get(kb.name, ""))
+    if ob is None or made is not None:
+        return None
+    with _object_mode(ob):
+        mesh = ob.data.copy()
+        coords = _coords(kb.data)
+    new = bpy.data.objects.new(free_object_name(kb.name), mesh)
+    mesh.name = f"{new.name}Shape"
+    if mesh.shape_keys is not None:
+        new.shape_key_clear()
+    _write(mesh.vertices, coords)
+    mesh.update()
+    (ob.users_collection[0] if ob.users_collection else context.scene.collection).objects.link(new)
+    new.matrix_world = ob.matrix_world.copy()
+    record[kb.name] = new.name
+    key[REBUILT] = record
+    return new
+
+
 AXES = (('X', "X", "Across the YZ plane"), ('Y', "Y", "Across the XZ plane"), ('Z', "Z", "Across the XY plane"))
+
+
+class ALLSET_OT_shape_rebuild(_TargetOp, bpy.types.Operator):
+    """Make a mesh of the selected target, where the base is (Maya Shapes > Rebuild Target)"""
+    bl_idname = "allset.shape_rebuild"
+    bl_label = "Rebuild Target"
+    bl_options = {'UNDO'}
+
+    def execute(self, context):
+        picked = self.picked(context, whole_node=False)
+        if not picked:
+            self.report({'WARNING'}, "Select a target to rebuild")
+            return {'CANCELLED'}
+        for key, i in picked:
+            rebuild_target(context, key, i)
+        redraw(context)
+        return {'FINISHED'}
 
 
 class ALLSET_OT_shape_flip(_TargetOp, bpy.types.Operator):
@@ -695,8 +751,8 @@ class ALLSET_PT_shape_editor(bpy.types.Panel):
 
 classes = (ALLSET_OT_shape_editor, ALLSET_OT_shape_pick, ALLSET_OT_shape_expand, ALLSET_OT_shape_create,
            ALLSET_OT_shape_add_target, ALLSET_OT_shape_add_selection, ALLSET_OT_shape_edit, ALLSET_OT_shape_key,
-           ALLSET_OT_shape_reset, ALLSET_OT_shape_duplicate, ALLSET_OT_shape_flip, ALLSET_OT_shape_mirror,
-           ALLSET_PT_shape_editor)
+           ALLSET_OT_shape_reset, ALLSET_OT_shape_duplicate, ALLSET_OT_shape_rebuild, ALLSET_OT_shape_flip,
+           ALLSET_OT_shape_mirror, ALLSET_PT_shape_editor)
 
 _WM_PROPS = ("allset_se_current", "allset_se_edit", "allset_se_filter")
 

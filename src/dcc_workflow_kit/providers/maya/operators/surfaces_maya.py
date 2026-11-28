@@ -7,8 +7,7 @@ SURFACE object, one NURBS spline, Maya U = Blender u (along a row), Maya V = the
 (Endpoint / Cyclic), non-uniform ones a Bezier decomposition (exact shape). The Maya knot vectors and CVs are kept in the
 data's ID property ``allset_nurbs`` while the points are what the kit wrote (signature check), so later commands
 continue with Maya's parameters. Every rule works in any right-handed frame: the operators work in Blender world space;
-Maya axis choices go through ``MAYA_AXES`` (Maya (X, Y, Z) -> Blender (X, -Z, Y)) and Maya lengths through
-``units.maya_unit()``.
+axis choices (``AXES``) are the scene axes the Channel Box shows and Maya lengths go through ``units.maya_unit()``.
 """
 
 import json
@@ -18,12 +17,13 @@ from bpy.props import BoolProperty, EnumProperty, FloatProperty, FloatVectorProp
 from mathutils import Vector
 
 from .. import compat, results, undo_steps
-from . import curves_maya, material, naming, units
+from .. import update_summary
+from . import curves_maya, naming, units
 from . import surfaces_math as sm
 from .modify_maya import selection_order
 
 KEY = "allset_nurbs"
-MAYA_AXES = {'X': (1.0, 0.0, 0.0), 'Y': (0.0, 0.0, 1.0), 'Z': (0.0, -1.0, 0.0)}   # Maya axis -> Blender world
+AXES = {'X': (1.0, 0.0, 0.0), 'Y': (0.0, 1.0, 0.0), 'Z': (0.0, 0.0, 1.0)}   # axis choice -> world direction
 RESOLUTION = 4          # Blender evaluates resolution x points per direction
 MAX_ORDER = 6           # Blender NURBS order 2..6: Maya degree 7 is drawn as degree 5
 
@@ -127,7 +127,6 @@ def new_surface(context, base, s, select=True):
     ob = bpy.data.objects.new(base, data)
     (context.collection or context.scene.collection).objects.link(ob)
     naming.apply_maya_name(ob, base)
-    material.give_default(ob)
     if select:
         _select(context, [ob])
     return ob
@@ -297,7 +296,6 @@ def new_loft_mesh(context, s, curve_names, opts):
     ob = bpy.data.objects.new("loftedSurface", me)
     (context.collection or context.scene.collection).objects.link(ob)
     naming.apply_maya_name(ob, "loftedSurface")
-    material.give_default(ob)
     ob[LOFT_KEY] = json.dumps({"curves": list(curve_names), "opts": opts, "sig": _mesh_signature(me)})
     return ob
 
@@ -356,7 +354,7 @@ def _tick():
 @bpy.app.handlers.persistent
 def _on_depsgraph(scene, depsgraph):
     names = set()
-    for up in depsgraph.updates:
+    for up in update_summary.updates(depsgraph, _on_depsgraph):
         idb = up.id
         if isinstance(idb, bpy.types.Object) and idb.type == 'CURVE' and (up.is_updated_geometry
                                                                           or up.is_updated_transform):
@@ -387,7 +385,7 @@ class ALLSET_OT_revolve(_SurfOp, bpy.types.Operator):
     bl_idname = "allset.revolve"
     bl_label = "Revolve"
 
-    axis: EnumProperty(name="Axis preset", items=[(a, a, f"Maya {a} axis") for a in "XYZ"], default='Y',
+    axis: EnumProperty(name="Axis preset", items=[(a, a, f"The scene's {a} axis") for a in "XYZ"], default='Z',
                        options={'SKIP_SAVE'})
     pivot: EnumProperty(name="Pivot", items=[('OBJECT', "Object", "The curve's pivot"),
                                              ('PRESET', "Preset", "The pivot point below")],
@@ -409,11 +407,11 @@ class ALLSET_OT_revolve(_SurfOp, bpy.types.Operator):
             return {'CANCELLED'}
         k = units.maya_unit(context.scene)
         p = self.pivot_point
-        preset = Vector((p[0], -p[2], p[1])) * k            # Maya point (Y up) -> Blender
+        preset = Vector(p) * k
         made = []
         for ob in obs:
             pivot = ob.matrix_world.translation if self.pivot == 'OBJECT' else preset
-            s = sm.revolve(_crv(ob), MAYA_AXES[self.axis], tuple(pivot), self.start_sweep, self.end_sweep,
+            s = sm.revolve(_crv(ob), AXES[self.axis], tuple(pivot), self.start_sweep, self.end_sweep,
                            self.segments, int(self.degree))
             made.append(new_surface(context, "revolvedSurface", s, select=False))
         return _done(self, context, made)
@@ -445,7 +443,7 @@ class ALLSET_OT_surface_extrude(_SurfOp, bpy.types.Operator):
             if not obs:
                 self.report({'WARNING'}, "Select curves to extrude.")
                 return {'CANCELLED'}
-            d = None if self.direction == 'NORMAL' else MAYA_AXES[self.direction]
+            d = None if self.direction == 'NORMAL' else AXES[self.direction]
             for ob in obs:
                 try:
                     s = sm.extrude_distance(_crv(ob), d, self.length * units.maya_unit(context.scene))

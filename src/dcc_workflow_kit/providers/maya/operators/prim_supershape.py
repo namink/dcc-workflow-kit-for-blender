@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Maya polySuperShape (Create > Polygon Primitives > Super Ellipse / Spherical Harmonics / Ultra Shape).
 
-Pure Python (no bpy), Maya Y-up space and Maya units, returning ``prim_shapes.Mesh``. Every rule follows
+Pure Python (no bpy), Maya Y-up space and Maya units, returning ``prim_nodes.Mesh``. Every rule follows
 Maya (default menu items and each attribute on its own).
 No Maya code or data was copied.
 
@@ -11,7 +11,7 @@ Rules in brief:
   2 Ultra). The menu passes radius 1, 16 / 16 divisions, createUV 2 (sawtooth poles), merge on, the default values.
 - Grid: n = 4 x horizontalDivisions columns around Y, R = 4 x verticalDivisions rows from the bottom pole to the
   top one. Angles are float32: latitude b_i = f32(f32(i * f32(pi / R)) - f32(pi / 2)), longitude
-  t_j = f32(j * f32(2 pi / n)); Maya's around angle is phi = -t (x = cos phi, z = sin phi). The float32 angles
+  t_j = f32(j * f32(2 pi / n)); the around angle is phi = -t (x = cos phi, z = sin phi). The float32 angles
   matter: cos(f32(pi / 2)) = -4.4e-8, raised to a small exponent it moves points by up to 0.04.
 - Super Ellipse: x = C(b, e0) C(phi, e1), y = S(b, e0), z = C(b, e0) S(phi, e1) with C / S = signed powers
   sign(c) |c|^e of cos / sin (0 stays 0); Ellipse Mirror on = e1 is ignored (e0 used for both).
@@ -198,7 +198,7 @@ POLY = {"polySuperShape": poly_super_shape}
 
 
 def build(attrs):
-    """``poly_super_shape`` on the node defaults + ``attrs`` (clamped like ``prim_shapes.clamp``)."""
+    """``poly_super_shape`` on the node defaults + ``attrs`` (clamped like ``prim_nodes.clamp``)."""
     a = {s[0]: s[2] for s in NODES["polySuperShape"]}
     a.update(attrs)
     out = {}

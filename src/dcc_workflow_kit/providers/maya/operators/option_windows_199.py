@@ -9,6 +9,7 @@ are listed (``missing``), never faked.
 import bpy
 from mathutils import Vector
 
+from . import scene_axes
 from .option_windows import F, Window
 
 WORLD_UP = ("Scene up", "Vector", "None")
@@ -17,9 +18,9 @@ WORLD_UP = ("Scene up", "Vector", "None")
 def _aim_like(op_name):
     def run(context, v):
         up = Vector(v["world_up_vector"])
-        if v["world_up_type"] == "Vector" and (up.length < 1e-9 or (up.normalized() - Vector((0, 1, 0))).length > 1e-6):
-            raise RuntimeError("The kit turns the up vector towards the scene up only: World up vector must be 0 1 0 "
-                               "(Maya Y)")
+        if v["world_up_type"] == "Vector" and (up.length < 1e-9 or (up.normalized() - Vector((0, 0, 1))).length > 1e-6):
+            raise RuntimeError("The kit turns the up vector towards the scene up only: World up vector must be 0 0 1 "
+                               "(the scene's Z, up)")
         return getattr(bpy.ops.allset, op_name)(
             'EXEC_DEFAULT', weight=v["weight"], aim_vector=v["aim_vector"], up_vector=v["up_vector"],
             world_up_type=v["world_up_type"])
@@ -28,9 +29,10 @@ def _aim_like(op_name):
 
 def _aim_fields():
     return [F("aim_vector", "Aim vector:", "vec3", (1.0, 0.0, 0.0)),
-            F("up_vector", "Up vector:", "vec3", (0.0, 1.0, 0.0)),
+            F("up_vector", "Up vector:", "vec3", (0.0, 0.0, 1.0)),      # the object's own Z (#453)
             F("world_up_type", "World up type:", "enum", "Vector", items=WORLD_UP),
-            F("world_up_vector", "World up vector:", "vec3", (0.0, 1.0, 0.0)),
+            # a world direction in scene axes (default 0 0 1 = the scene's up)
+            F("world_up_vector", "World up vector:", "vec3", (0.0, 0.0, 1.0), old=scene_axes.old_vector),
             F("weight", "Weight:", "float", 1.0, lo=0.0, hi=1.0)]
 
 
@@ -58,7 +60,7 @@ def _run_substitute(context, v):
 
 
 WINDOWS = [
-    # Normal Constraint Options (factory aim 1 0 0, up 0 1 0, world up Vector 0 1 0, weight 1)
+    # Normal Constraint Options (default aim 1 0 0, up 0 1 0, world up Vector 0 1 0, weight 1)
     Window("normal_constraint", "Normal Constraint Options", "Add", ("allset.normal_constraint", {}), _aim_fields(),
            _aim_like("normal_constraint"), paths=("Constrain/Normal",), missing=_AIM_MISSING),
     Window("tangent_constraint", "Tangent Constraint Options", "Add", ("allset.tangent_constraint", {}),

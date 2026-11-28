@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Maya 2022 Mesh Display normal commands: Set Vertex Normal, Lock / Unlock Normals, Average, Set to Face.
+"""Maya Mesh Display normal commands: Set Vertex Normal, Lock / Unlock Normals, Average, Set to Face.
 
 Maya rules on explicit meshes.
 
@@ -20,11 +20,11 @@ from mathutils import Vector
 
 from .. import results, undo_steps
 
-AVERAGE_DISTANCE = 0.1      # Maya Average Normals Options factory distance (polyAverageNormalTol)
+AVERAGE_DISTANCE = 0.1      # Average Normals Options default distance
 SET_NORMAL = (1.0, 0.0, 0.0)  # Maya Set Vertex Normal Options default value (X / Y / Z)
 
 
-# --- pure rules (tests/test_step189_normals.py) --------------------------------------------------------------
+# --- pure rules (no bpy) ---------------------------------------------------------------------------------------
 
 def unit(v):
     v = Vector(v)

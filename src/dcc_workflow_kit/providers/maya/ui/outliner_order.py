@@ -2,7 +2,7 @@
 """Maya Outliner order: creation order numbers (#117).
 
 Maya lists DAG nodes in creation order (a re-parented node last among its new siblings). The kit's Outliner tree
-(``ui/outliner_tree.py``) sorts every sibling list by the object ID property ``allset_dag_order``: given when the kit
+(``ui/outliner_tree_rows.py``) sorts every sibling list by the object ID property ``allset_dag_order``: given when the kit
 first sees an object, in link order (Blender appends new objects, so link order is creation order); the startup
 cameras have -4 .. -1 so they lead. ``numbers`` computes the order without writing (the tree orders rows while
 drawing), a timer writes the numbers of new objects once the structure changed, so a file keeps its order.

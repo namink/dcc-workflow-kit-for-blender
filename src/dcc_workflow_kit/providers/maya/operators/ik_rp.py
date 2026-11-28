@@ -36,13 +36,15 @@ from mathutils import Matrix, Quaternion, Vector
 
 from . import units
 
+from .. import update_summary
+
 PV = ("poleVectorX", "poleVectorY", "poleVectorZ")
 TWIST = "twist"
 HELPER = "allset_pole_helper"          # handle -> its pole helper empty
 OWNER = "allset_pole_of"               # helper -> its handle
 POLE_OBJECT = "allset_pole_object"     # handle -> the Pole Vector constraint's target
 PREBEND = math.radians(1.0)
-# Maya world axes in Blender world (joints.MAYA_WORLD): Maya X -> X, Y -> Z, Z -> -Y
+# Maya world axes in Blender world (joint_frames.MAYA_WORLD): Maya X -> X, Y -> Z, Z -> -Y
 _M2B = ((1.0, 0.0, 0.0), (0.0, 0.0, -1.0), (0.0, 1.0, 0.0))
 
 
@@ -114,7 +116,7 @@ def default_pole_vector(points, length, start_frame=None):
 
 
 # R4: Maya writes the middle joint's preferred angle (0, 90, 0) — 90° about its Maya Y = the bone's Z
-# (joints.JOINT_AXES), as pose Euler XYZ in bone axes like rig_maya.PREFERRED_PROP — when the 3-joint chain is
+# (joint_frames.JOINT_AXES), as pose Euler XYZ in bone axes like rig_maya.PREFERRED_PROP — when the 3-joint chain is
 # straight. Straightness: the kit takes 1e-3 of the chain length; jointOrient: 1e-6 rad (5.7e-5°).
 AUTO_PREFERRED = (0.0, 0.0, 90.0)
 STRAIGHT_TOL = 1e-3
@@ -122,7 +124,7 @@ JO_TOL = 1e-6
 
 
 def maya_axes(arm, bone):
-    """World rotation (3x3) of the joint's Maya axes at rest (joints.maya_frame for a Bone)."""
+    """World rotation (3x3) of the joint's Maya axes at rest (joint_frames.maya_frame for a Bone)."""
     from .joints import JOINT_AXES, MAYA_FRAME
     f = (arm.matrix_world.to_3x3().normalized() @ bone.matrix_local.to_3x3().normalized()) @ JOINT_AXES
     q = bone.get(MAYA_FRAME)
@@ -311,6 +313,43 @@ def update_handle(handle, depsgraph=None):
     return solve_multi(handle) or moved
 
 
+def solve_plane_normal(handle, root_w, goal):
+    """World normal of the RP solve plane for ``goal``: u × (pv turned by twist about u), u = goal − start joint."""
+    u = goal - root_w
+    pv = pole_vector(handle)
+    tw = math.radians(float(handle.get(TWIST, 0.0)))
+    if abs(tw) > 1e-12 and u.length > 1e-9:
+        pv = Quaternion(u.normalized(), tw) @ pv
+    return u.cross(pv)
+
+
+def follow_turn(handle, root_w, normal_local, start_rot, goal):
+    """Maya, Enable IK Handle Snap at Ik Blend 1: a turned joint of an RP chain turns the pole vector about the new
+    start -> goal line only, so that the solve plane goes the way the start joint turned: ``normal_local`` = the solve
+    plane's normal in the start joint's frame (taken from the solved pose), ``start_rot`` = the turned start joint's
+    world rotation (3x3), ``goal`` = where the handle goes. Returns True when the pole vector changed."""
+    if HELPER not in handle.keys() or isinstance(handle.get(POLE_OBJECT), bpy.types.Object):
+        return False                # a Pole Vector constraint drives the pole vector
+    u = goal - root_w
+    if u.length < 1e-9:
+        return False
+    axis = u.normalized()
+    want = start_rot @ normal_local
+    have = solve_plane_normal(handle, root_w, goal)
+    want = want - axis * want.dot(axis)
+    have = have - axis * have.dot(axis)
+    if want.length < 1e-9 or have.length < 1e-9:
+        return False
+    phi = _signed(have, want, axis)
+    if abs(phi) < 1e-9:
+        return False
+    k = _maya_unit()
+    pv = to_maya(Quaternion(axis, phi) @ pole_vector(handle)) / k
+    for i, name in enumerate(PV):
+        handle[name] = float(pv[i])
+    return True
+
+
 def rp_handles():
     return [ob for ob in bpy.data.objects if HELPER in ob]
 
@@ -353,10 +392,18 @@ def _update(depsgraph=None, frame=False):
             if count != _count[0]:
                 _count[0] = count
                 if count < _count[1]:
+                    update_summary.wrote()
                     drop_orphan_rotations()    # a handle deleted some other way than the kit's Delete
                 _count[1] = count
+        moved = False
         for handle in _handles():
-            update_handle(handle)
+            update_summary.wrote()
+            moved |= bool(update_handle(handle))
+        if moved:
+            # the pole / bone helpers moved after this evaluation: the chains are evaluated again without update
+            # handlers, so the kit's IK / FK rules read the solved pose once more afterwards
+            from . import ik_fk_control
+            ik_fk_control.pole_moved()
     except (ReferenceError, AttributeError, RuntimeError):
         _found[0] = None
     finally:
@@ -498,9 +545,11 @@ def _solver(handle, chain, sig):
 
 
 def _blend_driver(con, handle, kit_part):
-    """Influence = Ik Blend x kit (the kit's Copy Rotation) or x (1 - kit) (Blender's IK)."""
-    from .ik_fk import IK_BLEND
-    expr = "ikBlend * kit" if kit_part else "ikBlend * (1 - kit)"
+    """Influence = Ik Blend x kit (the kit's Copy Rotation) or x (1 - kit) (Blender's IK); with the handle's hold
+    switch (``ik_fk.HOLD``) both are off while the chain shows a turned joint."""
+    from .ik_fk import add_blend_variables, blend_expression
+    blend = blend_expression(handle)
+    expr = f"{blend} * kit" if kit_part else f"{blend} * (1 - kit)"
     ad = con.id_data.animation_data
     old = ad.drivers.find(con.path_from_id("influence")) if ad is not None else None
     if old is not None and old.driver.type == 'SCRIPTED' and old.driver.expression == expr:
@@ -509,13 +558,13 @@ def _blend_driver(con, handle, kit_part):
     drv = fc.driver
     for v in list(drv.variables):
         drv.variables.remove(v)
-    for name, prop in (("ikBlend", IK_BLEND), ("kit", MULTI)):
-        var = drv.variables.new()
-        var.name = name
-        var.type = 'SINGLE_PROP'
-        var.targets[0].id_type = 'OBJECT'
-        var.targets[0].id = handle
-        var.targets[0].data_path = f'["{prop}"]'
+    add_blend_variables(drv, handle)
+    var = drv.variables.new()
+    var.name = "kit"
+    var.type = 'SINGLE_PROP'
+    var.targets[0].id_type = 'OBJECT'
+    var.targets[0].id = handle
+    var.targets[0].data_path = f'["{MULTI}"]'
     drv.type = 'SCRIPTED'
     drv.expression = expr
     return fc

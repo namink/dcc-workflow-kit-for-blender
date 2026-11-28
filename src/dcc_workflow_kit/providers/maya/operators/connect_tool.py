@@ -7,7 +7,8 @@ is cut at its Slide point). Then it waits for clicks: click a vertex or an edge,
 and they are joined; every further click continues the path from the last point. Ctrl+click an edge connects its
 whole edge ring. A middle-drag (Ctrl or not) changes the value the Tool Settings radio picks (Segments by default;
 Slide, Pinch) and re-does the last connection with it while the mesh is still as that connection left it; the HUD
-shows the value like Maya ("Connect Segments: 1"). Enter / Esc ends the path and makes the last connection final;
+shows the value like Maya ("Connect Segments: 1"); a value typed into the tool's options (Tool Settings or the
+Modeling Toolkit's Connect Options) re-does it the same way. Enter / Esc ends the path and makes the last connection final;
 a click on a component that shares no face with the last point starts a new path. A click away from the mesh keeps
 Blender's selection.
 """
@@ -17,6 +18,8 @@ import math
 import bmesh
 import bpy
 from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty, StringProperty
+
+from .. import compat
 
 TOOL = "allset.connect_tool"
 HINT = ("Connect Tool: click vertices or edges one after another to connect them, Ctrl+click an edge to connect its "
@@ -33,6 +36,7 @@ _path = {}     # the open path: object name, last point (kind, index) and the me
 _last = {}     # the last connection a middle-drag re-does: object, pre (BMesh copy), items [(kind, index)], ring,
                # counts (the mesh after it)
 _handles = []
+_drag = []     # non-empty while allset.connect_drag runs
 
 
 def _counts(bm):
@@ -45,6 +49,16 @@ def end_path():
     _path.clear()
     forget()
     return was_open
+
+
+def dragging():
+    """A middle-drag is changing the value (its own undo step covers the result)."""
+    return bool(_drag)
+
+
+def has_last():
+    """A connection a new Slide / Segments / Pinch value can re-do."""
+    return bool(_last.get("object"))
 
 
 def forget():
@@ -79,8 +93,7 @@ def _restore(bm, pre):
     me = bpy.data.meshes.new(".allset_connect_pre")
     try:
         pre.to_mesh(me)
-        bm.clear()
-        bm.from_mesh(me)
+        compat.refill_bmesh(bm, me)
     finally:
         bpy.data.meshes.remove(me)
     bm.verts.ensure_lookup_table()
@@ -90,7 +103,7 @@ def _restore(bm, pre):
 
 def _connect(ob_name, bm, items, values, ring=True):
     """Connect ``items`` with the tool's ``values`` (slide, segments, pinch) and remember the connection for a
-    middle-drag. Returns the result of ``poly_maya.connect_items``."""
+    middle-drag. Returns the result of ``poly_connect.connect_items``."""
     bm.verts.index_update()
     bm.edges.index_update()
     bm.faces.index_update()
@@ -345,6 +358,7 @@ class ALLSET_OT_connect_drag(bpy.types.Operator):
         self._x0 = event.mouse_x
         self._start = drag_start(s)
         self._value = self._start
+        _drag[:] = [True]
         context.window_manager.modal_handler_add(self)
         return {'RUNNING_MODAL'}
 
@@ -354,8 +368,7 @@ class ALLSET_OT_connect_drag(bpy.types.Operator):
         if value == self._value:
             return
         self._value = value
-        set_value(s, value)
-        redo_last(context)
+        set_value(s, value)          # the settings' update re-does the last connection
         _redraw(context)
 
     def modal(self, context, event):
@@ -364,9 +377,11 @@ class ALLSET_OT_connect_drag(bpy.types.Operator):
             self._set(context, drag_value(settings(context), event.mouse_x - self._x0, self._start))
             return {'RUNNING_MODAL'}
         if event.type == 'MIDDLEMOUSE' and event.value == 'RELEASE':
+            _drag.clear()
             return {'FINISHED'}
         if event.type in {'ESC', 'RIGHTMOUSE'} and event.value == 'PRESS':
             self._set(context, self._start)
+            _drag.clear()
             return {'CANCELLED'}
         return {'RUNNING_MODAL'}
 
@@ -388,11 +403,11 @@ class ALLSET_OT_connect_tool_enter(bpy.types.Operator):
     def execute(self, context):
         from .edge_loops import settings
         s = settings(context)
+        end_path()                           # first: new values must not re-do an earlier connection
         if self.slide >= 0.0:               # the option window's values become the tool's
             s.ct_slide = self.slide
         if self.segments > 0:
             s.ct_segments = self.segments
-        end_path()
         if context.mode == 'OBJECT':
             if not context.active_object.visible_get():
                 self.report({'WARNING'}, f"{context.active_object.name} is hidden: show it first")
@@ -425,4 +440,5 @@ def register_handlers():
 def unregister_handlers():
     while _handles:
         bpy.types.SpaceView3D.draw_handler_remove(_handles.pop(), 'WINDOW')
+    _drag.clear()
     end_path()

@@ -9,6 +9,8 @@ import bpy
 from mathutils import Matrix, Vector
 from mathutils.kdtree import KDTree
 
+from .. import compat
+
 IDENTITY='allset_qd_identity'
 
 
@@ -237,7 +239,7 @@ class Stroke:
         mesh=bpy.data.meshes.new('_quad_draw_rollback')
         try:
             self.backup.to_mesh(mesh)
-            self.bm.clear();self.bm.from_mesh(mesh)
+            compat.refill_bmesh(self.bm,mesh)
             layer=self.bm.verts.layers.int.get(IDENTITY)
             for v in self.bm.verts:
                 co=coords.get(v[layer])

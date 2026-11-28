@@ -18,8 +18,8 @@ import bpy
 import gpu
 from gpu_extras.batch import batch_for_shader
 
-from . import engine
-from .. import i18n
+from . import engine, icons
+from .. import compat, i18n
 
 # The interaction being drawn: {"region": pointer, "window": pointer, "origin": (x, y) of that region
 # in the window, "session": Session} or {..., "hotbox": HotboxLayout, "hover": key, ...}; empty = nothing.
@@ -114,7 +114,8 @@ def _outline(r, color, ox=0.0, oy=0.0):
         _grow(((x0, y0), (x1, y1)), 1.0)
         return
     sh = _sh()
-    batch = batch_for_shader(sh, 'LINE_LOOP', {"pos": ((x0, y0), (x1, y0), (x1, y1), (x0, y1))})
+    pts = compat.closed_line_points(((x0, y0), (x1, y0), (x1, y1), (x0, y1)))
+    batch = batch_for_shader(sh, 'LINE_STRIP', {"pos": pts})
     sh.uniform_float("color", color)
     batch.draw(sh)
 
@@ -171,6 +172,36 @@ def _ring_arrow(rect, color, k, ox, oy):
     batch.draw(sh)
 
 
+_QUAD = []      # [shader, unit square batch] of the item pictures
+
+
+def _quad():
+    """The picture shader and square, made on the menu's first (hidden) drawing: Blender builds the shader the first
+    time it is asked for, which takes a moment."""
+    if not _QUAD:
+        sh = gpu.shader.from_builtin(compat.LINEAR_IMAGE_SHADER)
+        _QUAD[:] = [sh, batch_for_shader(sh, 'TRI_FAN', {"pos": ((0, 0), (1, 0), (1, 1), (0, 1)),
+                                                         "texCoord": ((0, 0), (1, 0), (1, 1), (0, 1))})]
+    return _QUAD
+
+
+def _icon(it, n, cx, cy):
+    """An item's command picture, ``n`` px square, left of its label (greyed with the item), on whole pixels."""
+    x = round(cx + it.rect[0] + it.icon_x)
+    y = round(cy + (it.rect[1] + it.rect[3]) / 2 - n / 2)
+    if _BOUNDS[0] is not None:
+        _grow(((x, y), (x + n, y + n)), 1.0)
+        return
+    tex = icons.texture(it.icon, n, greyed=not it.enabled)
+    sh, batch = _quad()
+    gpu.matrix.push()
+    gpu.matrix.translate((x, y))
+    gpu.matrix.scale((n, n))
+    sh.uniform_sampler("image", tex)
+    batch.draw(sh)
+    gpu.matrix.pop()
+
+
 def _circle(cx, cy, r, color, segments=24):
     import math
     pts = [(cx + r * math.cos(2 * math.pi * i / segments), cy + r * math.sin(2 * math.pi * i / segments))
@@ -221,6 +252,9 @@ def checked(action):
         if op == "allset.mm_camera_based":        # Camera-Based Selection = select-through off
             from .. import preferences
             return not preferences.get(bpy.context).select_through
+        if op == "allset.uv_step_snap":            # UV Editor tool option menus
+            from ..operators import snap_align
+            return snap_align.uv_step_snap_on(bpy.context.scene.tool_settings, props["kind"])
         if op == "allset.component_mask":        # Shift+Q check boxes = the mesh select modes
             mask = bpy.context.scene.tool_settings.mesh_select_mode
             return bool(mask[engine.MASK_CHECKS.index(props["kind"])])
@@ -307,6 +341,8 @@ def _near_centre(s, cx, cy):
 
 def draw_session(s, now, shown=None):
     """``shown``: draw the menu (True) or a hidden mark's stroke / route (False) whatever ``s.visible`` says."""
+    if _BOUNDS[0] is None and not _QUAD and any(it.icon is not None for lay, _c, _h in s.layers() for it in lay.items):
+        _quad()
     if not (s.visible(now) if shown is None else shown):
         if s.params.quick_gestures:
             _draw_route(s)
@@ -328,6 +364,9 @@ def draw_session(s, now, shown=None):
 def _draw_layout(lay, cx, cy, hover):
     hover, hover_opt = hover
     pad = lay.params.pad
+    n = int(round(lay.params.icon))
+    if _BOUNDS[0] is None and any(it.icon is not None for it in lay.items):
+        icons.warm(n)
     _draw_list_body(lay, cx, cy)
     for it in lay.items:
         on = it is hover
@@ -346,7 +385,9 @@ def _draw_layout(lay, cx, cy, hover):
         else:
             text = engine.Layout._text(it.label, it.action)
         tpad = lay.params.ring_pad if radial else pad
-        _text(cx + it.rect[0] + tpad, cy + it.rect[1] + (it.rect[3] - it.rect[1]) * 0.3, text, color)
+        if it.icon is not None:
+            _icon(it, n, cx, cy)
+        _text(cx + it.rect[0] + it.text_x, cy + it.rect[1] + (it.rect[3] - it.rect[1]) * 0.3, text, color)
         state = checked(it.action)
         if state is not None:
             right = it.opt_rect[0] if it.opt_rect else it.rect[2]
@@ -451,7 +492,7 @@ AREA_GAP_MAX = 8
 
 def window_edges(window, region):
     """Area border bands of ``window`` in ``region`` pixels: (x0, y0, x1, y1) rectangles, the gaps between areas
-    and the rims around them, including the window's outer edge (engine.fit_ring ``edges``)."""
+    and the rims around them, including the window's outer edge (ring_fit.fit_ring ``edges``)."""
     areas = list(window.screen.areas) if window and window.screen else []
     if not areas:
         return ()

@@ -134,12 +134,12 @@ class PrimitiveNode:
         self.spec = SimpleNamespace(
             fields=fields, node_type=self.node_type, arrow=None, in_view=True,
             labels={a[0]: a[1] for a in prim_shapes.NODES[self.node_type]},
-            defaults=prim_shapes.defaults(self.node_type),
+            defaults=prim_history.to_scene(prim_shapes.defaults(self.node_type)),
             kinds={name: prim_history.entry_kind(self.node_type, name) for name in fields})
 
     @property
     def params(self):
-        return prim_history.attrs(prim_history.owner_of(self.ob))
+        return prim_history.shown_attrs(prim_history.owner_of(self.ob))   # scene axes (#454)
 
     def valid(self):
         try:
@@ -149,7 +149,8 @@ class PrimitiveNode:
             return False
 
     def descriptor(self, name, soft=False):
-        _name, _label, default, _kind, minimum, maximum = prim_shapes.spec(self.node_type, name)
+        _name, _label, _default, _kind, minimum, maximum = prim_shapes.spec(self.node_type, name)
+        default = self.spec.defaults[name]
         kind = self.spec.kinds[name]
         return Field(kind, 0.05 if kind == 'INT' else 0.01, minimum, maximum, default)
 
@@ -169,7 +170,7 @@ class PrimitiveNode:
             raise ReferenceError('The creation node is no longer editable')
         current = self.params
         changes = {key: value for key, value in params.items() if current[key] != value}
-        if changes and prim_history.rebuild(context, self.ob, changes) is None:
+        if changes and prim_history.rebuild(context, self.ob, prim_history.from_scene(changes)) is None:
             raise RuntimeError('Unable to rebuild the creation node')
 
     def finish(self):

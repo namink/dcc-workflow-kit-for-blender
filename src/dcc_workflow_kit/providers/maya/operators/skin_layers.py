@@ -21,6 +21,8 @@ of an edited vertex make room for the painted one, ``settle_rows``) and re-compo
 import bpy
 import numpy as np
 
+from .. import live_refs
+from .. import update_summary
 from . import skin, skin_layers_math as math_
 
 PROP = "allset_skin_layers"
@@ -488,7 +490,7 @@ def _end_session():
 def stroke_running():
     wm = bpy.context.window_manager
     for win in wm.windows:
-        for op in win.modal_operators:
+        for op in live_refs.running_modals(win):
             if op.bl_idname in ("PAINT_OT_weight_paint", "paint.weight_paint", "PAINT_OT_weight_gradient",
                                 "paint.weight_gradient"):
                 return True
@@ -584,7 +586,7 @@ def ensure_timer():
 def on_depsgraph(scene, depsgraph):
     if not _session["ob"]:
         return
-    for up in depsgraph.updates:
+    for up in update_summary.updates(depsgraph, on_depsgraph):
         idb = up.id
         if isinstance(idb, (bpy.types.Object, bpy.types.Mesh)) and getattr(idb, "name", None) in (
                 _session["ob"], getattr(getattr(session_object(), "data", None), "name", None)):

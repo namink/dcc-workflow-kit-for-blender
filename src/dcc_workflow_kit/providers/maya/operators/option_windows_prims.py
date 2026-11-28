@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """#103: Maya option windows of Create > Polygon Primitives (Disc ... Ultra Shape) and Create > NURBS
-Primitives (same spec as operators/option_windows.py; option_windows._extend appends ``WINDOWS``).
+Primitives (same spec as operators/option_windows_spec.py; option_windows._extend appends ``WINDOWS``).
 
 Titles, field labels and ranges follow Maya's
 option windows.
@@ -8,12 +8,13 @@ Each window fills the kit's Maya creation node (operators/prim_history.py, prim_
 ``create.create(context, kind, overrides)``: values are Maya values, lengths in Maya units (create() scales them).
 Fields Blender / the kit can't follow are listed as ``missing``."""
 
+from . import scene_axes
 from .option_windows import AXIS, UVS, F, Window
+from .option_windows_spec import _AXES     # scene axis -> the creation node's (Y-up) axis
 
 _NORM = ("Normalize", "Preserve aspect ratio")
 _TOL = "Use tolerance: Local / Global, Positional tolerance (None only: sections and spans are used)"
 _VIEW = "Axis: Active view"
-_AXES = {"X": (1.0, 0.0, 0.0), "Y": (0.0, 1.0, 0.0), "Z": (0.0, 0.0, 1.0)}
 
 
 def _create(context, kind, over):
@@ -90,15 +91,22 @@ def _run_super(context, v):
     return _create(context, _SUPER_KINDS[v["shape"]], over)
 
 
+_HARMONICS_LABELS = ("V Multiplier 1:", "V Exponent 1:", "V Multiplier 2:", "V Exponent 2:", "H Multiplier 1:",
+                     "H Exponent 1:", "H Multiplier 2:", "H Exponent 2:")
+_ULTRA_LABELS = ("Horizontal Multiplier 1:", "Horizontal Exponent 1:", "Horizontal Exponent 2:", "Horizontal Mixer:",
+                 "Horizontal Multiplier 2:", "Horizontal Exponent 3:", "Horizontal Exponent 4:",
+                 "Horizontal Exponent 5:", "Vertical Multiplier 1:", "Vertical Exponent 1:", "Vertical Exponent 2:",
+                 "Vertical Mixer:", "Vertical Multiplier 2:", "Vertical Exponent 3:", "Vertical Exponent 4:",
+                 "Vertical Exponent 5:")
+
+
 def _super_fields(shape):
     """Polygon Super Shape Options: General / Helix / Super Ellipse / Spherical Harmonics / Ultra
     frames (default values like Maya; the menu item sets the Shape)."""
-    sh = [F(f"harmonics{i}", f"{'V' if i < 4 else 'H'} {'Multiplier' if i % 2 == 0 else 'Exponent'} {i % 4 // 2 + 1}:",
-            "float", d, lo=-20.0 if i % 2 == 0 else 0.0, hi=20.0 if i % 2 == 0 else 5.0)
+    sh = [F(f"harmonics{i}", _HARMONICS_LABELS[i], "float", d, lo=-20.0 if i % 2 == 0 else 0.0,
+            hi=20.0 if i % 2 == 0 else 5.0)
           for i, d in enumerate((0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0))]
-    ultra_labels = ("Multiplier 1:", "Exponent 1:", "Exponent 2:", "Mixer:", "Multiplier 2:", "Exponent 3:",
-                    "Exponent 4:", "Exponent 5:")
-    ultra = [F(f"ultra{i}", f"{'Horizontal' if i < 8 else 'Vertical'} {ultra_labels[i % 8]}", "float", d,
+    ultra = [F(f"ultra{i}", _ULTRA_LABELS[i], "float", d,
                lo=-30.0 if i % 4 == 0 else 0.0, hi=30.0 if i % 4 == 0 else (1.0 if i % 8 == 3 else 4.0))
              for i, d in enumerate((0.0, 1.0, 1.0, 0.5, 0.0, 1.0, 1.0, 1.0) * 2)]
     return [
@@ -135,20 +143,22 @@ LINEAR_CUBIC = ("Linear", "Cubic")
 
 def _pivot_fields(label="Pivot:"):
     return [F("pivot", label, "enum", "Object", items=("Object", "User defined")),
-            F("pivot_point", "Pivot point:", "vec3", (0.0, 0.0, 0.0))]
+            F("pivot_point", "Pivot point:", "vec3", (0.0, 0.0, 0.0), old=scene_axes.old_vector)]
 
 
 def _axis_fields(label="Axis:", definition="Axis definition:"):
-    return [F("axis", label, "enum", "Y", items=_AXIS_N),
-            F("axis_definition", definition, "vec3", (0.0, 1.0, 0.0))]
+    return [F("axis", label, "enum", "Z", items=_AXIS_N, old=scene_axes.old_axis),
+            F("axis_definition", definition, "vec3", (0.0, 0.0, 1.0), old=scene_axes.old_vector)]
 
+
+# Axis, Axis definition, Pivot point and Center are scene axes; the creation node keeps them in the Y-up frame
 
 def _axis_of(v):
-    return tuple(v["axis_definition"]) if v["axis"] == "Free" else _AXES[v["axis"]]
+    return scene_axes.to_yup(v["axis_definition"]) if v["axis"] == "Free" else _AXES[v["axis"]]
 
 
 def _pivot_of(v):
-    return tuple(v["pivot_point"]) if v["pivot"] == "User defined" else (0.0, 0.0, 0.0)
+    return scene_axes.to_yup(v["pivot_point"]) if v["pivot"] == "User defined" else (0.0, 0.0, 0.0)
 
 
 def _degree(label):
@@ -203,7 +213,7 @@ def _run_circle(context, v):
 
 
 def _run_square(context, v):
-    c, n = tuple(v["center"]), _axis_of(v)
+    c, n = scene_axes.to_yup(v["center"]), _axis_of(v)
     over = {"centerX": c[0], "centerY": c[1], "centerZ": c[2], "normalX": n[0], "normalY": n[1], "normalZ": n[2],
             "sideLength1": v["side1"], "sideLength2": v["side2"], "spansPerSide": v["spans_per_side"],
             "degree": _degree(v["degree"])}
@@ -307,7 +317,7 @@ WINDOWS = [
     _super("poly_spherical_harmonics", "Spherical Harmonics"),
     _super("poly_ultra_shape", "Ultra Shape"),
 
-    # --- NURBS (factory: pivot Object, axis Y, cubic, no tolerance) -------------
+    # --- NURBS (default: pivot Object, axis Y, cubic, no tolerance) -------------
     Window("nurbs_sphere", "NURBS Sphere Options", "Create", ("allset.create", {"kind": 'NURBS_SPHERE'}), [
         *_pivot_fields(), *_axis_fields(), *_sweep_fields(),
         F("radius", "Radius:", "length", 1.0, lo=0.0001, hi=1000), _degree_field(), *_sections(4, 2)],
@@ -349,7 +359,7 @@ WINDOWS = [
         _run_circle, missing=("Normal axis: Active view", _TOL)),
     # Square (defaults like Maya): centre, normal Y, sides 1 x 1, 1 span per side, degree 3
     Window("nurbs_square", "NURBS Square Options", "Create", ("allset.create", {"kind": 'NURBS_SQUARE'}), [
-        F("center", "Center:", "vec3", (0.0, 0.0, 0.0)), *_axis_fields("Normal axis:", "Normal definition:"),
+        F("center", "Center:", "vec3", (0.0, 0.0, 0.0), old=scene_axes.old_vector), *_axis_fields("Normal axis:", "Normal definition:"),
         F("side1", "Length of Side 1:", "length", 1.0, lo=0.1, hi=1000),
         F("side2", "Length of Side 2:", "length", 1.0, lo=0.1, hi=1000),
         F("spans_per_side", "Spans per side:", "int", 1, lo=1, hi=200),

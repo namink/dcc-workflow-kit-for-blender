@@ -5,6 +5,7 @@ import bpy
 from bpy.app.handlers import persistent
 from mathutils.bvhtree import BVHTree
 from .. import i18n
+from .. import update_summary
 
 COLOR = (0., 153/255, 84/255)  # sRGB #009954, Maya's live surface wire / Outliner colour
 LIMIT = 16
@@ -66,17 +67,21 @@ def _prune(scene):
     refs = getattr(scene, 'allset_live_objects', None)
     for i in reversed(range(len(refs) if refs is not None else 0)):
         if _gone(refs[i].object):
+            update_summary.wrote()
             refs.remove(i)
     history = getattr(scene, 'allset_live_history', None)
     for i in reversed(range(len(history) if history is not None else 0)):
         entry = history[i].objects
         for j in reversed(range(len(entry))):
             if _gone(entry[j].object):
+                update_summary.wrote()
                 entry.remove(j)
         if not len(entry):
+            update_summary.wrote()
             history.remove(i)
     legacy = getattr(scene, 'allset_live', None)
     if legacy is not None and _gone(legacy):
+        update_summary.wrote()
         scene.allset_live = None
 
 
@@ -93,6 +98,7 @@ def sync():
             refs = objects(scene)
             first = refs[0] if refs else None
             if getattr(scene, 'allset_live', None) != first:
+                update_summary.wrote()
                 scene.allset_live = first
             wanted.update((ob.session_uid, ob) for ob in refs)
         for uid, name in list(_locked.items()):
@@ -100,12 +106,15 @@ def sync():
                 _trees.pop(uid, None)
                 ob = bpy.data.objects.get(name)
                 if ob is not None and ob.session_uid == uid:
+                    update_summary.wrote()
                     _restore(ob)
                 del _locked[uid]
         for uid, ob in wanted.items():
             if LOCK not in ob:
+                update_summary.wrote()
                 ob[LOCK] = ob.hide_select
             if not ob.hide_select:
+                update_summary.wrote()
                 ob.hide_select = True
             _locked[uid] = ob.name
     finally:
@@ -379,7 +388,7 @@ def nearest(context, point, targets=None):
 @persistent
 def changed(_scene=None, depsgraph=None):
     if depsgraph is not None:
-        for update in depsgraph.updates:
+        for update in update_summary.updates(depsgraph, changed):
             if update.is_updated_geometry or update.is_updated_transform:
                 block = update.id.original
                 if isinstance(block, bpy.types.Object):

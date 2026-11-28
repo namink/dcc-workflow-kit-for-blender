@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Channel Box Channels menu commands Maya has and the first set lacked.
 
-Maya 2022 Channel Box Channels menu: Breakdown All / Mute All /
+Maya Channel Box Channels menu: Breakdown All / Mute All /
 Unmute All act on every shown channel; Cut / Copy / Delete Selected take the whole curves of the selected channels
 (``cmds.cutKey`` / ``cmds.copyKey`` over all time and every float range); Paste Selected = ``cmds.pasteKey(connect=True,
 time=current)``; Freeze = ``cmds.makeIdentity(apply=True)``; Select Connection selects the node feeding

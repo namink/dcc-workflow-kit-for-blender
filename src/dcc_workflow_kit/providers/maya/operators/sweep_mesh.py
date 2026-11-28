@@ -292,7 +292,7 @@ def _next_name():
 
 def create(context, curve, values=None):
     """``sweep1`` (mesh ``sweepShape1``) with a live ``sweepMeshCreator1`` on ``curve``; returns the object."""
-    from . import curve_tools, material, prim_history
+    from . import curve_tools, prim_history
     me = bpy.data.meshes.new("sweepShape")
     ob = bpy.data.objects.new("sweep", me)
     curve_tools._link_new(context, ob, "sweep", select=False)
@@ -302,7 +302,6 @@ def create(context, curve, values=None):
     set_(md, "Unit", float(units.maya_unit(context.scene)))
     for name, value in (values or {}).items():
         set_(md, name, value)
-    material.give_default(ob)
     if not prim_history.history_on(context):
         bake(context, ob)
     return ob

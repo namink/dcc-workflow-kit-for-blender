@@ -22,6 +22,7 @@ from bpy.app.handlers import persistent
 from bpy.props import BoolProperty, EnumProperty
 
 from .. import i18n
+from .. import update_summary
 
 AXES = ("X", "Y", "Z")
 ABOUT = (("OBJECT", "Object", "Mirror across the object's own axis"),
@@ -139,6 +140,7 @@ def apply(sym, objects):
         want = flags(ob, sym)
         me = ob.data
         if _mesh_flags(me) != want:
+            update_summary.wrote()
             me.use_mirror_x, me.use_mirror_y, me.use_mirror_z, me.use_mirror_topology = want
 
 
@@ -148,6 +150,7 @@ def pull(sym, ob):
     have = _mesh_flags(me)
     if have == flags(ob, sym):
         return False
+    update_summary.wrote()
     on_axes = [k for k in range(3) if have[k]]
     if not on_axes:
         sym.on = False

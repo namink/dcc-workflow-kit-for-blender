@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Maya's Connection Editor window (Issue #119).
 
-Maya 2022: Reload Left / Reload Right, the mode buttons
+Maya: Reload Left / Reload Right, the mode buttons
 Outputs / from -> to / Inputs, two attribute lists (the node, then its attributes; compounds such as translate open
 to translateX / Y / Z), the node names under the lists with < > to swap them, and Clear All / Remove / Break / Make /
-Close. With Auto-connect on (factory) a click on a left attribute then on a right one connects them: the right one
+Close. With Auto-connect on (the default) a click on a left attribute then on a right one connects them: the right one
 follows the left (``connectAttr``); a click on a connected right attribute breaks it, the value stays.
 
 Blender has no dependency graph connections between properties: a connection is a driver on the right property with
@@ -29,7 +29,7 @@ MODES = (("OUTPUTS", "Outputs", "Both lists show outputs: connect left to right"
          ("FROM_TO", "from -> to", "Connect a left output to a right input"),
          ("INPUTS", "Inputs", "Both lists show inputs: connect right to left"))
 
-# Maya long name -> (Blender path, index, kind); compounds -> their children (Maya's readable list, ui/channel_box MAIN)
+# Maya long name -> (Blender path, index, kind); compounds -> their children (Maya's readable list, ui/cb_keys MAIN)
 SIMPLE = {}
 COMPOUNDS = {}
 for _maya, _path, _kind in (("translate", "location", "LOC"), ("rotate", "rotation_euler", "ROT"),

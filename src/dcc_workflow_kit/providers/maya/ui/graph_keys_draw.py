@@ -27,6 +27,9 @@ import gpu
 import numpy as np
 from gpu_extras.batch import batch_for_shader
 
+from . import draw_replay
+from .draw_replay import call
+
 SEGMENTS = 16              # rim polygon sides
 HANDLE_RATIO = 0.8         # handle point diameter / key diameter
 # modifier types whose curve keeps editable keys (generators only when additive)
@@ -468,22 +471,22 @@ def _draw_batches(batches, shift=None):
     if not batches:
         return
     shader = gpu.shader.from_builtin('UNIFORM_COLOR')
-    gpu.state.blend_set('ALPHA')
+    call(gpu.state.blend_set, 'ALPHA')
     if shift is not None:
-        gpu.matrix.push()
-        gpu.matrix.translate(shift)
+        call(gpu.matrix.push)
+        call(gpu.matrix.translate, shift)
     try:
         for batch, colour, width in batches:
             if width is not None:
-                gpu.state.line_width_set(width)
-            shader.uniform_float("color", colour)
-            batch.draw(shader)
+                call(gpu.state.line_width_set, width)
+            call(shader.uniform_float, "color", colour)
+            call(batch.draw, shader)
             if width is not None:
-                gpu.state.line_width_set(1.0)
+                call(gpu.state.line_width_set, 1.0)
     finally:
         if shift is not None:
-            gpu.matrix.pop()
-        gpu.state.blend_set('NONE')
+            call(gpu.matrix.pop)
+        call(gpu.state.blend_set, 'NONE')
 
 
 def draw_kit_handles(context, region, space, size):
@@ -532,6 +535,16 @@ def draw():
     kit_handles = graph_handles.owns(space)
     if not kit_handles and size <= 0:
         return
+    key = ("graph keys", region.as_pointer())
+    sig = (region.width, region.height, context.preferences.system.ui_scale, size, kit_handles)
+    if draw_replay.again(key, sig):     # a window moves: the keys as drawn last
+        return
+    with draw_replay.recording(key, sig):
+        _draw_keys(context, space, region, size, kit_handles)
+
+
+def _draw_keys(context, space, region, size, kit_handles):
+    from . import graph_handles
     ptr = region.as_pointer()
     try:
         keys = drawn_keys(context, space, region, graph_handles.shows_handles(space) and (kit_handles or size > 0))
