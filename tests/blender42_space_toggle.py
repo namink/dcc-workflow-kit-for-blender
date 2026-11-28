@@ -10,11 +10,13 @@ def tick():
    addon_utils.enable('dcc_workflow_kit',default_set=True)
    import dcc_workflow_kit as d
    assert addon_utils.check('dcc_workflow_kit')[1]
+   bpy.context.preferences.view.show_splash = False
    d.preferences.get().profile='MAYA';d.core.request('MAYA')
   else:
    window=bpy.context.window_manager.windows[0]
    from dcc_workflow_kit.providers.maya.ui import four_view as fv
-   a=max((a for a in window.screen.areas if a.type=='VIEW_3D'),key=lambda x:x.width*x.height)
+   print('SPACE TEST',phase,window.workspace.name,window.screen.show_fullscreen,len(fv.panes(window.screen)),flush=True)
+   a=max(fv.panes(window.screen),key=lambda x:x.width*x.height)
    with bpy.context.temp_override(window=window,area=a,region=next(r for r in a.regions if r.type=='WINDOW')):
     if phase==1:
      assert bpy.ops.allset.toggle_quad_view()=={'FINISHED'}
@@ -30,7 +32,7 @@ def tick():
      bpy.ops.wm.quit_blender()
      return None
   phase+=1
-  return 1.3
+  return 2.5
  except Exception:
   (root/'result.txt').write_text(traceback.format_exc(),encoding='utf-8')
   bpy.ops.wm.quit_blender()

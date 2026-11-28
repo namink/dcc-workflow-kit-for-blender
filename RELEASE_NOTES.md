@@ -1,3 +1,13 @@
+# DCC Workflow Kit 0.1.8 · 兼容版
+
+扩展清单允许 Blender 4.2.9 至 5.1 安装。Windows 4.2.9 LTS 和 4.5.12 LTS 已实测安装、工具架导入、模式切换与停用。5.0、5.1 和其他 4.x 小版本本轮未实测。Blender 5.2 LTS、5.3 请使用 [0.2.2 新版](https://github.com/namink/dcc-workflow-kit-for-blender/releases/tag/v0.2.2)。
+
+- 保留 4.2 的短按空格四视图切换修复。4.2.9 已通过四轮操作符往返检查，未模拟真实键盘按键。
+- 将 Maya 挤出参数「Thickness」统一为 Autodesk 简体中文用语「厚度」。
+- 旧版依赖维持在 Maya Workflow Kit 0.6.2 和 Blender Max 0.6.8，以保留 4.x 兼容性。
+
+请下载 Assets 中的安装 ZIP，在 Blender 偏好设置中选择「从磁盘安装」。
+
 # 0.1.7 Blender 4.2 Maya 空格切换修复
 
 修复短按空格进入四视图后无法返回单视图。对不支持坐标合并区域的 Blender 使用原生区域最大化；单视图暂时隐藏周围面板，再按空格恢复。Blender 4.2.9 GUI 操作符四轮往返通过，真实键盘事件未模拟，其他工具未完整重测。
